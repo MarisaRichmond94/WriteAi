@@ -171,7 +171,7 @@ export default function ChapterViewer({ citation, bookId, lightMode, onToggleLig
           </div>
           {/* Row 2: chapter */}
           <p className="mt-1.5 text-[11px] text-ink-muted">
-            Chapter {citation.chapter}
+            {citation.chapter === 0 ? "Prologue" : `Chapter ${citation.chapter}`}
             {citation.chapter_heading !== String(citation.chapter) &&
               ` · "${citation.chapter_heading}"`}
           </p>

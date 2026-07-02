@@ -59,7 +59,7 @@ export default function CitationCard({ citation, index, isSelected, onClick }: P
 
           {/* Row 2: chapter */}
           <p className="mt-1.5 text-[10px] text-ink-secondary">
-            Chapter {citation.chapter}
+            {citation.chapter === 0 ? "Prologue" : `Chapter ${citation.chapter}`}
             {citation.chapter_heading !== String(citation.chapter) &&
               ` · "${citation.chapter_heading}"`}
           </p>

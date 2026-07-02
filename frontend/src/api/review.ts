@@ -5,6 +5,7 @@ import { generateMockChapterText } from "../mocks/timelineMocks";
 
 export interface ReviewRequest {
   chapter_text: string;
+  chapter?: number;   // synced chapter number — backend scopes context strictly before it
   book: string;
   focus: ReviewFocus;
   message: string;

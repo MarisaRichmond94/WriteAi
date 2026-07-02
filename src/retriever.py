@@ -62,8 +62,9 @@ def _within_scope(meta: dict, scope: Scope) -> bool:
 
 
 def _header(meta: dict) -> str:
+    ch = meta.get("chapter_number")
     parts = [f"Book {meta.get('book_number')} \"{meta.get('book_title')}\"",
-             f"Chapter {meta.get('chapter_number')}"]
+             "Prologue" if ch == 0 else f"Chapter {ch}"]
     if meta.get("pov_character"):
         parts.append(f"POV {meta['pov_character']}")
     if meta.get("date_line"):

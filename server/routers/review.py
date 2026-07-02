@@ -86,10 +86,11 @@ def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
         return []
     lines = []
     for i, (bn, cn, title, gran, summary) in enumerate(rows):
+        ch = "Prologue" if cn == 0 else f"Ch {cn}"
         if i >= len(rows) - _DIGEST_TAIL:
-            lines.append(f"- (Book {bn}, Ch {cn}) {title}: {summary}")
+            lines.append(f"- (Book {bn}, {ch}) {title}: {summary}")
         elif gran == "major":
-            lines.append(f"- (Book {bn}, Ch {cn}) {title}")
+            lines.append(f"- (Book {bn}, {ch}) {title}")
     if len(lines) > _DIGEST_MAX:
         dropped = len(lines) - _DIGEST_MAX
         lines = [f"(…{dropped} earlier events omitted)"] + lines[-_DIGEST_MAX:]
@@ -160,11 +161,15 @@ def review_stream(req: ReviewRequest):
         notes = [] if no_prior else _story_so_far(s.db, req.book, req.chapter)
 
         question = req.message or f"Give your {req.focus} review of this chapter."
+        if req.chapter is None:
+            ch_label = ", new draft"
+        elif req.chapter == 0:
+            ch_label = ", Prologue"
+        else:
+            ch_label = f", Chapter {req.chapter}"
         review_plan = QueryPlan(
-            question=(f"CHAPTER UNDER REVIEW (Book {req.book}"
-                      + (f", Chapter {req.chapter}" if req.chapter is not None
-                         else ", new draft")
-                      + f"):\n\n{text}\n\n{question}"),
+            question=(f"CHAPTER UNDER REVIEW (Book {req.book}{ch_label}):"
+                      f"\n\n{text}\n\n{question}"),
             qtype="general")
 
         answerer = s.new_answerer()

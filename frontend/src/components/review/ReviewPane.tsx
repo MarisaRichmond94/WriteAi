@@ -156,7 +156,7 @@ function ReviewConfirmModal({
           <BookOpen className="h-4 w-4 flex-shrink-0 text-accent" />
           <div>
             <p className="text-[11px] font-semibold text-ink-primary">{book}</p>
-            <p className="text-[10px] text-ink-muted">Chapter {chapter}</p>
+            <p className="text-[10px] text-ink-muted">{chapter === 0 ? "Prologue" : `Chapter ${chapter}`}</p>
           </div>
         </div>
 
@@ -610,6 +610,7 @@ export default function ReviewPane() {
     try {
       const gen = streamReview({
         chapter_text: chapterText,
+        chapter: typeof selectedChapter === "number" ? selectedChapter : undefined,
         book: filterBook,
         focus: filterFocus,
         message: text,
@@ -694,7 +695,7 @@ export default function ReviewPane() {
   ];
 
   const chapterLabel = (v: number | "new") =>
-    v === "new" ? "+ New Chapter" : `Chapter ${v}`;
+    v === "new" ? "+ New Chapter" : v === 0 ? "Prologue" : `Chapter ${v}`;
 
   const selectedModel = MODELS.find((m) => m.id === model)?.label ?? model;
 
