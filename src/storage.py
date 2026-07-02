@@ -95,12 +95,23 @@ class SeriesStore:
             name=slugify(cfg.series_name),
             metadata={"hnsw:space": "cosine"},
         )
-        # check_same_thread=False lets the web server's worker threads share
-        # this connection; SQLite itself runs in serialized mode.
-        self.db = sqlite3.connect(cfg.sqlite_path, check_same_thread=False)
-        self.db.execute("PRAGMA foreign_keys = ON")
+        # One SQLite connection per thread: the web server calls this from a
+        # threadpool, and sharing a single connection across threads
+        # interleaves cursors. SQLite coordinates between connections.
+        import threading
+        self._cfg_path = cfg.sqlite_path
+        self._local = threading.local()
         self.db.executescript(_SCHEMA)
         self.db.commit()
+
+    @property
+    def db(self) -> sqlite3.Connection:
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self._cfg_path, check_same_thread=False)
+            conn.execute("PRAGMA foreign_keys = ON")
+            self._local.conn = conn
+        return conn
 
     # ── writes ──────────────────────────────────────────────────────────────
 

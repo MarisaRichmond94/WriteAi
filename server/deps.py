@@ -22,16 +22,31 @@ class AppState:
     def __init__(self):
         self.cfg = load_config()
         self.store = SeriesStore(self.cfg)
-        self.canon = Canonicalizer(self.store.db)
+        # dedicated connection for the canonicalizer: its build phase runs
+        # many queries and must never interleave with request queries
+        import sqlite3
+        self.canon = Canonicalizer(
+            sqlite3.connect(self.cfg.sqlite_path, check_same_thread=False))
         self._embedder = None
         self._retriever = None
+        self._local = threading.local()
         # RLock: the retriever property calls the embedder property while
         # holding the lock — a plain Lock would deadlock.
         self._lock = threading.RLock()
 
     @property
     def db(self):
-        return self.store.db
+        """Thread-local SQLite connection. FastAPI serves sync endpoints from
+        a threadpool; sharing one connection across those threads interleaves
+        cursors and corrupts results (sporadic 500s). One connection per
+        worker thread is safe — SQLite coordinates between connections."""
+        import sqlite3
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self.cfg.sqlite_path, check_same_thread=False)
+            conn.execute("PRAGMA foreign_keys = ON")
+            self._local.conn = conn
+        return conn
 
     @property
     def embedder(self):
@@ -57,10 +72,15 @@ class AppState:
 
 
 state: AppState | None = None
+_state_lock = threading.Lock()
 
 
 def get_state() -> AppState:
+    """Singleton, created under a lock: parallel first requests must not
+    construct two AppStates (double-initializing ChromaDB fails)."""
     global state
     if state is None:
-        state = AppState()
+        with _state_lock:
+            if state is None:
+                state = AppState()
     return state

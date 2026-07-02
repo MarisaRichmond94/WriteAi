@@ -76,7 +76,10 @@ class Retriever:
         self.cfg = cfg
         self.store = store
         self.embedder = embedder
-        self.db = store.db
+
+    @property
+    def db(self):
+        return self.store.db
 
     # ── entry point ─────────────────────────────────────────────────────────
 

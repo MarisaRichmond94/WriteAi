@@ -167,7 +167,34 @@ function CharacterProfilePanel({
   filterBook: string;
   characterPhotos: Record<string, string>;
 }) {
-  const profile = generateMockCharacterProfile(name, filterBook || undefined);
+  const stub = generateMockCharacterProfile(name, filterBook || undefined);
+  const [real, setReal] = useState<Record<string, any> | null>(null);
+  useEffect(() => {
+    setReal(null);
+    fetch(`/api/characters/${encodeURIComponent(name)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setReal)
+      .catch(() => setReal(null));
+  }, [name]);
+  const profile = real
+    ? {
+        ...stub,
+        role: real.is_pov ? "POV Character" : "Character",
+        aliases: (real.aliases ?? []).map((a: any) => a.alias ?? a),
+        traits: real.traits ?? [],
+        relationships: (real.relationships ?? []).slice(0, 8).map((r: any) => ({
+          name: r.target,
+          nature: r.status,
+        })),
+        books: real.books ?? [],
+        description: Object.values(real.arc ?? {})
+          .flat()
+          .map((a: any) => a?.insight)
+          .filter(Boolean)
+          .join(" ")
+          .slice(0, 400),
+      }
+    : stub;
 
   return (
     <div className="flex h-full flex-col bg-surface-card">

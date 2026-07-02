@@ -65,12 +65,29 @@ def _seed_outline(book: int) -> list[dict]:
 
 # ── outline CRUD ────────────────────────────────────────────────────────────
 
+def _bullets_html(bullets: list[str]) -> str:
+    """key_events -> a TipTap-compatible bullet list for the card summary."""
+    import html
+    items = "".join(f"<li><p>{html.escape(b)}</p></li>" for b in bullets)
+    return f"<ul>{items}</ul>" if items else ""
+
+
 @router.get("/outline/{book}")
 def get_outline(book: int):
     outlines = writer_store.plan_outline()
     key = str(book)
     if key not in outlines:
         outlines[key] = _seed_outline(book)
+        writer_store.save_plan_outline(outlines)
+    # Backfill: cards display writer_summary; where the writer hasn't written
+    # one yet, show the extracted chapter summary (key events) as bullets.
+    # Only ever fills EMPTY summaries — never overwrites the writer's words.
+    changed = False
+    for c in outlines[key]:
+        if not (c.get("writer_summary") or "").strip() and c.get("extracted_bullets"):
+            c["writer_summary"] = _bullets_html(c["extracted_bullets"])
+            changed = True
+    if changed:
         writer_store.save_plan_outline(outlines)
     return {"book": book, "chapters": sorted(outlines[key],
                                              key=lambda c: c["position"])}

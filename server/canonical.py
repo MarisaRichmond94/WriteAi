@@ -74,7 +74,9 @@ class Canonicalizer:
     """Builds and caches the entity view; rebuild when data or map changes."""
 
     def __init__(self, db: sqlite3.Connection):
+        import threading
         self.db = db
+        self._build_lock = threading.Lock()
         self._built_at = 0.0
         self._map_state: str = ""
         self.entities: dict[str, Entity] = {}
@@ -86,14 +88,18 @@ class Canonicalizer:
     # ── public API ──────────────────────────────────────────────────────────
 
     def ensure_built(self) -> None:
-        cmap = writer_store.character_map()
-        state = repr(sorted(cmap.get("map", {}).items())) + repr(sorted(cmap.get("hidden", [])))
-        row_count = self.db.execute("SELECT COUNT(*) FROM characters").fetchone()[0]
-        state += f"|rows={row_count}"
-        if state != self._map_state or time.time() - self._built_at > 3600:
-            self._build(cmap)
-            self._map_state = state
-            self._built_at = time.time()
+        # The whole check runs under the lock: this instance's connection is
+        # shared across request threads, and even the cheap COUNT query
+        # corrupts if two threads interleave on it.
+        with self._build_lock:
+            cmap = writer_store.character_map()
+            state = repr(sorted(cmap.get("map", {}).items())) + repr(sorted(cmap.get("hidden", [])))
+            row_count = self.db.execute("SELECT COUNT(*) FROM characters").fetchone()[0]
+            state += f"|rows={row_count}"
+            if state != self._map_state or time.time() - self._built_at > 3600:
+                self._build(cmap)
+                self._map_state = state
+                self._built_at = time.time()
 
     def resolve(self, name: str) -> str | None:
         """Raw variant -> canonical entity name (None if quarantined/hidden)."""
