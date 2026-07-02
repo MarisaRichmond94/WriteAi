@@ -207,18 +207,6 @@ def _ch_label(n: int) -> str:
     return "Prologue" if n == 0 else f"Chapter {n}"
 
 
-def _dedup_keep_first(items: list[tuple[int, str]]) -> list[tuple[int, str]]:
-    """Drop repeats of the same text (whitespace/case-insensitive), keeping
-    the earliest chapter's occurrence."""
-    seen, out = set(), []
-    for ch, t in items:
-        k = " ".join(str(t).lower().split())
-        if k and k not in seen:
-            seen.add(k)
-            out.append((ch, str(t)))
-    return out
-
-
 def _build_bible(s, book: int) -> tuple[str, str]:
     """(title, markdown). Assembled entirely from extracted/enriched data —
     deterministic, zero LLM cost, nothing invented."""
@@ -235,22 +223,14 @@ def _build_bible(s, book: int) -> tuple[str, str]:
     rel_overrides = cmap.get("relationship_overrides", {})
     genders = cmap.get("gender", {})
 
-    # one pass over the book's chunks: chapter skeleton + thread collections
+    # chapter skeleton: POV + date line from each chapter's first chunk
     ch_meta: dict[int, dict] = {}
-    fores, unresolved, reveals = [], [], []
-    locations: dict[str, list[int]] = defaultdict(list)
     for ch, mj in db.execute(
             "SELECT chapter_number, metadata_json FROM chunks WHERE book_number = ? "
             "ORDER BY chapter_number, chunk_index", (book,)):
-        m = json.loads(mj or "{}")
         if ch not in ch_meta:
+            m = json.loads(mj or "{}")
             ch_meta[ch] = {"pov": m.get("pov_character"), "date": m.get("date_line")}
-        fores.extend((ch, f) for f in m.get("foreshadowing", []))
-        unresolved.extend((ch, q) for q in m.get("unresolved_questions", []))
-        reveals.extend((ch, r) for r in m.get("new_information_revealed", []))
-        for loc in m.get("locations", []):
-            if ch not in locations[loc]:
-                locations[loc].append(ch)
 
     # enriched events per chapter (skip gracefully if enrichment hasn't run)
     events_by_ch: dict[int, list] = defaultdict(list)
@@ -277,13 +257,6 @@ def _build_bible(s, book: int) -> tuple[str, str]:
     profiles = {name: (tj, rj, aj) for name, tj, rj, aj in db.execute(
         "SELECT name, traits_json, relationships_json, arcs_json "
         "FROM character_profiles")}
-
-    know: dict[str, list[tuple[int, str]]] = defaultdict(list)
-    for who, ch, fact in db.execute(
-            "SELECT k.character, c.chapter_number, k.learns FROM character_knowledge k "
-            "JOIN chunks c ON c.chunk_id = k.chunk_id WHERE c.book_number = ? "
-            "ORDER BY c.chapter_number, c.chunk_index", (book,)):
-        know[canon.resolve(who) or who].append((ch, fact))
 
     pov_counts: dict[str, int] = defaultdict(int)
     for meta in ch_meta.values():
@@ -324,8 +297,6 @@ def _build_bible(s, book: int) -> tuple[str, str]:
             tags.append(genders[e.name])
         if tags:
             out(f"*{' · '.join(tags)}*")
-        pov_note = f", POV of {pov_counts[e.name]} chapters" if e.name in pov_counts else ""
-        out(f"- **Presence:** {n} scenes in this book{pov_note}")
         tj, rj, aj = profiles.get(e.name, (None, None, None))
         traits = json.loads(tj) if tj else []
         if traits:
@@ -343,19 +314,12 @@ def _build_bible(s, book: int) -> tuple[str, str]:
             rel_lines.append(f"{other} ({nature})" if nature else other)
         if rel_lines:
             out(f"- **Relationships:** {'; '.join(rel_lines)}")
-        learned = _dedup_keep_first(know.get(e.name, []))
-        if learned:
-            out(f"- **Learns in this book:**")
-            for ch, fact in learned[:12]:
-                out(f"  - ({_ch_label(ch)}) {fact}")
-            if len(learned) > 12:
-                out(f"  - (…{len(learned) - 12} more)")
         out("")
     if minor:
         out("### Minor characters")
-        for n, e in minor:
+        for _n, e in minor:
             aka = f" (aka {', '.join(e.aliases)})" if e.aliases else ""
-            out(f"- **{e.name}**{aka} — {n} scene{'s' if n != 1 else ''}")
+            out(f"- **{e.name}**{aka}")
         out("")
 
     out("## Chapter-by-Chapter")
@@ -385,39 +349,6 @@ def _build_bible(s, book: int) -> tuple[str, str]:
         out("## Major Events Timeline")
         for ch, t in majors:
             out(f"- ({_ch_label(ch)}) {t}")
-        out("")
-
-    reveals = _dedup_keep_first(reveals)
-    if reveals:
-        out("## Reveals Ledger")
-        out("*New information the reader gains, in order of appearance.*")
-        for ch, r in reveals:
-            out(f"- ({_ch_label(ch)}) {r}")
-        out("")
-
-    fores = _dedup_keep_first(fores)
-    unresolved = _dedup_keep_first(unresolved)
-    if fores or unresolved:
-        out("## Open Threads")
-        if fores:
-            out("### Foreshadowing planted")
-            for ch, f in fores:
-                out(f"- ({_ch_label(ch)}) {f}")
-            out("")
-        if unresolved:
-            out("### Unresolved questions")
-            for ch, q in unresolved:
-                out(f"- ({_ch_label(ch)}) {q}")
-            out("")
-
-    if locations:
-        out("## Locations")
-        for loc in sorted(locations, key=lambda x: locations[x][0]):
-            chls = locations[loc]
-            refs = ", ".join(_ch_label(c) for c in chls[:8])
-            if len(chls) > 8:
-                refs += f", +{len(chls) - 8} more"
-            out(f"- **{loc}** — {refs}")
         out("")
 
     return title, "\n".join(md)
