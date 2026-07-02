@@ -30,7 +30,9 @@ class Embedder:
         if self.provider == "local":
             from sentence_transformers import SentenceTransformer  # heavy import
 
-            self.model_name = os.environ.get("EMBEDDING_MODEL", DEFAULT_LOCAL_MODEL)
+            # `or`, not a .get() default: Settings writes EMBEDDING_MODEL= (empty)
+            # to mean "use the default" — treat blank the same as unset
+            self.model_name = os.environ.get("EMBEDDING_MODEL") or DEFAULT_LOCAL_MODEL
             log.info("loading local embedding model %s …", self.model_name)
             # trust_remote_code is required by the nomic models (custom pooling)
             self.model = SentenceTransformer(self.model_name, trust_remote_code=True)
