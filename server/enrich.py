@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 import threading
 from collections import defaultdict
@@ -84,20 +85,62 @@ _PROFILE_SCHEMA = {
     "type": "object",
     "properties": {
         "traits": {"type": "array", "items": {"type": "string"}},
-        "relationships": {"type": "array", "items": {
-            "type": "object",
-            "properties": {"name": {"type": "string"}, "nature": {"type": "string"}},
-            "required": ["name", "nature"], "additionalProperties": False,
-        }},
         "arcs": {"type": "array", "items": {
             "type": "object",
             "properties": {"book_number": {"type": "integer"}, "arc": {"type": "string"}},
             "required": ["book_number", "arc"], "additionalProperties": False,
         }},
     },
-    "required": ["traits", "relationships", "arcs"],
+    "required": ["traits", "arcs"],
     "additionalProperties": False,
 }
+
+# Relationship natures are handled by a SEPARATE evidence-based pass: the model
+# only ever sees verbatim prose snippets and must quote its evidence, which we
+# verify mechanically. No evidence -> null nature. This prevents invented
+# family structure ("younger brother", "cousin") that plagued nature labels
+# derived from distilled notes.
+_REL_SCHEMA = {
+    "type": "object",
+    "properties": {"relationships": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "nature": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "evidence": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+        "required": ["name", "nature", "evidence"],
+        "additionalProperties": False,
+    }}},
+    "required": ["relationships"],
+    "additionalProperties": False,
+}
+
+REL_PROMPT = """You are identifying how characters in a novel are related, using ONLY the prose excerpts provided. Each excerpt is labeled with its narrator ("I" in the excerpt is that narrator).
+
+For each listed character, state what that character IS to the main_character (e.g. "older brother", "best friend", "girlfriend", "father", "coach").
+
+DIRECTION RULES — read carefully, this is where mistakes happen:
+- nature answers: "who is <character> to <main_character>?"
+- Worked example: main_character is Alex; the excerpt is "[narrator: Sam] I have two older brothers—Alex and Ben." Here SAM says ALEX is one of Sam's older brothers. So for main_character Alex and character Sam, Sam is Alex's YOUNGER sibling — nature: "younger brother". (If instead main_character were Sam and character Alex, nature would be "older brother".)
+- Always work out who "I"/"my" refers to via the narrator label before assigning older/younger.
+- Directional details (older/younger) may only be included if the text states them.
+
+OTHER RULES:
+- The excerpts must EXPLICITLY establish the relationship.
+- Copy the single most decisive excerpt VERBATIM into evidence (the exact substring, unmodified).
+- If the excerpts do not explicitly establish a relationship for a character, return nature=null and evidence=null. Never guess from tone or behavior."""
+
+_REL_KEYWORDS = (
+    "brother", "sister", "sibling", "father", "dad", "mother", "mom", "mum",
+    "cousin", "uncle", "aunt", "grandpa", "grandfather", "grandma",
+    "grandmother", "son", "daughter", "husband", "wife", "fiancé", "fiancée",
+    "boyfriend", "girlfriend", "best friend", "friend", "married", "dating",
+    "ex-", "stepbrother", "stepsister", "half-brother", "coach", "teacher",
+    "counselor", "principal", "teammate", "mentor", "boss", "partner",
+)
+
+_SENT_SPLIT = re.compile(r"(?<=[.!?”\"])\s+")
 
 EVENTS_PROMPT = """You are curating a story timeline from extraction notes for chapters of a fiction series. For each chapter below, consolidate its raw key-event notes into 1-4 real EVENTS (merge notes describing the same happening; skip trivia).
 
@@ -108,13 +151,12 @@ Rules:
 - source_chunk_ids: the chunk IDs (given per note) the event is drawn from.
 - granularity: major = changes the course of the story; moderate = advances a plotline; minor = character/flavor beat."""
 
-PROFILE_PROMPT = """You are summarizing one fiction character from extraction notes (their knowledge gained, emotional beats, and who they share scenes with).
+PROFILE_PROMPT = """You are summarizing one fiction character from extraction notes (their knowledge gained and emotional beats).
 
 Rules:
 - traits: 3-6 short personality descriptors evidenced by the notes.
-- relationships: for each listed co-occurring character, a 2-5 word nature ("younger brother", "girlfriend, later estranged") — ONLY the listed names, copied exactly.
 - arcs: for each book number present in the notes, one 2-3 sentence arc summary.
-Never invent facts not supported by the notes."""
+Never invent facts not supported by the notes. Do NOT describe how characters are related to each other — that is handled elsewhere."""
 
 
 def ensure_tables(db: sqlite3.Connection) -> None:
@@ -176,6 +218,88 @@ def _chapter_inputs(db, canon) -> list[dict]:
     return out
 
 
+def _entity_names(canon, name: str) -> list[str]:
+    e = canon.entities.get(name)
+    return [name, *(e.aliases if e else [])]
+
+
+def _mention_tokens(names: list[str]) -> set[str]:
+    """Tokens that count as 'mentioning' a character in a sentence."""
+    tokens = set()
+    for n in names:
+        tokens.add(n)
+        first = n.split()[0]
+        if len(first) >= 3:
+            tokens.add(first)
+    return tokens
+
+
+def relationship_evidence(db, canon, name: str, others: list[str],
+                          max_per_pair: int = 10) -> dict[str, list[str]]:
+    """Mine verbatim prose sentences that could establish how `name` relates
+    to each of `others`: sentences from shared scenes that mention the other
+    character AND contain a relationship keyword. Purely mechanical."""
+    canon.ensure_built()
+    me = canon.entities.get(name)
+    if me is None:
+        return {}
+    pov_by_chunk = dict(db.execute("SELECT chunk_id, pov_character FROM chunks"))
+    evidence: dict[str, list[str]] = {o: [] for o in others}
+    my_tokens = _mention_tokens(_entity_names(canon, name))
+    other_tokens = {o: _mention_tokens(_entity_names(canon, o)) for o in others}
+    # search chunks where EITHER character is tagged — extraction sometimes
+    # misses a participant that the prose still names (e.g. "Austin's lying")
+    search_ids = set(me.chunk_ids)
+    for o in others:
+        oe = canon.entities.get(o)
+        if oe:
+            search_ids |= oe.chunk_ids
+
+    # Definitional/directional phrases outrank generic keyword hits, so the
+    # decisive sentence ("my older brother, Noah") always makes the cut.
+    strong = ("older brother", "oldest brother", "big brother", "little brother",
+              "younger brother", "youngest", "older sister", "little sister",
+              "best friend", "stepbrother", "stepsister", "my cousin",
+              "girlfriend", "boyfriend", "my father", "my mother", "my dad",
+              "my mom", "my uncle", "my aunt", "my grandpa", "my grandma")
+    candidates: dict[str, list[tuple[int, int, str]]] = {o: [] for o in others}
+
+    for order, cid in enumerate(sorted(search_ids)):
+        present = canon.chunk_entities.get(cid, set())
+        row = db.execute("SELECT text FROM chunks WHERE chunk_id = ?", (cid,)).fetchone()
+        if not row:
+            continue
+        narrator = pov_by_chunk.get(cid) or "unknown"
+        i_am_narrator = narrator and narrator.split()[0] in {t.split()[0] for t in my_tokens}
+        sentences = _SENT_SPLIT.split(row[0])
+        for i, s in enumerate(sentences):
+            low = s.lower()
+            if not any(k in low for k in _REL_KEYWORDS):
+                continue
+            prev = sentences[i - 1] if i > 0 else ""
+            prev2 = sentences[i - 2] if i > 1 else ""
+            pair_text = f"{prev} {s}" if prev else s
+            match_window = f"{prev2} {pair_text}"
+            score = 2 if any(k in low for k in strong) else 1
+            # the main character must be involved: tagged in the chunk,
+            # named in the window, or the narrator of the scene
+            me_involved = (name in present or i_am_narrator
+                           or any(t in match_window for t in my_tokens))
+            if not me_involved:
+                continue
+            for o in others:
+                # dialogue often names the character a sentence or two before
+                # the descriptor ("Austin's lying." "…he's your best friend")
+                if any(t in match_window for t in other_tokens[o]):
+                    snippet = f"[narrator: {narrator}] {pair_text}".strip()
+                    candidates[o].append((-score, order, snippet[:420]))
+
+    for o in others:
+        ranked = sorted(candidates[o])[:max_per_pair]
+        evidence[o] = [snippet for _, _, snippet in ranked]
+    return evidence
+
+
 def _profile_inputs(db, canon, min_chunks: int = 8) -> list[dict]:
     """Per-character payloads for the profile pass (main cast only)."""
     canon.ensure_built()
@@ -209,9 +333,26 @@ def _profile_inputs(db, canon, min_chunks: int = 8) -> list[dict]:
             "beats": beat_lines[:200],
             "co_occurring": co,
         }
-        payload["content_hash"] = _hash([payload["knowledge"][:50],
+        payload["content_hash"] = _hash(["v2", payload["knowledge"][:50],
                                          payload["beats"][:50], co])
         out.append(payload)
+    return out
+
+
+def _rel_inputs(db, canon) -> list[dict]:
+    """Per-character evidence bundles for the relationship-nature pass."""
+    out = []
+    for p in _profile_inputs(db, canon):
+        others = p["co_occurring"]
+        if not others:
+            continue
+        evidence = relationship_evidence(db, canon, p["name"], others)
+        out.append({
+            "name": p["name"],
+            "others": others,
+            "evidence": evidence,
+            "content_hash": _hash(["rel-v4", evidence]),
+        })
     return out
 
 
@@ -224,13 +365,17 @@ def preview(db, cfg, canon) -> dict:
                 != c["content_hash"]]
     profiles = [p for p in _profile_inputs(db, canon)
                 if _state(db, f"profile:{p['name']}") != p["content_hash"]]
+    rels = [r for r in _rel_inputs(db, canon)
+            if _state(db, f"rels:{r['name']}") != r["content_hash"]]
     in_tok = sum(len(json.dumps(c["notes"])) // 3 + 400 for c in chapters) \
-        + sum((len(p["knowledge"]) + len(p["beats"])) * 20 + 500 for p in profiles)
-    out_tok = len(chapters) * 350 + len(profiles) * 500
+        + sum((len(p["knowledge"]) + len(p["beats"])) * 20 + 500 for p in profiles) \
+        + sum(len(json.dumps(r["evidence"])) // 3 + 400 for r in rels)
+    out_tok = len(chapters) * 350 + len(profiles) * 500 + len(rels) * 250
     in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))
     return {
         "chapters_to_process": len(chapters),
         "profiles_to_process": len(profiles),
+        "relationships_to_process": len(rels),
         "estimated_cost_usd": round((in_tok * in_p + out_tok * out_p) / 1e6, 3),
         "model": cfg.extraction_model,
     }
@@ -273,8 +418,10 @@ class EnrichmentRunner:
                         != c["content_hash"]]
             profiles = [p for p in _profile_inputs(db, canon)
                         if _state(db, f"profile:{p['name']}") != p["content_hash"]]
+            rels = [r for r in _rel_inputs(db, canon)
+                    if _state(db, f"rels:{r['name']}") != r["content_hash"]]
             self.status.update(state="running", done=0,
-                               total=len(chapters) + len(profiles),
+                               total=len(chapters) + len(profiles) + len(rels),
                                cost_usd=0.0, error=None)
 
             def call(system, user, schema):
@@ -304,11 +451,12 @@ class EnrichmentRunner:
                                 c["book_number"], c["chapter_number"], e)
                 self.status["done"] += 1
 
-            # profiles — one call each
+            # profiles (traits + arcs) — one call each
             for p in profiles:
                 try:
                     user = json.dumps({k: v for k, v in p.items()
-                                       if k != "content_hash"}, ensure_ascii=False)
+                                       if k not in ("content_hash", "co_occurring")},
+                                      ensure_ascii=False)
                     data = call(PROFILE_PROMPT, user, _PROFILE_SCHEMA)
                     self._store_profile(db, p, data)
                     _set_state(db, f"profile:{p['name']}", p["content_hash"])
@@ -317,6 +465,44 @@ class EnrichmentRunner:
                     log.warning("profile enrichment failed for %s: %s", p["name"], e)
                 self.status["done"] += 1
 
+            # relationship natures — evidence-based, quote-verified
+            strong_hint = ("older brother", "oldest brother", "big brother",
+                           "little brother", "best friend", "girlfriend",
+                           "boyfriend", "my cousin", "stepbrother")
+            for r in rels:
+                try:
+                    user = json.dumps({
+                        "main_character": r["name"],
+                        "characters": r["others"],
+                        "excerpts": r["evidence"],
+                    }, ensure_ascii=False)
+                    data = call(REL_PROMPT, user, _REL_SCHEMA)
+                    by_name = {x.get("name"): x for x in data.get("relationships", [])}
+                    # focused retry: pairs the model left null even though a
+                    # decisive phrase is sitting in the snippets
+                    for o in r["others"]:
+                        answered = by_name.get(o, {}).get("nature")
+                        snippets = r["evidence"].get(o, [])
+                        if answered or not any(
+                                h in s.lower() for s in snippets for h in strong_hint):
+                            continue
+                        retry = call(REL_PROMPT, json.dumps({
+                            "main_character": r["name"],
+                            "characters": [o],
+                            "excerpts": {o: snippets},
+                        }, ensure_ascii=False), _REL_SCHEMA)
+                        for x in retry.get("relationships", []):
+                            if x.get("name") == o and x.get("nature"):
+                                by_name[o] = x
+                    data = {"relationships": list(by_name.values())}
+                    self._store_relationships(db, r, data)
+                    _set_state(db, f"rels:{r['name']}", r["content_hash"])
+                    db.commit()
+                except Exception as e:
+                    log.warning("relationship enrichment failed for %s: %s", r["name"], e)
+                self.status["done"] += 1
+
+            self._reconcile_directions(db)
             self.status["state"] = "done"
         except Exception as e:
             log.exception("enrichment run failed")
@@ -355,19 +541,101 @@ class EnrichmentRunner:
 
     @staticmethod
     def _store_profile(db, payload: dict, data: dict) -> None:
-        valid = set(payload["co_occurring"])
-        relationships = [r for r in data.get("relationships", [])
-                         if r.get("name") in valid]
+        """Update traits + arcs, leaving relationships to the evidence pass."""
         arcs = {str(a["book_number"]): a["arc"] for a in data.get("arcs", [])}
         db.execute(
             """INSERT INTO character_profiles (name, traits_json, relationships_json, arcs_json)
-               VALUES (?,?,?,?)
+               VALUES (?, ?, COALESCE((SELECT relationships_json FROM character_profiles
+                                       WHERE name = ?), '[]'), ?)
                ON CONFLICT(name) DO UPDATE SET traits_json = excluded.traits_json,
-                   relationships_json = excluded.relationships_json,
                    arcs_json = excluded.arcs_json""",
             (payload["name"], json.dumps(data.get("traits", []), ensure_ascii=False),
-             json.dumps(relationships, ensure_ascii=False),
-             json.dumps(arcs, ensure_ascii=False)))
+             payload["name"], json.dumps(arcs, ensure_ascii=False)))
+
+    @staticmethod
+    def _reconcile_directions(db) -> None:
+        """Mechanical sanity check: two characters cannot BOTH be each
+        other's 'older brother' (or both 'younger'). When the model produced
+        a contradictory mutual pair, null both sides — an honest blank beats
+        a coin flip."""
+        profiles = {name: json.loads(rj or "[]") for name, rj in db.execute(
+            "SELECT name, relationships_json FROM character_profiles")}
+
+        def direction(nature: str | None) -> str | None:
+            if not nature:
+                return None
+            low = nature.lower()
+            if "older" in low or "big " in low or "oldest" in low:
+                return "older"
+            if "younger" in low or "little " in low or "youngest" in low:
+                return "younger"
+            return None
+
+        changed = set()
+        for a, rels in profiles.items():
+            for r in rels:
+                b = r["name"]
+                d_ab = direction(r.get("nature"))
+                if d_ab is None or b not in profiles:
+                    continue
+                back = next((x for x in profiles[b] if x["name"] == a), None)
+                if back is None:
+                    continue
+                d_ba = direction(back.get("nature"))
+                if d_ba is not None and d_ab == d_ba:
+                    log.warning("contradictory sibling direction %s<->%s "
+                                "(%r / %r) — nulling both",
+                                a, b, r.get("nature"), back.get("nature"))
+                    r["nature"] = r["evidence"] = None
+                    back["nature"] = back["evidence"] = None
+                    changed |= {a, b}
+        for name in changed:
+            db.execute("UPDATE character_profiles SET relationships_json = ? "
+                       "WHERE name = ?",
+                       (json.dumps(profiles[name], ensure_ascii=False), name))
+        db.commit()
+
+    @staticmethod
+    def _store_relationships(db, payload: dict, data: dict) -> None:
+        """Store natures ONLY when the model's quoted evidence verifies
+        against the snippets we supplied. Everything else is null — an honest
+        blank beats an invented relationship. Matching normalizes quote
+        characters and whitespace (models straighten curly quotes when
+        copying) but still requires a real substring match."""
+
+        def norm(s: str) -> str:
+            for a, b in (("’", "'"), ("‘", "'"), ("“", '"'), ("”", '"'),
+                         ("—", "-"), ("…", "...")):
+                s = s.replace(a, b)
+            return re.sub(r"\s+", " ", s).strip().lower()
+
+        valid = set(payload["others"])
+        verified = []
+        for r in data.get("relationships", []):
+            name = r.get("name")
+            if name not in valid:
+                continue
+            nature, evidence = r.get("nature"), r.get("evidence")
+            snippets = payload["evidence"].get(name, [])
+            ok = bool(nature and evidence
+                      and any(norm(evidence) in norm(s) for s in snippets))
+            if nature and not ok:
+                log.info("rejected unverified nature %r for %s -> %s",
+                         nature, payload["name"], name)
+            verified.append({
+                "name": name,
+                "nature": nature if ok else None,
+                "evidence": evidence if ok else None,
+            })
+        db.execute(
+            """INSERT INTO character_profiles (name, traits_json, relationships_json, arcs_json)
+               VALUES (?, COALESCE((SELECT traits_json FROM character_profiles
+                                    WHERE name = ?), '[]'), ?,
+                       COALESCE((SELECT arcs_json FROM character_profiles
+                                 WHERE name = ?), '{}'))
+               ON CONFLICT(name) DO UPDATE SET relationships_json = excluded.relationships_json""",
+            (payload["name"], payload["name"],
+             json.dumps(verified, ensure_ascii=False), payload["name"]))
 
 
 runner = EnrichmentRunner()

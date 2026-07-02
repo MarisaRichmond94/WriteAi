@@ -203,11 +203,37 @@ class Canonicalizer:
         single = [n for n in normalized if " " not in n]
         descriptors = [n for n in normalized if "'s " in n]
 
+        # Merge full-name heads that are first-token-anchored subsequences of
+        # a longer head — "Chase Gatlin" and "Chase Ryder Gatlin" are one
+        # person. Anchoring on the first name keeps "Michael Gatlin" (the
+        # father) from folding into "Jared Michael Gatlin" (the son). The
+        # most-frequent spelling becomes the display name.
+        def _subseq(short: list[str], long: list[str]) -> bool:
+            it = iter(long)
+            return all(tok in it for tok in short)
+
+        head_canon: dict[str, str] = {h: h for h in multi}
+        for h in sorted(multi, key=lambda n: len(n.split())):
+            ht = h.split()
+            longer = [o for o in multi if o != h and o.split()[0] == ht[0]
+                      and len(o.split()) > len(ht) and _subseq(ht, o.split())]
+            if len(longer) == 1:
+                # union: point the less frequent name at the more frequent one
+                a, b = h, longer[0]
+                keep = a if len(normalized[a]) >= len(normalized[b]) else b
+                drop = b if keep == a else a
+                for k, v in list(head_canon.items()):
+                    if v == drop:
+                        head_canon[k] = keep
+                head_canon[drop] = keep
+
         head_by_first: dict[str, list[str]] = defaultdict(list)
         for h in multi:
-            head_by_first[h.split()[0]].append(h)
+            canon_h = head_canon[h]
+            if canon_h not in head_by_first[h.split()[0]]:
+                head_by_first[h.split()[0]].append(canon_h)
 
-        entity_of: dict[str, str] = {h: h for h in multi}
+        entity_of: dict[str, str] = {h: head_canon[h] for h in multi}
         for s in single:
             heads = head_by_first.get(s, [])
             entity_of[s] = heads[0] if len(heads) == 1 else s
