@@ -299,7 +299,7 @@ export interface TimelineEvent {
   date_source: "extracted" | "user" | null;
 }
 
-export type ReviewFocus = "Rough Draft" | "Continuity" | "Character Voice" | "Line Edit" | "Pacing";
+export type ReviewFocus = "Literary Agent" | "Casual Reader" | "Hard-Core Reader" | "Philosopher" | "What-If Explorer";
 
 export interface ReviewMessage {
   id: string;

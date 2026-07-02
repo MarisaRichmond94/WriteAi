@@ -20,18 +20,18 @@ const MODELS = [
 ];
 
 const FOCUS_OPTIONS: { value: ReviewFocus; description: string }[] = [
-  { value: "Rough Draft", description: "Big-picture structure, pacing, and scene purpose" },
-  { value: "Continuity", description: "Consistency with series facts, timeline, and canon" },
-  { value: "Character Voice", description: "Dialogue authenticity and behavioral consistency" },
-  { value: "Line Edit", description: "Prose quality, clarity, rhythm, and word choice" },
-  { value: "Pacing", description: "Chapter flow, tension arc, and scene transitions" },
+  { value: "Literary Agent", description: "Commercial instincts — the hook, the voice, would they request pages" },
+  { value: "Casual Reader", description: "Honest gut reactions — hooked, bored, confused, would they keep reading" },
+  { value: "Hard-Core Reader", description: "Superfan who knows every book — callbacks, canon slips, theories" },
+  { value: "Philosopher", description: "Themes, moral stakes, and what the chapter is really about" },
+  { value: "What-If Explorer", description: "The roads not taken — pivotal choices and how alternates would play out" },
 ];
 
 const SUGGESTIONS = [
-  "Is the opening scene engaging enough to hook the reader?",
-  "Does the main character's voice match their established characterization?",
-  "Are there any continuity issues with events from earlier books?",
-  "How is the pacing — does the tension build and release effectively?",
+  "Would you keep reading past this chapter? Where did you almost stop?",
+  "What is the pivotal choice in this chapter, and what if it had gone the other way?",
+  "Does anything here contradict what an attentive reader of the series would know?",
+  "What is this chapter really about, beneath the plot?",
 ];
 
 function uuid(): string {
@@ -414,9 +414,11 @@ export default function ReviewPane() {
   const [filterBook, setFilterBook] = useState<string>(
     () => localStorage.getItem("review_filter_book") ?? ""
   );
-  const [filterFocus, setFilterFocus] = useState<ReviewFocus>(
-    () => (localStorage.getItem("review_filter_focus") as ReviewFocus) ?? "Rough Draft"
-  );
+  const [filterFocus, setFilterFocus] = useState<ReviewFocus>(() => {
+    const stored = localStorage.getItem("review_filter_focus") as ReviewFocus | null;
+    // discard pre-persona values ("Rough Draft", "Line Edit", …)
+    return stored && FOCUS_OPTIONS.some((f) => f.value === stored) ? stored : "Casual Reader";
+  });
 
   useEffect(() => { localStorage.setItem("review_filter_book", filterBook); }, [filterBook]);
   useEffect(() => { localStorage.setItem("review_filter_focus", filterFocus); }, [filterFocus]);
@@ -767,11 +769,11 @@ export default function ReviewPane() {
               onChange={(v) => { setFilterBook(v); setSelectedChapter(null); setChapterText(""); setMessages([]); setPreviewOpen(false); setActiveCitation(null); setViewingReviewSessionId(null); activeSessionIdRef.current = null; }}
             />
 
-            {/* Focus dropdown */}
+            {/* Reviewer persona dropdown */}
             <Dropdown
               value={filterFocus}
               options={FOCUS_OPTIONS.map((f) => f.value)}
-              placeholder="Select focus…"
+              placeholder="Select reviewer…"
               onChange={(v) => { setFilterFocus(v); setMessages([]); setPreviewOpen(false); setActiveCitation(null); setViewingReviewSessionId(null); activeSessionIdRef.current = null; }}
               renderOption={(v) => (
                 <div>
