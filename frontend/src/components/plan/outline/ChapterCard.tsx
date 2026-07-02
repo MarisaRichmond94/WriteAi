@@ -4,6 +4,7 @@ import { Calendar, X } from "lucide-react";
 import { clsx } from "clsx";
 import type { OutlineChapter } from "../../../types";
 import StoryDatePicker from "./StoryDatePicker";
+import { chapterLabel } from "../../../lib/format";
 import RichTextArea from "./RichTextArea";
 
 const POV_COLORS = [
@@ -121,7 +122,7 @@ export default function ChapterCard({
           {/* Chapter name + inline POV combobox */}
           <div className="flex items-center gap-2 min-w-0 mt-3 leading-none">
             <span className="text-sm font-bold text-ink-primary flex-shrink-0 leading-none">
-              {chapter.chapter != null ? `Chapter ${chapter.chapter}` : `Chapter ${sortedIndex + 1}`}
+              {chapter.chapter != null ? chapterLabel(chapter.chapter) : `Chapter ${sortedIndex + 1}`}
             </span>
             <div className="relative flex-shrink-0">
               <input

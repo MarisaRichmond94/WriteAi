@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { useAppStore } from "../../store/useAppStore";
 import type { ChapterSummary, Citation, PipelineCostEstimate, ReviewFocus, ReviewMessage, ReviewSession } from "../../types";
 import { streamReview, fetchChapterText, bookNameToId } from "../../api/review";
+import { chapterLabel } from "../../lib/format";
 import { runPipeline, fetchCostEstimate } from "../../api/pipeline";
 import CitationCard from "../chat/CitationCard";
 import StreamingIndicator from "../chat/StreamingIndicator";
@@ -696,9 +697,6 @@ export default function ReviewPane() {
     ...chapters.map((c) => c.chapter as number),
   ];
 
-  const chapterLabel = (v: number | "new") =>
-    v === "new" ? "+ New Chapter" : v === 0 ? "Prologue" : `Chapter ${v}`;
-
   const selectedModel = MODELS.find((m) => m.id === model)?.label ?? model;
 
   const sideOpen = activeCitation !== null || previewOpen;
@@ -793,10 +791,10 @@ export default function ReviewPane() {
               onChange={(v) => { setSelectedChapter(v); setMessages([]); setPreviewOpen(false); setActiveCitation(null); setViewingReviewSessionId(null); activeSessionIdRef.current = null; }}
               renderOption={(v) => (
                 <span className={v === "new" ? "text-accent" : undefined}>
-                  {v === "new" ? "+ New Chapter (paste)" : `Chapter ${v}`}
+                  {v === "new" ? "+ New Chapter (paste)" : chapterLabel(v)}
                 </span>
               )}
-              renderValue={(v) => v === "new" ? "New Chapter" : `Chapter ${v}`}
+              renderValue={(v) => v === "new" ? "New Chapter" : chapterLabel(v)}
               maxHeight="198px"
             />
 

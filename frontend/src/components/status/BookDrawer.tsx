@@ -4,6 +4,7 @@ import { clsx } from "clsx";
 import type { BookSummary, ChapterSummary, Citation, ExtractedChapter, ExtractedKnowledgeItem } from "../../types";
 import { fetchBookSummary, fetchExtractedChapter, fetchMissingChapters, triggerBookUpdate } from "../../api/books";
 import { bookSlug } from "../../api/settings";
+import { chapterLabel } from "../../lib/format";
 import { useAppStore } from "../../store/useAppStore";
 import ConfirmModal from "../ui/ConfirmModal";
 import ChapterViewer from "../chat/ChapterViewer";
@@ -400,7 +401,7 @@ function ChapterRow({
           }
         </span>
         <span className="flex flex-1 items-center gap-2">
-          <span className="text-xs font-medium text-ink-secondary">Chapter {chapter.chapter}</span>
+          <span className="text-xs font-medium text-ink-secondary">{chapterLabel(chapter.chapter)}</span>
           <span className={clsx("rounded-full px-2.5 py-0.5 text-[10px] font-medium", povColor)}>
             {chapter.pov}
           </span>

@@ -3,6 +3,7 @@ import { clsx } from "clsx";
 import { AlertTriangle, X } from "lucide-react";
 import type { ResyncPreviewResponse } from "../../../types";
 import DiffChapterRow from "./DiffChapterRow";
+import { chapterLabel } from "../../../lib/format";
 
 interface ResyncModalProps {
   open: boolean;
@@ -135,7 +136,7 @@ export default function ResyncModal({ open, preview, onApprove, onCancel }: Resy
                           {n.outline_heading || "(untitled)"}
                         </td>
                         <td className="px-4 py-2 text-right text-ink-muted">
-                          {n.old_chapter !== null ? `Chapter ${n.old_chapter}` : (
+                          {n.old_chapter !== null ? chapterLabel(n.old_chapter) : (
                             <span className="text-amber-400 font-medium">Planned</span>
                           )}
                         </td>
@@ -143,7 +144,7 @@ export default function ResyncModal({ open, preview, onApprove, onCancel }: Resy
                           "px-4 py-2 text-right font-medium",
                           n.is_renumbered ? "text-amber-400" : n.old_chapter === null ? "text-emerald-400" : "text-ink-secondary"
                         )}>
-                          Chapter {n.new_chapter}
+                          {chapterLabel(n.new_chapter)}
                         </td>
                       </tr>
                     ))}

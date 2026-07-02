@@ -13,6 +13,7 @@ import ChapterEditModal from "./ChapterEditModal";
 import ResyncModal from "./ResyncModal";
 import OutlineReviewPanel from "./OutlineReviewPanel";
 import ConfirmModal from "../../ui/ConfirmModal";
+import { chapterLabel } from "../../../lib/format";
 
 function ChapterCardSkeleton() {
   return (
@@ -296,7 +297,7 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
         message={(() => {
           const ch = chapters.find((c) => c.id === pendingDeleteId);
           return ch?.chapter != null
-            ? `Chapter ${ch.chapter} will be permanently deleted and all subsequent chapters will be renumbered. This cannot be undone.`
+            ? `${chapterLabel(ch.chapter)} will be permanently deleted and all subsequent chapters will be renumbered. This cannot be undone.`
             : "This chapter will be permanently deleted and all subsequent chapters will be renumbered. This cannot be undone.";
         })()}
         confirmLabel="Delete"

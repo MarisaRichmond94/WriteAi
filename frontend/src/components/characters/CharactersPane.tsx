@@ -5,6 +5,7 @@ import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import type { CharacterSummary, CharacterDetail, CharacterBookDetail, CharacterRelationship, KnowledgeItem, ArcEntry, AliasWithProvenance, Citation } from "../../types";
 import ChapterViewer from "../chat/ChapterViewer";
+import { chapterLabel } from "../../lib/format";
 import {
   fetchCharacters,
   fetchCharacterDetail,
@@ -702,7 +703,7 @@ function DetailPanel({
                       onClick={() => onChapterClick?.(ch)}
                       className="rounded bg-accent-subtle px-1.5 py-0.5 text-[10px] font-medium text-accent hover:bg-accent/20 transition-colors"
                     >
-                      Chapter {ch}
+                      {chapterLabel(ch)}
                     </button>
                   ))}
                 </div>
@@ -718,9 +719,9 @@ function DetailPanel({
 function KnowledgeItemRow({ item, onSourceClick }: { item: KnowledgeItem; onSourceClick?: (item: KnowledgeItem) => void }) {
   return (
     <div className="group flex items-start gap-2">
-      {item.first_revealed_chapter != null && item.first_revealed_chapter > 0 && (
+      {item.first_revealed_chapter != null && (
         <span className="mt-0.5 flex-shrink-0 rounded bg-accent-subtle px-1.5 py-0.5 text-[10px] font-medium text-accent">
-          Chapter {item.first_revealed_chapter}
+          {chapterLabel(item.first_revealed_chapter)}
         </span>
       )}
       <p className="flex-1 text-[11px] text-ink-secondary leading-relaxed">{item.text}</p>
@@ -786,9 +787,9 @@ function ScrollableList({ children }: { children: React.ReactNode }) {
 function ArcEntryRow({ entry, onSourceClick }: { entry: ArcEntry; onSourceClick?: (entry: ArcEntry) => void }) {
   return (
     <div className="group flex items-start gap-2">
-      {entry.chapter > 0 && (
+      {entry.chapter != null && (
         <span className="mt-0.5 flex-shrink-0 rounded bg-accent-subtle px-1.5 py-0.5 text-[10px] font-medium text-accent">
-          Chapter {entry.chapter}
+          {chapterLabel(entry.chapter)}
         </span>
       )}
       <p className="flex-1 text-[11px] text-ink-secondary leading-relaxed">{entry.insight}</p>

@@ -7,6 +7,7 @@ import { fetchEvents } from "../../api/events";
 import { fetchCharacters } from "../../api/characters";
 import ChapterViewer from "../chat/ChapterViewer";
 import { generateMockCharacterProfile } from "../../mocks/timelineMocks";
+import { chapterLabel } from "../../lib/format";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -498,7 +499,7 @@ function EventDrawer({
                           )}
                         >
                           <BookOpen className="h-3 w-3 flex-shrink-0" />
-                          {sq.book} — Chapter {sq.chapter}
+                          {sq.book} — {chapterLabel(sq.chapter)}
                         </button>
                       ))}
                     </div>

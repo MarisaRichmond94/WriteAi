@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { X } from "lucide-react";
 import { clsx } from "clsx";
 import type { OutlineChapter } from "../../../types";
+import { chapterLabel } from "../../../lib/format";
 
 interface ChapterSelectModalProps {
   open: boolean;
@@ -139,7 +140,7 @@ export default function ChapterSelectModal({
                   {/* Chapter label + dot + date */}
                   <div className="flex flex-1 items-center gap-2 min-w-0">
                     <span className="text-xs font-medium text-ink-primary flex-shrink-0">
-                      {`Chapter ${ch.chapter ?? i + 1}`}
+                      {ch.chapter != null ? chapterLabel(ch.chapter) : `Chapter ${i + 1}`}
                     </span>
                     {ch.date && (
                       <>

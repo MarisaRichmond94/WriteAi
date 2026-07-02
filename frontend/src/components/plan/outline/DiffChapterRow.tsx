@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { OutlineChapterDiff } from "../../../types";
+import { chapterLabel } from "../../../lib/format";
 
 interface DiffChapterRowProps {
   diff: OutlineChapterDiff;
@@ -128,7 +129,7 @@ export default function DiffChapterRow({ diff, approved, onToggle }: DiffChapter
             />
           </label>
           <span className="text-xs font-medium text-ink-secondary ml-[4px]">
-            Chapter {diff.chapter}
+            {chapterLabel(diff.chapter)}
           </span>
           <span className="rounded-full bg-yellow-500/10 px-2 py-0.5 text-[10px] font-medium text-yellow-400">
             {diff.diffs.length} field{diff.diffs.length !== 1 ? "s" : ""} changed
