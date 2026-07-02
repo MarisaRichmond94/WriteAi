@@ -287,7 +287,6 @@ def _build_bible(s, book: int) -> tuple[str, str]:
     out("## Characters")
     out("")
     major = [(n, e) for n, e in in_book if n >= 3]
-    minor = [(n, e) for n, e in in_book if n < 3]
     for n, e in major:
         out(f"### {e.name}")
         tags = []
@@ -315,12 +314,6 @@ def _build_bible(s, book: int) -> tuple[str, str]:
         if rel_lines:
             out(f"- **Relationships:** {'; '.join(rel_lines)}")
         out("")
-    if minor:
-        out("### Minor characters")
-        for _n, e in minor:
-            aka = f" (aka {', '.join(e.aliases)})" if e.aliases else ""
-            out(f"- **{e.name}**{aka}")
-        out("")
 
     out("## Chapter-by-Chapter")
     out("")
@@ -341,14 +334,6 @@ def _build_bible(s, book: int) -> tuple[str, str]:
                     out(f"- **{t}** *({typ})* — {summ}")
         else:
             out("- *(no extracted events)*")
-        out("")
-
-    majors = [(ch, t) for ch in chs
-              for t, _typ, gran, _s in events_by_ch.get(ch, []) if gran == "major"]
-    if majors:
-        out("## Major Events Timeline")
-        for ch, t in majors:
-            out(f"- ({_ch_label(ch)}) {t}")
         out("")
 
     return title, "\n".join(md)
