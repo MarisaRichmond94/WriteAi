@@ -48,9 +48,15 @@ def list_events(book: str | None = None, pov: str | None = None,
                    participants_json, knowledge_json, source_chunk_ids_json
             FROM events {where}
             ORDER BY book_number, chapter_number, position""", params).fetchall()
+    s.canon.ensure_built()
+
+    def is_named(p: str) -> bool:
+        e = s.canon.entities.get(p)
+        return e is not None and e.kind == "character"
+
     events = []
     for r in rows:
-        participants = json.loads(r[10] or "[]")
+        participants = [p for p in json.loads(r[10] or "[]") if is_named(p)]
         if pov and pov not in participants:
             continue
         sources = json.loads(r[12] or "[]")

@@ -134,6 +134,8 @@ def list_characters(book: str | None = None, raw: bool = False,
     for e in canon.entities.values():
         if len(e.chunk_ids) < min_chunks:
             continue
+        if e.kind != "character" and not raw:
+            continue  # role/group tags and descriptors live in the Raw view
         hidden = e.name in cmap["hidden"]
         if hidden and not include_hidden:
             continue

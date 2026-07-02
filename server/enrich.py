@@ -305,7 +305,7 @@ def _profile_inputs(db, canon, min_chunks: int = 8) -> list[dict]:
     canon.ensure_built()
     out = []
     for e in canon.visible_entities():
-        if len(e.chunk_ids) < min_chunks or e.kind == "descriptor":
+        if len(e.chunk_ids) < min_chunks or e.kind != "character":
             continue
         names = [e.name, *e.aliases]
         knowledge = db.execute(

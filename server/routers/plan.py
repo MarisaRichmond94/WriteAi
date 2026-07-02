@@ -241,7 +241,7 @@ def _seed_writer_characters() -> list[dict]:
     titles = _book_titles()
     seeded = []
     for e in s.canon.visible_entities()[:24]:
-        if e.kind == "descriptor":
+        if e.kind != "character":
             continue
         category = ("main" if e.is_pov
                     else "secondary" if len(e.chunk_ids) >= 50 else "tertiary")
@@ -266,9 +266,24 @@ def get_writer_characters():
         chars = _seed_writer_characters()
         writer_store.save_writer_characters(chars)
         return {"characters": chars, "seeded": True}
+    # drop auto-seeded entries that classification now marks as non-characters
+    # ("The man", role tags) — but never anything the writer has edited
+    s = get_state()
+    s.canon.ensure_built()
+
+    def untouched_junk(c: dict) -> bool:
+        e = s.canon.entities.get(c["name"])
+        is_junk = e is not None and e.kind != "character"
+        edited = bool(c.get("goals") or c.get("arc_notes") or c.get("traits")
+                      or c.get("relationships") or c.get("role"))
+        return is_junk and not edited
+
+    pruned = [c for c in chars if not untouched_junk(c)]
+    changed = len(pruned) != len(chars)
+    chars = pruned
+
     # self-heal older records that stored book numbers instead of names
     titles = _book_titles()
-    changed = False
     for c in chars:
         fixed = [titles.get(b, b) if isinstance(b, int) else b
                  for b in c.get("books", [])]

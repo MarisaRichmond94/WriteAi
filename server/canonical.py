@@ -43,6 +43,88 @@ _PAREN_RE = re.compile(r"^(.*?)\s*\((.*?)\)\s*$")
 _NON_NAME_PARENS = {"mentioned", "referenced", "unnamed", "unseen", "implied",
                     "voice", "flashback", "memory", "photo", "deceased"}
 
+# ── personhood classification ───────────────────────────────────────────────
+# Extraction tags like "CFO", "Board members", "The man", "other students"
+# are grounded in prose but aren't named people. Classified mechanically as
+# kind="generic" and excluded from character UIs (recoverable via the
+# Raw AI view or by assigning them to a real character).
+
+_HONORIFICS = {"mr", "mrs", "ms", "miss", "dr", "coach", "principal",
+               "officer", "detective", "professor", "father", "sister",
+               "judge", "captain", "sergeant", "deputy", "nurse", "agent"}
+
+_DETERMINERS = {"the", "a", "an", "other", "others", "some", "several",
+                "various", "both", "two", "three", "four", "many", "another",
+                "their", "his", "her", "my", "our", "one", "unnamed",
+                "unknown", "unidentified", "masked", "mysterious", "random",
+                "new", "old", "young", "opposing", "rival", "fellow"}
+
+_ROLE_WORDS = {
+    # titles / occupations
+    "cfo", "ceo", "coo", "cto", "vp", "president", "chairman", "chairwoman",
+    "judge", "principal", "coach", "teacher", "counselor", "therapist",
+    "doctor", "physician", "nurse", "surgeon", "paramedic", "medic",
+    "officer", "officers", "cop", "cops", "police", "policeman", "detective",
+    "detectives", "sheriff", "deputy", "guard", "guards", "bodyguard",
+    "attorney", "lawyer", "lawyers", "prosecutor", "bailiff", "jury",
+    "secretary", "receptionist", "assistant", "operator", "dispatcher",
+    "waiter", "waitress", "bartender", "barista", "cashier", "clerk",
+    "driver", "chauffeur", "pilot", "captain", "conductor",
+    "reporter", "reporters", "journalist", "anchor", "interviewer",
+    "referee", "umpire", "announcer", "scout", "recruiter", "trainer",
+    "manager", "boss", "employee", "employees", "worker", "workers",
+    "staff", "staffer", "janitor", "librarian", "chef", "cook",
+    "bully", "bullies", "stranger", "strangers", "passerby", "bystander",
+    "bystanders", "neighbor", "neighbors", "landlord", "tenant",
+    "pastor", "priest", "reverend", "chaplain", "monk",
+    "soldier", "soldiers", "veteran", "marine", "sailor",
+    "psychiatrist", "psychologist", "specialist", "expert", "consultant",
+    "bouncer", "dealer", "thug", "thugs", "goon", "goons", "henchman",
+    "henchmen", "attacker", "attackers", "assailant", "intruder", "burglar",
+    "kidnapper", "shooter", "gunman", "sniper", "voice", "figure", "silhouette",
+    # people-group nouns
+    "man", "men", "woman", "women", "boy", "boys", "girl", "girls",
+    "kid", "kids", "child", "children", "teen", "teens", "teenager",
+    "teenagers", "adult", "adults", "person", "people", "guy", "guys",
+    "lady", "ladies", "gentleman", "gentlemen", "folks", "crowd", "mob",
+    "student", "students", "classmate", "classmates", "schoolmate",
+    "player", "players", "teammate", "teammates", "team", "squad",
+    "member", "members", "board", "committee", "council", "panel",
+    "family", "families", "parents", "grandparents", "siblings", "brothers",
+    "sisters", "relatives", "cousins", "twins", "couple", "pair", "group",
+    "gang", "crew", "clique", "friends", "buddies", "peers", "onlookers",
+    "spectators", "audience", "patrons", "customers", "guests", "visitors",
+    "patients", "victims", "witnesses", "suspects", "inmates", "prisoners",
+    "nurses", "doctors", "teachers", "authorities", "paramedics",
+    "operators", "clerks", "servers",
+}
+
+
+def _is_generic(name: str) -> bool:
+    """True when a grounded tag is a role/group description, not a named
+    person. Purely mechanical; honorific + proper name is exempt."""
+    tokens = name.split()
+    if not tokens:
+        return True
+    lower = [t.strip(".,").lower() for t in tokens]
+    # "Mr. Ryan", "Coach West", "Dr. Patel" — honorific + capitalized
+    # non-role token is a real named character
+    if (len(tokens) >= 2 and lower[0] in _HONORIFICS
+            and tokens[1][:1].isupper() and lower[1] not in _ROLE_WORDS
+            and lower[1] not in _DETERMINERS):
+        return False
+    # any lowercase token -> descriptive phrase ("police operator",
+    # "other students in locker room")
+    if any(t[:1].islower() for t in tokens):
+        return True
+    # determiner-led phrases ("The man", "Other Students")
+    if lower[0] in _DETERMINERS:
+        return True
+    # every token is a role/group word ("CFO", "Board Members", "Judge")
+    if all(t in _ROLE_WORDS or t in _DETERMINERS for t in lower):
+        return True
+    return False
+
 
 @dataclass
 class Entity:
@@ -124,7 +206,10 @@ class Canonicalizer:
                 if other != name:
                     counts[other] += 1
         hidden = set(writer_store.character_map().get("hidden", []))
-        return [(n, c) for n, c in counts.most_common() if n not in hidden]
+        return [(n, c) for n, c in counts.most_common()
+                if n not in hidden
+                and self.entities.get(n) is not None
+                and self.entities[n].kind == "character"]
 
     # ── build ───────────────────────────────────────────────────────────────
 
@@ -272,10 +357,20 @@ class Canonicalizer:
         self.variant_to_entity = {}
         self.chunk_entities = defaultdict(set)
         groups: dict[str, Entity] = {}
+        user_targets = set(user_map.values())  # names the user assigned INTO
+
+        def classify(canon: str) -> str:
+            if canon in user_targets:
+                return "character"     # the user's choice outranks heuristics
+            if "'s " in canon:
+                return "descriptor"    # "Jared's brother"
+            if _is_generic(canon):
+                return "generic"       # "CFO", "Board members", "The man"
+            return "character"
+
         for name, cids in normalized.items():
             canon = entity_of.get(name, name)
-            e = groups.setdefault(canon, Entity(
-                name=canon, kind="descriptor" if "'s " in canon else "character"))
+            e = groups.setdefault(canon, Entity(name=canon, kind=classify(canon)))
             if name != canon and name not in e.aliases:
                 e.aliases.append(name)
             e.chunk_ids |= cids
