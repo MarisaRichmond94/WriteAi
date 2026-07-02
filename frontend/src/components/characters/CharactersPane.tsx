@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Users, Camera, ChevronRight, RefreshCw, Info, Search, Link, Sparkles, X, Pencil } from "lucide-react";
+import { Users, Camera, ChevronRight, RefreshCw, Info, Search, Link, Sparkles, X, Pencil, Eye, EyeOff } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import type { CharacterSummary, CharacterDetail, CharacterBookDetail, CharacterRelationship, KnowledgeItem, ArcEntry, AliasWithProvenance, Citation } from "../../types";
@@ -11,6 +11,8 @@ import {
   fetchCharacterBookDetail,
   uploadCharacterPhoto,
   triggerExtract,
+  hideCharacter,
+  unhideCharacter,
 } from "../../api/characters";
 import ConfirmModal from "../ui/ConfirmModal";
 import CharacterEditModal from "./CharacterEditModal";
@@ -330,7 +332,6 @@ function CharacterCard({
   photoMap,
   disabledIds = new Set(),
   hiddenIds,
-  isHidden = false,
   onToggleHidden,
   onEdit,
 }: {
@@ -344,8 +345,7 @@ function CharacterCard({
   photoMap: Record<string, string | null>;
   disabledIds?: Set<string>;
   hiddenIds?: Set<string>;
-  isHidden?: boolean;
-  onToggleHidden?: (id: string) => void;
+  onToggleHidden?: (name: string) => void;
   onEdit?: () => void;
 }) {
   const visibleRels = character.relationships.filter(r => !hiddenIds?.has(r.character_id));
@@ -358,19 +358,29 @@ function CharacterCard({
       className={clsx(
         "group/card relative flex flex-col rounded-xl border p-4 transition-colors",
         hasRelationships ? "gap-3" : "h-[82px] justify-center overflow-hidden",
-        isHidden
-          ? "border-surface-border bg-surface-card opacity-40"
-          : character.hidden
-            ? "border-dashed border-ink-muted/30 bg-surface-card cursor-pointer"
-            : isDisabled
-              ? "border-surface-border bg-surface-card cursor-not-allowed"
-              : active
-                ? "border-accent bg-accent/5 cursor-pointer"
-                : "border-surface-border bg-surface-card hover:border-accent/40 cursor-pointer"
+        character.hidden
+          ? "border-dashed border-ink-muted/30 bg-surface-card opacity-40"
+          : isDisabled
+            ? "border-surface-border bg-surface-card cursor-not-allowed"
+            : active
+              ? "border-accent bg-accent/5 cursor-pointer"
+              : "border-surface-border bg-surface-card hover:border-accent/40 cursor-pointer"
       )}
-      onClick={isDisabled || isHidden ? undefined : () => onSelect(character.id)}
+      onClick={isDisabled || character.hidden ? undefined : () => onSelect(character.id)}
     >
-      {/* Top-right action buttons — visibility toggle removed; use Edit modal instead */}
+      {/* Hide / unhide eyeball */}
+      {onToggleHidden && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleHidden(character.name); }}
+          title={character.hidden ? "Unhide character" : "Hide character"}
+          className={clsx(
+            "absolute top-2 right-2 z-10 p-1 rounded text-ink-muted hover:text-ink-primary hover:bg-surface-hover transition-opacity",
+            character.hidden ? "opacity-100" : "opacity-0 group-hover/card:opacity-100"
+          )}
+        >
+          {character.hidden ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        </button>
+      )}
 
       {/* Server-side hidden badge */}
       {character.hidden && (
@@ -870,12 +880,6 @@ export default function CharactersPane() {
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [bookFilter, setBookFilter] = useState<string | null>(null);
-  const [hiddenIds, setHiddenIds] = useState<Set<string>>(() => {
-    try {
-      const stored = localStorage.getItem("characters_hidden_ids");
-      return stored ? new Set(JSON.parse(stored)) : new Set();
-    } catch { return new Set(); }
-  });
   const [showHidden, setShowHidden] = useState(false);
   const [countMap, setCountMap] = useState<Record<string, number>>({});
   const [search, setSearch] = useState(
@@ -891,6 +895,8 @@ export default function CharactersPane() {
   const [activeBookId, setActiveBookId] = useState<string>("");
   const [lightMode, setLightMode] = useState(() => useAppStore.getState().appSettings?.viewer_light_mode ?? true);
   const cardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  // server-side hidden (writer_data) — survives re-ingests and browsers
+  const hiddenIds = new Set(characters.filter(c => c.hidden).map(c => c.id));
   const knownCharacterIds = new Set(characters.map(c => c.id));
   const disabledIds = new Set([
     ...characters.filter(c => c.relationships.length === 0).map(c => c.id),
@@ -899,14 +905,16 @@ export default function CharactersPane() {
   const bookHasNoData = bookFilter !== null && !(countMap[bookFilter] > 0);
   const bookFilterLabel = bookFilter ? (bookOrder.find(b => bookId(b) === bookFilter) ?? bookFilter) : null;
 
-  const load = useCallback(async (filter: string | null, raw?: boolean) => {
+  const load = useCallback(async (filter: string | null) => {
     setLoading(true);
     try {
-      const data = await fetchCharacters(filter ?? undefined, { raw, includeHidden: raw });
+      // always fetch hidden too; visibility is a client-side toggle
+      const data = await fetchCharacters(filter ?? undefined, { includeHidden: true });
       setCharacters(data);
       if (!filter) {
-        const map: Record<string, number> = { all: data.length };
-        for (const c of data) {
+        const visible = data.filter((c) => !c.hidden);
+        const map: Record<string, number> = { all: visible.length };
+        for (const c of visible) {
           for (const b of c.books) {
             const bid = bookId(b);
             map[bid] = (map[bid] ?? 0) + 1;
@@ -1073,14 +1081,21 @@ export default function CharactersPane() {
     return () => document.removeEventListener("keydown", onKey);
   }, [viewerOpen, viewerHasBack]);
 
-  const handleToggleHidden = useCallback((id: string) => {
-    setHiddenIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      try { localStorage.setItem("characters_hidden_ids", JSON.stringify([...next])); } catch {}
-      return next;
-    });
-  }, []);
+  const handleToggleHidden = useCallback(async (name: string) => {
+    const char = characters.find((c) => c.name === name);
+    try {
+      if (char?.hidden) {
+        await unhideCharacter(name);
+        showToast(`${name} is visible again.`);
+      } else {
+        await hideCharacter(name);
+        showToast(`${name} hidden. Toggle "Hidden" above to see hidden characters.`);
+      }
+      await load(bookFilter);
+    } catch {
+      showToast("Failed to update character visibility.");
+    }
+  }, [characters, bookFilter, load, showToast]);
 
   const handleExtractConfirm = async () => {
     setConfirmOpen(false);
@@ -1149,6 +1164,19 @@ export default function CharactersPane() {
             }
           )}
         </div>
+        <button
+          onClick={() => setShowHidden((v) => !v)}
+          title={showHidden ? "Hide hidden characters" : "Show hidden characters"}
+          className={clsx(
+            "flex-shrink-0 flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-colors",
+            showHidden
+              ? "bg-accent/20 text-accent ring-1 ring-accent/40"
+              : "bg-surface-card text-ink-secondary hover:text-ink-primary"
+          )}
+        >
+          {showHidden ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+          Hidden ({hiddenIds.size})
+        </button>
       </div>
 
 
@@ -1277,7 +1305,6 @@ export default function CharactersPane() {
                     photoMap={pm}
                     disabledIds={disabledIds}
                     hiddenIds={effectiveHiddenIds}
-                    isHidden={hiddenIds.has(char.id)}
                     onToggleHidden={handleToggleHidden}
                     onEdit={() => setEditingCharacter(char)}
                   />
