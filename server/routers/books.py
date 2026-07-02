@@ -86,6 +86,120 @@ def chapter_text(book: int, chapter: int):
             "text": "\n\n".join(r[0] for r in rows)}
 
 
+def _book_summary_dict(s, book: int) -> dict:
+    dates = s.db.execute(
+        """SELECT date_line FROM chunks WHERE book_number = ? AND date_line IS NOT NULL
+           ORDER BY chapter_number, chunk_index""", (book,)).fetchall()
+    povs = s.db.execute(
+        """SELECT pov_character, COUNT(DISTINCT chapter_number) FROM chunks
+           WHERE book_number = ? AND pov_character IS NOT NULL
+           GROUP BY pov_character ORDER BY 2 DESC""", (book,)).fetchall()
+    count = lambda table: s.db.execute(  # noqa: E731
+        f"""SELECT COUNT(*) FROM {table} t JOIN chunks c ON c.chunk_id = t.chunk_id
+            WHERE c.book_number = ?""", (book,)).fetchone()[0]
+    has_events = s.db.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                              "AND name='events'").fetchone() is not None
+    event_count = s.db.execute("SELECT COUNT(*) FROM events WHERE book_number = ?",
+                               (book,)).fetchone()[0] if has_events else 0
+    characters = s.db.execute(
+        """SELECT COUNT(DISTINCT name) FROM characters ch
+           JOIN chunks c ON c.chunk_id = ch.chunk_id WHERE c.book_number = ?""",
+        (book,)).fetchone()[0]
+    locations = s.db.execute(
+        """SELECT COUNT(DISTINCT name) FROM locations l
+           JOIN chunks c ON c.chunk_id = l.chunk_id WHERE c.book_number = ?""",
+        (book,)).fetchone()[0]
+    return {
+        "date_span": {"first": dates[0][0] if dates else None,
+                      "last": dates[-1][0] if dates else None},
+        "pov_breakdown": [{"pov": p, "chapter_count": n} for p, n in povs],
+        "character_count": characters,
+        "location_count": locations,
+        "event_count": event_count,
+        "fact_count": count("character_knowledge"),
+    }
+
+
+@router.get("/books/{book}/summary")
+def book_summary(book: int):
+    return _book_summary_dict(get_state(), book)
+
+
+@router.get("/series/summary")
+def series_summary():
+    s = get_state()
+    books = [r[0] for r in s.db.execute(
+        "SELECT DISTINCT book_number FROM chunks ORDER BY book_number")]
+    titles = dict(s.db.execute("SELECT DISTINCT book_number, book_title FROM chunks"))
+    has_events = s.db.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                              "AND name='events'").fetchone() is not None
+    breakdown = []
+    for b in books:
+        chapters = s.db.execute(
+            "SELECT COUNT(DISTINCT chapter_number) FROM chunks WHERE book_number = ?",
+            (b,)).fetchone()[0]
+        events = s.db.execute("SELECT COUNT(*) FROM events WHERE book_number = ?",
+                              (b,)).fetchone()[0] if has_events else 0
+        breakdown.append({"book": titles.get(b, f"Book {b}"),
+                          "chapter_count": chapters, "event_count": events})
+    # series-wide aggregate: reuse the per-book helper across all books
+    agg = {"date_span": {"first": None, "last": None}, "pov_breakdown": [],
+           "character_count": 0, "location_count": 0, "event_count": 0,
+           "fact_count": 0}
+    for b in books:
+        one = _book_summary_dict(s, b)
+        agg["event_count"] += one["event_count"]
+        agg["fact_count"] += one["fact_count"]
+        agg["character_count"] = max(agg["character_count"], one["character_count"])
+        agg["location_count"] += one["location_count"]
+        if agg["date_span"]["first"] is None:
+            agg["date_span"]["first"] = one["date_span"]["first"]
+        if one["date_span"]["last"]:
+            agg["date_span"]["last"] = one["date_span"]["last"]
+    agg["book_breakdown"] = breakdown
+    return agg
+
+
+@router.get("/books/{book}/chapters/{chapter}/extracted")
+def chapter_extracted(book: int, chapter: int):
+    """ExtractedChapter view assembled from stored chunk metadata."""
+    s = get_state()
+    rows = s.db.execute(
+        """SELECT pov_character, date_line, metadata_json FROM chunks
+           WHERE book_number = ? AND chapter_number = ? ORDER BY chunk_index""",
+        (book, chapter)).fetchall()
+    if not rows:
+        raise HTTPException(404, "chapter not found")
+    summary, characters, facts, locations = [], {}, [], set()
+    for pov, date, meta_json in rows:
+        if not meta_json:
+            continue
+        meta = json.loads(meta_json)
+        summary.extend(meta.get("key_events", []))
+        for name in meta.get("characters_present", []):
+            characters.setdefault(name, {"name": name, "aliases": None,
+                                         "role": "", "knowledge_gained": []})
+        for who, learned in meta.get("character_knowledge_updates", {}).items():
+            entry = characters.setdefault(who, {"name": who, "aliases": None,
+                                                "role": "", "knowledge_gained": []})
+            entry["knowledge_gained"].extend(
+                {"insight": fact, "source_quote": None} for fact in learned)
+        facts.extend({"statement": f, "characters": [], "category": "revealed",
+                      "source_quote": None}
+                     for f in meta.get("new_information_revealed", []))
+        locations.update(meta.get("locations", []))
+    return {
+        "chapter": chapter,
+        "pov": rows[0][0] or "",
+        "date": rows[0][1],
+        "summary": summary[:10],
+        "characters": list(characters.values()),
+        "events": [],
+        "facts": facts[:20],
+        "locations": [{"name": n, "type": ""} for n in sorted(locations)][:15],
+    }
+
+
 @router.get("/books/{book}/cover")
 def book_cover(book: int):
     """Serve the dust-jacket front cover (read-only) if the book has one."""

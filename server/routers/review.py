@@ -43,7 +43,7 @@ FOCUS_PROMPTS = {
 
 
 class ReviewRequest(BaseModel):
-    book: int
+    book: int | str
     chapter: int | None = None        # synced chapter…
     chapter_text: str | None = None   # …or a pasted draft
     focus: str = "Rough Draft"
@@ -56,6 +56,12 @@ def review_stream(req: ReviewRequest):
     s = get_state()
     if req.focus not in FOCUS_PROMPTS:
         raise HTTPException(400, f"unknown focus: {req.focus}")
+    if isinstance(req.book, str) and not req.book.isdigit():
+        titles = {t.lower(): n for n, t in s.db.execute(
+            "SELECT DISTINCT book_number, book_title FROM chunks")}
+        req.book = titles.get(req.book.lower(), 1)
+    else:
+        req.book = int(req.book)
 
     # resolve the chapter text
     text = req.chapter_text

@@ -1,0 +1,98 @@
+// Adapter: expose this app's settings in the reference AppSettings shape.
+import type { AppSettings } from "../types";
+
+interface BackendSettings {
+  fields: { key: string; value: string }[];
+  profile: { writer_name: string; site_name: string; writer_photo_url?: string | null };
+}
+
+async function backendSettings(): Promise<BackendSettings> {
+  const res = await fetch("/api/settings");
+  if (!res.ok) throw new Error(`Failed to fetch settings: ${res.statusText}`);
+  return res.json();
+}
+
+export async function fetchSettings(): Promise<AppSettings> {
+  const data = await backendSettings();
+  const f = (k: string) => data.fields.find((x) => x.key === k)?.value ?? "";
+  return {
+    site_name: data.profile.site_name || "The Archive",
+    source_books_dir: f("BOOKS_DIR"),
+    books_dir: f("TEXT_EXPORT_DIR"),
+    data_dir: f("DATA_DIR"),
+    backup_retention_days: 30,
+    sync_time: "02:30",
+    auto_sync_enabled: true,
+    book_order: [],
+    query_model: f("QUERY_MODEL"),
+    extraction_model: f("EXTRACTION_MODEL"),
+    odv_model: "",
+    discovered_books: [],
+    anthropic_api_key_preview: f("ANTHROPIC_API_KEY"),
+    openai_api_key_preview: f("OPENAI_API_KEY"),
+    writer_name: data.profile.writer_name || "Writer",
+    writer_photo_url: data.profile.writer_photo_url ?? null,
+    viewer_light_mode: true,
+  };
+}
+
+export async function saveSettings(
+  updates: Partial<AppSettings> & { anthropic_api_key?: string; openai_api_key?: string },
+): Promise<void> {
+  const values: Record<string, string> = {};
+  if (updates.source_books_dir !== undefined) values.BOOKS_DIR = updates.source_books_dir;
+  if (updates.books_dir !== undefined) values.TEXT_EXPORT_DIR = updates.books_dir;
+  if (updates.data_dir !== undefined) values.DATA_DIR = updates.data_dir;
+  if (updates.query_model !== undefined) values.QUERY_MODEL = updates.query_model;
+  if (updates.extraction_model !== undefined) values.EXTRACTION_MODEL = updates.extraction_model;
+  if (updates.anthropic_api_key) values.ANTHROPIC_API_KEY = updates.anthropic_api_key;
+  if (updates.openai_api_key) values.OPENAI_API_KEY = updates.openai_api_key;
+
+  const profile: Record<string, unknown> = {};
+  if (updates.writer_name !== undefined) profile.writer_name = updates.writer_name;
+  if (updates.site_name !== undefined) profile.site_name = updates.site_name;
+  if (updates.writer_photo_url !== undefined) profile.writer_photo_url = updates.writer_photo_url;
+
+  const res = await fetch("/api/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ values, profile: Object.keys(profile).length ? profile : null }),
+  });
+  if (!res.ok) throw new Error(`Failed to save settings: ${res.statusText}`);
+}
+
+export async function fetchDiscoveredBooks(): Promise<string[]> {
+  const res = await fetch("/api/settings/validate", { method: "POST" });
+  if (!res.ok) return [];
+  const data = (await res.json()) as { books: string[] };
+  return data.books ?? [];
+}
+
+export async function uploadWriterPhoto(file: File): Promise<string> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/api/settings/writer-photo", { method: "POST", body: form });
+  if (!res.ok) throw new Error(`Failed to upload photo: ${res.statusText}`);
+  const data = (await res.json()) as { photo_url: string };
+  return data.photo_url;
+}
+
+export async function deleteWriterPhoto(): Promise<void> {
+  await fetch("/api/settings/writer-photo", { method: "DELETE" });
+}
+
+export function bookSlug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+export async function uploadBookCover(_slug: string, _file: File): Promise<string> {
+  throw new Error("Book covers come from your Dust Jacket folders and are read-only here.");
+}
+
+export async function deleteBookCover(_slug: string): Promise<void> {
+  throw new Error("Book covers come from your Dust Jacket folders and are read-only here.");
+}
+
+export async function pickFolder(_current?: string): Promise<string | null> {
+  return null; // native folder picker not available in this app
+}

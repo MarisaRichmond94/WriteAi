@@ -34,7 +34,7 @@ ALTERNATE_EXTRA = (
 class ChatRequest(BaseModel):
     message: str
     mode: str = "general"
-    book_filter: list[int] = []
+    book_filter: list[str | int] = []
     pov_filter: list[str] = []
     conversation_history: list[dict] = []
 
@@ -43,17 +43,28 @@ class ChatRequest(BaseModel):
 def chat_stream(req: ChatRequest):
     s = get_state()
 
+    def resolve_books(values):
+        titles = {t.lower(): n for n, t in s.db.execute(
+            "SELECT DISTINCT book_number, book_title FROM chunks")}
+        out = []
+        for v in values:
+            if isinstance(v, int) or (isinstance(v, str) and v.isdigit()):
+                out.append(int(v))
+            elif isinstance(v, str) and v.lower() in titles:
+                out.append(titles[v.lower()])
+        return out
+
     def generate():
+        books = resolve_books(req.book_filter)
         plan = classify(req.message,
                         forced_type=MODE_MAP.get(req.mode) or None)
-        if req.book_filter:
-            plan.scope = Scope(book_min=min(req.book_filter),
-                               book_max=max(req.book_filter))
+        if books:
+            plan.scope = Scope(book_min=min(books), book_max=max(books))
         excerpts, notes = s.retriever.retrieve(plan)
         # exact-set filters the range scope can't express
-        if req.book_filter:
+        if books:
             excerpts = [e for e in excerpts
-                        if e.get("book_number") in set(req.book_filter)]
+                        if e.get("book_number") in set(books)]
         if req.pov_filter:
             povs = set(req.pov_filter)
             filtered = [e for e in excerpts if e.get("pov_character") in povs]

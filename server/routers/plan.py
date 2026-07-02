@@ -7,8 +7,9 @@ import json
 import logging
 import uuid
 from collections import defaultdict
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from src.query_router import QueryPlan, Scope
@@ -84,7 +85,7 @@ def put_outline(book: int, body: OutlinePut):
     outlines = writer_store.plan_outline()
     outlines[str(book)] = body.chapters
     writer_store.save_plan_outline(outlines)
-    return {"ok": True}
+    return get_outline(book)
 
 
 class NewChapter(BaseModel):
@@ -121,33 +122,64 @@ def delete_chapter(book: int, chapter_id: str):
 
 # ── resync: outline vs extracted ────────────────────────────────────────────
 
+def _book_name(book: int) -> str:
+    s = get_state()
+    row = s.db.execute("SELECT book_title FROM chunks WHERE book_number = ? LIMIT 1",
+                       (book,)).fetchone()
+    return row[0] if row else f"Book {book}"
+
+
 @router.get("/resync/{book}")
 def resync_preview(book: int):
+    """Diff the writer's outline against the extracted chapters, in the shape
+    the resync modal expects: per-chapter field diffs (approval granularity is
+    the chapter card) plus numbering assignments for newly written chapters."""
     extracted = _extracted_chapters(book)
-    outline = {c["chapter"]: c for c in writer_store.plan_outline().get(str(book), [])
+    outline_chapters = writer_store.plan_outline().get(str(book), [])
+    outline = {c["chapter"]: c for c in outline_chapters
                if c.get("chapter") is not None}
-    diffs, new_chapters = [], []
+    planned = [c for c in outline_chapters if c.get("chapter") is None]
+
+    field_diffs, numbering = [], []
     for ch, ext in sorted(extracted.items()):
         oc = outline.get(ch)
         if oc is None:
-            new_chapters.append(ch)
+            numbering.append({
+                "outline_id": f"new-{book}-{ch}",
+                "outline_heading": ext["heading"],
+                "old_chapter": None,
+                "new_chapter": ch,
+                "is_renumbered": False,
+            })
             continue
-        for field, ext_val in (("pov", ext["pov"] or ""), ("date", ext["date"]),
-                               ("extracted_bullets", ext["bullets"])):
-            cur = oc.get(field if field != "extracted_bullets" else "extracted_bullets")
-            if cur != ext_val:
-                diffs.append({"id": f"{ch}:{field}", "chapter": ch, "field": field,
-                              "outline_value": cur, "extracted_value": ext_val})
-    removed = [ch for ch in outline if ch not in extracted]
-    return {"book": book, "diffs": diffs, "new_chapters": new_chapters,
-            "removed_chapters": removed,
-            "status": "ready" if (diffs or new_chapters or removed) else "in_sync"}
+        diffs = []
+        for field, ext_val, old_val in (
+                ("pov", ext["pov"] or "", oc.get("pov")),
+                ("date", ext["date"], oc.get("date")),
+                ("extracted_bullets", ext["bullets"], oc.get("extracted_bullets"))):
+            if old_val != ext_val:
+                # bullets travel as JSON strings (the diff row parses them)
+                enc = (lambda v: json.dumps(v, ensure_ascii=False)
+                       if isinstance(v, list) else v)
+                diffs.append({"field": field, "old": enc(old_val), "new": enc(ext_val)})
+        if diffs:
+            field_diffs.append({"chapter_id": oc["id"], "chapter": ch,
+                                "heading": oc.get("heading") or f"Chapter {ch}",
+                                "diffs": diffs})
+    return {
+        "book": _book_name(book),
+        "status": "partial" if planned else "ready",
+        "conflict_reason": None,
+        "numbering": numbering,
+        "field_diffs": field_diffs,
+        "unmatched_outline_count": len(planned),
+    }
 
 
 class ResyncApprove(BaseModel):
-    diff_ids: list[str] = []
-    add_new_chapters: bool = True
-    remove_missing: bool = False
+    book: str | None = None
+    approved_diff_ids: list[str] = []   # outline chapter card ids
+    diff_ids: list[str] = []            # legacy per-field ids (still accepted)
 
 
 @router.post("/resync/{book}/approve")
@@ -157,25 +189,23 @@ def resync_approve(book: int, body: ResyncApprove):
     key = str(book)
     chapters = outlines.get(key, [])
     by_num = {c["chapter"]: c for c in chapters if c.get("chapter") is not None}
+    approved_cards = set(body.approved_diff_ids)
+    approved_fields = set(body.diff_ids)
 
-    approved = set(body.diff_ids)
     for ch, ext in extracted.items():
         oc = by_num.get(ch)
-        if oc is None:
-            if body.add_new_chapters:
-                seeded = next(c for c in _seed_outline(book) if c["chapter"] == ch)
-                chapters.append(seeded)
+        if oc is None:  # newly written chapter — always added
+            seeded = next(c for c in _seed_outline(book) if c["chapter"] == ch)
+            chapters.append(seeded)
             continue
-        if f"{ch}:pov" in approved:
+        card_approved = oc["id"] in approved_cards
+        if card_approved or f"{ch}:pov" in approved_fields:
             oc["pov"] = ext["pov"] or ""
-        if f"{ch}:date" in approved:
+        if card_approved or f"{ch}:date" in approved_fields:
             oc["date"] = ext["date"]
-        if f"{ch}:extracted_bullets" in approved:
+        if card_approved or f"{ch}:extracted_bullets" in approved_fields:
             oc["extracted_bullets"] = ext["bullets"]
         oc["status"] = "synced"
-    if body.remove_missing:
-        chapters = [c for c in chapters
-                    if c.get("chapter") is None or c["chapter"] in extracted]
     outlines[key] = chapters
     writer_store.save_plan_outline(outlines)
     return get_outline(book)
@@ -183,8 +213,15 @@ def resync_approve(book: int, body: ResyncApprove):
 
 # ── writer characters (authorial intent) ────────────────────────────────────
 
+def _book_titles() -> dict[int, str]:
+    s = get_state()
+    return dict(s.db.execute(
+        "SELECT DISTINCT book_number, book_title FROM chunks"))
+
+
 def _seed_writer_characters() -> list[dict]:
     s = get_state()
+    titles = _book_titles()
     seeded = []
     for e in s.canon.visible_entities()[:24]:
         if e.kind == "descriptor":
@@ -198,7 +235,9 @@ def _seed_writer_characters() -> list[dict]:
             "category": category, "role": None,
             "aliases": ", ".join(e.aliases) or None, "traits": [],
             "arc_notes": None, "goals": None, "relationships": [],
-            "books": books,
+            # the UI matches characters to books by book NAME
+            "books": [titles.get(b, f"Book {b}") for b in books],
+            "photo_url": None,
         })
     return seeded
 
@@ -210,6 +249,20 @@ def get_writer_characters():
         chars = _seed_writer_characters()
         writer_store.save_writer_characters(chars)
         return {"characters": chars, "seeded": True}
+    # self-heal older records that stored book numbers instead of names
+    titles = _book_titles()
+    changed = False
+    for c in chars:
+        fixed = [titles.get(b, b) if isinstance(b, int) else b
+                 for b in c.get("books", [])]
+        if fixed != c.get("books"):
+            c["books"] = fixed
+            changed = True
+        if "photo_url" not in c:
+            c["photo_url"] = None
+            changed = True
+    if changed:
+        writer_store.save_writer_characters(chars)
     return {"characters": chars, "seeded": False}
 
 
@@ -225,14 +278,50 @@ def put_writer_characters(body: CharactersPut):
 
 @router.put("/characters/{char_id}")
 def put_writer_character(char_id: str, body: dict):
+    """Upsert: updates in place, or appends when the id is new (the UI
+    creates fresh characters this way)."""
     chars = writer_store.writer_characters()
+    body["id"] = char_id
     for i, c in enumerate(chars):
         if c["id"] == char_id:
-            body["id"] = char_id
             chars[i] = body
-            writer_store.save_writer_characters(chars)
-            return body
-    raise HTTPException(404, "unknown character")
+            break
+    else:
+        chars.append(body)
+    writer_store.save_writer_characters(chars)
+    return body
+
+
+@router.post("/characters/{char_id}/photo")
+async def upload_character_photo(char_id: str, file: UploadFile):
+    """Store a character portrait under writer_data/photos/ (writer data,
+    never touched by AI or re-indexing)."""
+    suffix = Path(file.filename or "photo.png").suffix.lower() or ".png"
+    if suffix not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        raise HTTPException(400, "unsupported image type")
+    photos_dir = writer_store.WRITER_DATA_DIR / "photos"
+    photos_dir.mkdir(parents=True, exist_ok=True)
+    # one photo per character: clear previous extensions
+    for old in photos_dir.glob(f"{char_id}.*"):
+        old.unlink()
+    dest = photos_dir / f"{char_id}{suffix}"
+    dest.write_bytes(await file.read())
+    photo_url = f"/api/plan/photos/{dest.name}"
+    chars = writer_store.writer_characters()
+    for c in chars:
+        if c["id"] == char_id:
+            c["photo_url"] = photo_url
+    writer_store.save_writer_characters(chars)
+    return {"photo_url": photo_url}
+
+
+@router.get("/photos/{filename}")
+def get_character_photo(filename: str):
+    from fastapi.responses import FileResponse
+    path = (writer_store.WRITER_DATA_DIR / "photos" / Path(filename).name)
+    if not path.exists():
+        raise HTTPException(404, "no photo")
+    return FileResponse(path)
 
 
 @router.delete("/characters/{char_id}")
@@ -244,7 +333,9 @@ def delete_writer_character(char_id: str):
 
 @router.get("/characters/{char_id}/extracted")
 def writer_character_extracted(char_id: str):
-    """The AI-extracted profile matching a writer character (Compare panel)."""
+    """The AI-extracted profile matching a writer character, in the shape the
+    Compare panel renders: aliases, traits, relationships with status/inferred,
+    knowledge summary, active conflicts."""
     chars = writer_store.writer_characters()
     wc = next((c for c in chars if c["id"] == char_id), None)
     if wc is None:
@@ -255,10 +346,25 @@ def writer_character_extracted(char_id: str):
     name = wc["name"] if wc["name"] in s.canon.entities \
         else s.canon.resolve(wc["name"])
     if not name or name not in s.canon.entities:
-        return {"found": False, "name": wc["name"]}
+        return {}
     detail = character_detail(name)
-    detail["found"] = True
-    return detail
+    knowledge_count = sum(len(v) for v in detail["knowledge_by_book"].values())
+    return {
+        "aliases": detail["aliases"],
+        "role": "POV character" if detail["is_pov"] else None,
+        "traits": detail["traits"],
+        "relationships": [
+            {"target": r["name"],
+             "status": r["nature"] or f"{r['shared_scenes']} shared scenes",
+             "gendered_status": None,
+             "inferred": r["nature"] is None}
+            for r in detail["relationships"][:10]
+        ],
+        "knowledge_gained": (
+            f"{knowledge_count} facts learned across "
+            f"{len(detail['knowledge_by_book'])} book(s)"),
+        "active_conflicts": [],
+    }
 
 
 # ── AI review streams ───────────────────────────────────────────────────────

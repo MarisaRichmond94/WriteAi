@@ -41,12 +41,27 @@ def stream_response(generator) -> StreamingResponse:
 
 
 def citations_payload(excerpts: list[dict]) -> dict:
-    return {"type": "citations", "sources": [
-        {"chunk_id": e["chunk_id"],
-         "book_number": e.get("book_number"),
-         "book_title": e.get("book_title"),
-         "chapter_number": e.get("chapter_number"),
-         "pov_character": e.get("pov_character"),
-         "distance": e.get("distance"),
-         "preview": (e.get("text") or "")[:180]}
-        for e in excerpts]}
+    """Citation shape the UI's citation cards render: book name, chapter,
+    POV, snippet, distance (plus chunk_id so the source viewer can open the
+    exact passage)."""
+    sources = []
+    for e in excerpts:
+        chunk_index = 0
+        cid = e.get("chunk_id") or ""
+        if ".k" in cid:
+            try:
+                chunk_index = int(cid.rsplit(".k", 1)[1])
+            except ValueError:
+                pass
+        sources.append({
+            "book": e.get("book_title") or f"Book {e.get('book_number')}",
+            "chapter": e.get("chapter_number") or 0,
+            "chapter_heading": f"Chapter {e.get('chapter_number')}",
+            "pov": e.get("pov_character") or "",
+            "date": None,
+            "chunk_index": chunk_index,
+            "snippet": (e.get("text") or "")[:220],
+            "distance": e.get("distance") if e.get("distance") is not None else 0.5,
+            "chunk_id": e.get("chunk_id"),
+        })
+    return {"type": "citations", "sources": sources}
