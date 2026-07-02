@@ -39,13 +39,16 @@ class Answerer:
     def build_request(self, plan: QueryPlan, excerpts: list[dict],
                       notes: list[str],
                       history: list[dict] | None = None,
-                      system_extra: str = "") -> dict:
+                      system_extra: str = "",
+                      system_base: str | None = None,
+                      notes_header: str | None = None) -> dict:
         """Assemble the messages.create kwargs. Shared by the blocking
         answer() path and the server's SSE streaming path."""
         parts: list[str] = []
 
         if notes:
-            parts.append("== EXTRACTED STORY NOTES (from ingestion metadata) ==")
+            parts.append(notes_header
+                         or "== EXTRACTED STORY NOTES (from ingestion metadata) ==")
             parts.extend(notes)
             parts.append("")
 
@@ -67,7 +70,8 @@ class Answerer:
         max_tokens = 12000 if plan.qtype in ("continuity", "general") else 6000
         messages = list(history or [])
         messages.append({"role": "user", "content": "\n".join(parts)})
-        system = SYSTEM_PROMPT + (f"\n\n{system_extra}" if system_extra else "")
+        system = ((system_base or SYSTEM_PROMPT)
+                  + (f"\n\n{system_extra}" if system_extra else ""))
         return {"model": self.model, "max_tokens": max_tokens,
                 "system": system, "messages": messages}
 
@@ -83,9 +87,12 @@ class Answerer:
 
     def answer_stream(self, plan: QueryPlan, excerpts: list[dict],
                       notes: list[str], history: list[dict] | None = None,
-                      system_extra: str = ""):
+                      system_extra: str = "",
+                      system_base: str | None = None,
+                      notes_header: str | None = None):
         """Generator of text deltas; records usage when the stream ends."""
-        request = self.build_request(plan, excerpts, notes, history, system_extra)
+        request = self.build_request(plan, excerpts, notes, history, system_extra,
+                                     system_base, notes_header)
         with self.client.messages.stream(**request) as stream:
             yield from stream.text_stream
             final = stream.get_final_message()
