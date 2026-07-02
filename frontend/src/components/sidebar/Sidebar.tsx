@@ -1,4 +1,4 @@
-import { BookOpen, Compass, Clock, Library, Users, Info, Kanban, ScanText, FlaskConical } from "lucide-react";
+import { Compass, Clock, Library, Users, Info, Kanban, ScanText, FlaskConical } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import ChatHistory from "./ChatHistory";
@@ -30,7 +30,7 @@ export default function Sidebar() {
     <aside className="flex h-full w-64 flex-shrink-0 flex-col border-r border-surface-border bg-surface-card">
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-surface-border px-4 py-4">
-        <BookOpen className="h-5 w-5 text-accent" strokeWidth={1.5} />
+        <img src="/logo.svg" alt="" className="h-7 w-7 flex-shrink-0" />
         <div className="flex flex-col">
           <span className="text-sm font-semibold tracking-wide text-ink-primary">
             {siteName}
