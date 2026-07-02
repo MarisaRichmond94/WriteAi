@@ -86,6 +86,25 @@ def chapter_text(book: int, chapter: int):
             "text": "\n\n".join(r[0] for r in rows)}
 
 
+@router.get("/books/{book}/cover")
+def book_cover(book: int):
+    """Serve the dust-jacket front cover (read-only) if the book has one."""
+    from fastapi.responses import FileResponse
+
+    from src.discovery import discover_books
+    s = get_state()
+    match = next((b for b in discover_books(s.cfg) if b.number == book), None)
+    if match is None:
+        raise HTTPException(404, "unknown book")
+    for candidate in ("Dust Jacket/Front Cover.png", "Dust Jacket/Front Cover.jpg",
+                      "cover.png", "cover.jpg"):
+        path = match.folder / candidate
+        if path.exists():
+            # covers are print-resolution files; let the browser cache them
+            return FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+    raise HTTPException(404, "no cover")
+
+
 @router.get("/chunks/{chunk_id}")
 def chunk_text(chunk_id: str):
     s = get_state()

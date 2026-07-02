@@ -248,10 +248,12 @@ export function ChatInput({
   onSend,
   disabled,
   placeholder,
+  hintRight,
 }: {
   onSend: (text: string) => void;
   disabled: boolean;
   placeholder: string;
+  hintRight?: string;
 }) {
   const [text, setText] = useState("");
   const submit = () => {
@@ -261,7 +263,7 @@ export function ChatInput({
     onSend(t);
   };
   return (
-    <div className="border-t border-surface-border px-6 py-4">
+    <div className="border-t border-surface-border px-4 pb-2.5 pt-3">
       <div className="flex items-end gap-2 rounded-xl border border-surface-border bg-surface px-4 py-2.5 focus-within:border-accent">
         <textarea
           value={text}
@@ -286,6 +288,10 @@ export function ChatInput({
         >
           <Send className="h-4 w-4" strokeWidth={1.5} />
         </button>
+      </div>
+      <div className="mt-1.5 flex items-center justify-between px-1">
+        <span className="text-[10px] text-ink-muted">Press Enter to send</span>
+        {hintRight && <span className="text-[10px] text-ink-muted">{hintRight}</span>}
       </div>
     </div>
   );

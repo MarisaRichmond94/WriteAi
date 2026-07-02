@@ -1,18 +1,25 @@
 import { useEffect, useState } from "react";
 import clsx from "clsx";
-import { Eye, RefreshCw, ScanText, X } from "lucide-react";
+import { Eye, FileScan, ScanText, X } from "lucide-react";
 import { useApp } from "../../store";
 import type { Citation, ReviewFocus } from "../../types";
 import { api } from "../../lib/api";
 import { ChatInput, ChunkViewer, MessageThread, useStream } from "../chat";
-import { Button, ConfirmModal, EmptyState, Spinner } from "../ui";
+import { ConfirmModal, Spinner } from "../ui";
+import { Dropdown, PaneHeader } from "../shared";
 
-const FOCUSES: ReviewFocus[] = ["Rough Draft", "Continuity", "Character Voice", "Line Edit", "Pacing"];
+const FOCUSES: { value: ReviewFocus; accent: string }[] = [
+  { value: "Rough Draft", accent: "border-mode-plot/50 text-mode-plot" },
+  { value: "Continuity", accent: "border-mode-timeline/50 text-mode-timeline" },
+  { value: "Character Voice", accent: "border-mode-character/50 text-mode-character" },
+  { value: "Line Edit", accent: "border-mode-alternate/50 text-mode-alternate" },
+  { value: "Pacing", accent: "border-fuchsia-400/50 text-fuchsia-300" },
+];
 
 export function ReviewPane() {
   const { books, toast } = useApp();
-  const [book, setBook] = useState<number | null>(null);
-  const [chapter, setChapter] = useState<number | "new" | null>(null);
+  const [book, setBook] = useState<string>("");
+  const [chapter, setChapter] = useState<string>("");
   const [focus, setFocus] = useState<ReviewFocus>("Rough Draft");
   const [draftText, setDraftText] = useState("");
   const [preview, setPreview] = useState<{ text: string } | null>(null);
@@ -22,26 +29,28 @@ export function ReviewPane() {
   const [resyncBusy, setResyncBusy] = useState(false);
   const { messages, setMessages, streaming, send } = useStream("/api/review/stream");
 
-  const selectedBook = books.find((b) => b.id === book);
+  const bookId = book ? Number(book) : null;
+  const selectedBook = books.find((b) => b.id === bookId);
+  const focusOpt = FOCUSES.find((f) => f.value === focus)!;
 
   useEffect(() => {
     setPreview(null);
     setShowPreview(false);
-    if (book != null && typeof chapter === "number") {
-      api<{ text: string }>(`/api/books/${book}/chapters/${chapter}/text`)
+    if (bookId != null && chapter && chapter !== "new") {
+      api<{ text: string }>(`/api/books/${bookId}/chapters/${chapter}/text`)
         .then(setPreview)
         .catch(() => toast("Could not load chapter text", "error"));
     }
   }, [book, chapter]);
 
   const runReview = (message: string) => {
-    if (book == null) return toast("Select a book first", "error");
-    const body: Record<string, unknown> = { book, focus, message };
+    if (bookId == null) return toast("Select a book first", "error");
+    const body: Record<string, unknown> = { book: bookId, focus, message };
     if (chapter === "new") {
       if (!draftText.trim()) return toast("Paste your draft chapter first", "error");
       body.chapter_text = draftText;
-    } else if (typeof chapter === "number") {
-      body.chapter = chapter;
+    } else if (chapter) {
+      body.chapter = Number(chapter);
     } else {
       return toast("Select a chapter (or paste a new draft)", "error");
     }
@@ -49,13 +58,10 @@ export function ReviewPane() {
   };
 
   const startResync = async () => {
-    if (book == null) return;
+    if (bookId == null) return toast("Select a book first", "error");
     setResyncBusy(true);
     try {
-      const p = await api<{ estimated_cost_usd: number; changed_chunks: number }>(
-        `/api/ingest/preview?book=${book}`,
-      );
-      setResync(p);
+      setResync(await api(`/api/ingest/preview?book=${bookId}`));
     } catch (e) {
       toast(String(e), "error");
     } finally {
@@ -63,101 +69,85 @@ export function ReviewPane() {
     }
   };
 
-  const confirmResync = async () => {
-    try {
-      await api(`/api/ingest/run?book=${book}`, { method: "POST" });
-      toast("Re-ingestion started — see the Books page for progress", "success");
-    } catch (e) {
-      toast(String(e), "error");
-    }
-    setResync(null);
-  };
-
-  const select = (
-    <div className="flex flex-wrap items-center gap-2 border-b border-surface-border px-6 py-3">
-      <select
-        value={book ?? ""}
-        onChange={(e) => {
-          setBook(e.target.value ? Number(e.target.value) : null);
-          setChapter(null);
-          setMessages([]);
-        }}
-        className="rounded-md border border-surface-border bg-surface px-2.5 py-1.5 text-xs text-ink-primary outline-none focus:border-accent"
-      >
-        <option value="">Select book…</option>
-        {books.map((b) => (
-          <option key={b.id} value={b.id}>
-            {b.name}
-          </option>
-        ))}
-      </select>
-      <select
-        value={chapter === null ? "" : chapter}
-        onChange={(e) => {
-          const v = e.target.value;
-          setChapter(v === "" ? null : v === "new" ? "new" : Number(v));
-          setMessages([]);
-        }}
-        disabled={!selectedBook}
-        className="rounded-md border border-surface-border bg-surface px-2.5 py-1.5 text-xs text-ink-primary outline-none focus:border-accent disabled:opacity-50"
-      >
-        <option value="">Select chapter…</option>
-        <option value="new">✏️ New draft (paste text)</option>
-        {selectedBook?.chapters.map((c) => (
-          <option key={c.chapter} value={c.chapter}>
-            {c.kind === "prologue" ? "Prologue" : `Chapter ${c.chapter}`}
-            {c.pov ? ` — ${c.pov}` : ""}
-          </option>
-        ))}
-      </select>
-      <div className="flex gap-1">
-        {FOCUSES.map((f) => (
-          <button
-            key={f}
-            onClick={() => setFocus(f)}
-            className={clsx(
-              "rounded-full border px-2.5 py-1 text-[11px] transition-colors",
-              focus === f
-                ? "border-accent bg-accent/10 text-accent"
-                : "border-surface-border text-ink-secondary hover:text-ink-primary",
-            )}
-          >
-            {f}
-          </button>
-        ))}
-      </div>
-      <span className="flex-1" />
-      {preview && (
-        <button
-          onClick={() => setShowPreview((v) => !v)}
-          className={clsx(
-            "flex items-center gap-1 rounded-md px-2 py-1 text-[11px]",
-            showPreview ? "text-accent" : "text-ink-secondary hover:text-ink-primary",
-          )}
-        >
-          <Eye className="h-3.5 w-3.5" strokeWidth={1.5} /> Preview
-        </button>
-      )}
-      <Button variant="secondary" onClick={startResync} disabled={book == null || resyncBusy} className="!px-3 !py-1">
-        {resyncBusy ? <Spinner className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />}
-        Resync
-      </Button>
-      <Button
-        onClick={() => runReview("")}
-        disabled={streaming || book == null || chapter == null}
-        className="!px-3 !py-1"
-      >
-        <ScanText className="h-3.5 w-3.5" strokeWidth={1.5} /> Review
-      </Button>
-    </div>
-  );
-
   return (
     <div className="flex h-full">
-      <div className="flex min-w-0 flex-1 flex-col">
-        {select}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <PaneHeader
+          icon={FileScan}
+          title="Review"
+          info="Pick a synced chapter (or paste a fresh draft) and get feedback through a chosen lens, grounded in your series canon with citations."
+          subtitle="AI feedback on your writing, grounded in your series canon"
+        />
+
+        {/* controls row */}
+        <div className="flex flex-shrink-0 flex-wrap items-center gap-2 px-6 pb-3">
+          <Dropdown
+            label="Select book…"
+            value={book}
+            onChange={(v) => {
+              setBook(v);
+              setChapter("");
+              setMessages([]);
+            }}
+            options={[
+              { value: "", label: "Select book…" },
+              ...books.map((b) => ({ value: String(b.id), label: b.name })),
+            ]}
+            accentClass={book ? "border-accent/60 text-accent" : undefined}
+          />
+          <Dropdown
+            label="Focus"
+            value={focus}
+            onChange={(v) => setFocus(v as ReviewFocus)}
+            options={FOCUSES.map((f) => ({ value: f.value, label: f.value }))}
+            accentClass={focusOpt.accent}
+          />
+          <Dropdown
+            label="Select chapter…"
+            value={chapter}
+            onChange={(v) => {
+              setChapter(v);
+              setMessages([]);
+            }}
+            options={[
+              { value: "", label: "Select chapter…" },
+              { value: "new", label: "✏️ New draft (paste text)" },
+              ...(selectedBook?.chapters ?? []).map((c) => ({
+                value: String(c.chapter),
+                label: `${c.kind === "prologue" ? "Prologue" : `Chapter ${c.chapter}`}${c.pov ? ` — ${c.pov}` : ""}`,
+              })),
+            ]}
+          />
+          {preview && (
+            <button
+              onClick={() => setShowPreview((v) => !v)}
+              className={clsx(
+                "flex items-center gap-1 rounded px-2 py-1 text-[11px] transition-colors",
+                showPreview ? "text-accent" : "text-ink-secondary hover:text-ink-primary",
+              )}
+            >
+              <Eye className="h-3.5 w-3.5" strokeWidth={1.5} /> Preview
+            </button>
+          )}
+          <span className="flex-1" />
+          <button
+            onClick={() => runReview("")}
+            disabled={streaming || !book || !chapter}
+            className="rounded border border-surface-border px-3 py-1 text-[11px] text-ink-secondary transition-colors hover:border-accent hover:text-ink-primary disabled:pointer-events-none disabled:opacity-40"
+          >
+            Review
+          </button>
+          <button
+            onClick={startResync}
+            disabled={resyncBusy}
+            className="flex items-center gap-1.5 rounded border border-surface-border px-3 py-1 text-[11px] text-ink-secondary transition-colors hover:border-accent hover:text-ink-primary disabled:opacity-40"
+          >
+            {resyncBusy && <Spinner className="h-3 w-3" />} Resync
+          </button>
+        </div>
+
         {chapter === "new" && (
-          <div className="border-b border-surface-border px-6 py-3">
+          <div className="flex-shrink-0 px-6 pb-3">
             <textarea
               value={draftText}
               onChange={(e) => setDraftText(e.target.value)}
@@ -167,26 +157,37 @@ export function ReviewPane() {
             />
           </div>
         )}
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {messages.length === 0 ? (
-            <EmptyState
-              icon={<ScanText className="h-10 w-10" strokeWidth={1} />}
-              title={book == null ? "Select a chapter to begin" : "Ready to review"}
-              hint={`Focus lens: ${focus}. The review is grounded in the rest of the series, with citations.`}
-            />
-          ) : (
-            <MessageThread
-              messages={messages}
-              activeCitation={viewChunk}
-              onCitation={(c: Citation) => setViewChunk(c.chunk_id)}
-            />
-          )}
+
+        {/* content card */}
+        <div className="mx-6 mb-4 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-surface-border">
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            {messages.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-3 p-10 text-center">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-accent-subtle">
+                  <ScanText className="h-5 w-5 text-accent" strokeWidth={1.5} />
+                </div>
+                <div className="text-sm font-semibold text-ink-primary">
+                  {!book || !chapter ? "Select a chapter to begin" : "Ready to review"}
+                </div>
+                <div className="max-w-xs text-xs leading-relaxed text-ink-secondary">
+                  Choose a book, focus, and chapter above, then ask for feedback.
+                </div>
+              </div>
+            ) : (
+              <MessageThread
+                messages={messages}
+                activeCitation={viewChunk}
+                onCitation={(c: Citation) => setViewChunk(c.chunk_id)}
+              />
+            )}
+          </div>
+          <ChatInput
+            onSend={runReview}
+            disabled={streaming}
+            placeholder="Select or paste a chapter to review…"
+            hintRight="Sonnet 4.6"
+          />
         </div>
-        <ChatInput
-          onSend={runReview}
-          disabled={streaming}
-          placeholder={`Ask a ${focus.toLowerCase()} question about this chapter…`}
-        />
       </div>
 
       {showPreview && preview && !viewChunk && (
@@ -210,16 +211,18 @@ export function ReviewPane() {
         <ConfirmModal
           title="Re-ingest this book?"
           body={
-            <>
-              <p>
-                {resync.changed_chunks} chunk(s) have changed since the last sync. Estimated extraction
-                cost: <span className="font-semibold text-ink-primary">${resync.estimated_cost_usd}</span>.
-              </p>
-              <p className="mt-2">The run happens in the background; nothing under your writing folder is modified.</p>
-            </>
+            <p>
+              {resync.changed_chunks} chunk(s) changed since the last sync. Estimated extraction cost:{" "}
+              <span className="font-semibold text-ink-primary">${resync.estimated_cost_usd}</span>. Runs in
+              the background; your manuscript files stay read-only.
+            </p>
           }
           confirmLabel={`Spend ~$${resync.estimated_cost_usd}`}
-          onConfirm={confirmResync}
+          onConfirm={async () => {
+            await api(`/api/ingest/run?book=${bookId}`, { method: "POST" }).catch((e) => toast(String(e), "error"));
+            toast("Re-ingestion started — see Books for progress", "success");
+            setResync(null);
+          }}
           onClose={() => setResync(null)}
         />
       )}

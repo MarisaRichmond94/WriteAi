@@ -86,6 +86,7 @@ export interface TimelineEvent {
   participants: string[];
   knowledge_impact: { character: string; learns: string }[];
   source_chunk_ids: string[];
+  setups: string[];
 }
 
 export interface OutlineChapter {

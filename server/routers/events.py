@@ -40,13 +40,22 @@ def list_events(book: int | None = None, participant: str | None = None,
         participants = json.loads(r[10] or "[]")
         if participant and participant not in participants:
             continue
+        sources = json.loads(r[12] or "[]")
+        # foreshadowing notes from the event's source chunks -> "sets up" hints
+        setups: list[str] = []
+        for cid in sources[:3]:
+            row = s.db.execute("SELECT metadata_json FROM chunks WHERE chunk_id = ?",
+                               (cid,)).fetchone()
+            if row and row[0]:
+                setups.extend(json.loads(row[0]).get("foreshadowing", [])[:2])
         events.append({
             "id": r[0], "book_number": r[1], "chapter_number": r[2],
             "position": r[3], "title": r[4], "type": r[5], "granularity": r[6],
             "date": r[7], "summary": r[8], "location": r[9],
             "participants": participants,
             "knowledge_impact": json.loads(r[11] or "[]"),
-            "source_chunk_ids": json.loads(r[12] or "[]"),
+            "source_chunk_ids": sources,
+            "setups": setups[:3],
         })
     return {"events": events, "enriched": bool(rows) or None}
 

@@ -34,6 +34,20 @@ export const EVENT_TYPE_COLORS: Record<string, string> = {
   other: "bg-slate-400/15 text-slate-300 border-slate-400/30",
 };
 
+// hex versions for SVG fills
+export const EVENT_DOT_HEX: Record<string, string> = {
+  discovery: "#60a5fa",
+  confrontation: "#fb7185",
+  revelation: "#a78bfa",
+  death: "#a1a1aa",
+  relationship: "#f472b6",
+  journey: "#22d3ee",
+  decision: "#fbbf24",
+  loss: "#818cf8",
+  victory: "#34d399",
+  other: "#94a3b8",
+};
+
 export const EVENT_DOT_COLORS: Record<string, string> = {
   discovery: "bg-blue-400",
   confrontation: "bg-rose-400",
