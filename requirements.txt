@@ -6,9 +6,10 @@
 anthropic>=0.40
 
 # Phase 4+ — vector store and embeddings
-# chromadb>=0.5
-# sentence-transformers>=3.0   # only if EMBEDDING_PROVIDER=local
-# openai>=1.40                 # only if EMBEDDING_PROVIDER=openai
+chromadb>=0.5
+sentence-transformers>=3.0     # only needed if EMBEDDING_PROVIDER=local
+einops>=0.8                    # required by the nomic embedding models
+# openai>=1.40                 # only needed if EMBEDDING_PROVIDER=openai
 
 # Phase 7 — settings TUI
 # questionary>=2.0

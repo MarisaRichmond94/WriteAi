@@ -180,6 +180,15 @@ class MetadataExtractor:
         results: list[dict | None] = []
         for batch in _batches(chunks):
             results.extend(self._extract_batch(batch))
+
+        # Second pass: in large batches the model occasionally skips a chunk
+        # entirely. Retry any misses one at a time — a single-chunk request
+        # is trivially reliable, and misses are rare so this stays cheap.
+        missing = [i for i, r in enumerate(results) if r is None]
+        if missing:
+            log.info("retrying %d missed chunk(s) individually", len(missing))
+            for i in missing:
+                results[i] = self._extract_batch([chunks[i]], depth=3)[0]
         return results
 
     # ── internals ───────────────────────────────────────────────────────────
