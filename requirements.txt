@@ -11,8 +11,8 @@ sentence-transformers>=3.0     # only needed if EMBEDDING_PROVIDER=local
 einops>=0.8                    # required by the nomic embedding models
 # openai>=1.40                 # only needed if EMBEDDING_PROVIDER=openai
 
-# Phase 7 — settings TUI
-# questionary>=2.0
+# Settings TUI
+questionary>=2.0
 
 # Optional: PDF text extraction fallback (.pdf sources or .pages QuickLook previews)
 # pypdf>=4.0

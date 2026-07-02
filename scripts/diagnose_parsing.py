@@ -1,10 +1,10 @@
-"""Phase 2 smoke test: parser + chunker on a single book / single chapter.
+"""Diagnostic: parser + chunker on a single book / single chapter.
 
 Usage:
-    python smoke_phase2.py "~/Writing/2. Faded/Faded.pages" --book-number 2
-    python smoke_phase2.py <book file> --chapter 1        # which chapter to chunk
-    python smoke_phase2.py <book file> --probe            # also force-test each
-                                                          # conversion method
+    python scripts/diagnose_parsing.py "~/Writing/2. Faded/Faded.pages"
+    python scripts/diagnose_parsing.py <book file> --chapter 3
+    python scripts/diagnose_parsing.py <book file> --probe   # force-test each
+                                                             # conversion method
 Reads only. Writes only under DATA_DIR (cache + transient staging).
 """
 
@@ -14,6 +14,8 @@ import argparse
 import sys
 from collections import Counter
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))  # repo root
 
 from config import load_config
 from src.parser import extract_text
