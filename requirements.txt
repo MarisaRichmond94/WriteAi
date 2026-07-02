@@ -1,0 +1,17 @@
+# Phases 2-3 (parser, chunker, extractor) run on the standard library alone.
+# Dependencies below are introduced by later phases; install with:
+#   pip install -r requirements.txt
+
+# Phase 3+ — LLM metadata extraction and query answering
+anthropic>=0.40
+
+# Phase 4+ — vector store and embeddings
+# chromadb>=0.5
+# sentence-transformers>=3.0   # only if EMBEDDING_PROVIDER=local
+# openai>=1.40                 # only if EMBEDDING_PROVIDER=openai
+
+# Phase 7 — settings TUI
+# questionary>=2.0
+
+# Optional: PDF text extraction fallback (.pdf sources or .pages QuickLook previews)
+# pypdf>=4.0

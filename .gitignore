@@ -1,0 +1,13 @@
+# Local configuration (contains API keys and machine-specific paths)
+.env
+
+# All generated data: ChromaDB, SQLite, staging copies, extracted text cache
+data/
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
