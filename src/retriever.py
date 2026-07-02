@@ -102,9 +102,16 @@ class Retriever:
         for h in hits:
             if not _within_scope(h["metadata"], plan.scope):
                 continue
+            m = h["metadata"]
             excerpts.append({"chunk_id": h["chunk_id"],
-                             "header": _header(h["metadata"]),
-                             "text": h["text"]})
+                             "header": _header(m),
+                             "text": h["text"],
+                             # extra fields for UI citations (answerer ignores)
+                             "book_number": m.get("book_number"),
+                             "book_title": m.get("book_title"),
+                             "chapter_number": m.get("chapter_number"),
+                             "pov_character": m.get("pov_character"),
+                             "distance": h.get("distance")})
             if len(excerpts) >= top_k:
                 break
         return excerpts

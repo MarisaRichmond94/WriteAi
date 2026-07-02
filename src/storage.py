@@ -95,7 +95,9 @@ class SeriesStore:
             name=slugify(cfg.series_name),
             metadata={"hnsw:space": "cosine"},
         )
-        self.db = sqlite3.connect(cfg.sqlite_path)
+        # check_same_thread=False lets the web server's worker threads share
+        # this connection; SQLite itself runs in serialized mode.
+        self.db = sqlite3.connect(cfg.sqlite_path, check_same_thread=False)
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.executescript(_SCHEMA)
         self.db.commit()

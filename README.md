@@ -107,6 +107,39 @@ Tips:
 - A chunk whose metadata extraction failed is retried automatically on the
   next run.
 
+## Web UI
+
+A local web app ("The Archive") sits on top of the same stores:
+
+```sh
+cd frontend && npm install && npm run build && cd ..   # once
+.venv/bin/uvicorn server.main:app --port 8000
+# open http://localhost:8000
+```
+
+Pages: **Explore** (streaming chat with citations you can open to the exact
+passage), **Review** (chapter feedback with focus lenses: Rough Draft /
+Continuity / Character Voice / Line Edit / Pacing), **Timeline** (curated
+events from the enrichment pass), **Plan** (your chapter outline + character
+intent, kept separate from AI-extracted data, with sync-diff and compare),
+**Books** (per-book stats, sync + enrichment controls), **Characters**
+(canonicalized cast with relationships, knowledge, arcs, and merge/rename/
+hide corrections), **Settings**.
+
+Two data disciplines the UI enforces:
+
+- **Prose grounding.** Character names that never appear in your actual prose
+  (occasionally invented by extraction) are remapped to the real character
+  when unambiguous, otherwise quarantined for your review — heuristics never
+  guess. Your merge/rename/hide decisions live in `writer_data/` (untracked;
+  add it to your backups) and are keyed by name, so they survive every
+  re-index and apply to future books automatically.
+- **Cost gates.** Any button that would spend API money (Sync, Resync,
+  Enrich) shows a dry-run plan and dollar estimate first.
+
+For frontend development: `cd frontend && npm run dev` (Vite on :5173,
+proxying to the API on :8000).
+
 ## Asking questions
 
 ```sh

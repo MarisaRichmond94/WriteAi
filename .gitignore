@@ -4,6 +4,14 @@
 # All generated data: ChromaDB, SQLite, staging copies, extracted text cache
 data/
 
+# Writer-authored data (plan outlines, character intent, merge decisions).
+# Deliberately untracked — include this directory in your backup routine.
+writer_data/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
 # Logs
 logs/
 

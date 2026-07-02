@@ -14,5 +14,9 @@ einops>=0.8                    # required by the nomic embedding models
 # Settings TUI
 questionary>=2.0
 
+# Web UI backend (frontend lives in frontend/, built with npm)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+
 # Optional: PDF text extraction fallback (.pdf sources or .pages QuickLook previews)
 # pypdf>=4.0

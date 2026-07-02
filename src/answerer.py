@@ -36,7 +36,12 @@ class Answerer:
         return round((self.usage["input_tokens"] * in_p
                       + self.usage["output_tokens"] * out_p) / 1_000_000, 4)
 
-    def answer(self, plan: QueryPlan, excerpts: list[dict], notes: list[str]) -> str:
+    def build_request(self, plan: QueryPlan, excerpts: list[dict],
+                      notes: list[str],
+                      history: list[dict] | None = None,
+                      system_extra: str = "") -> dict:
+        """Assemble the messages.create kwargs. Shared by the blocking
+        answer() path and the server's SSE streaming path."""
         parts: list[str] = []
 
         if notes:
@@ -60,18 +65,32 @@ class Answerer:
         # Continuity reports and exports run long; 12K keeps them un-truncated
         # while staying inside non-streaming HTTP-timeout territory.
         max_tokens = 12000 if plan.qtype in ("continuity", "general") else 6000
+        messages = list(history or [])
+        messages.append({"role": "user", "content": "\n".join(parts)})
+        system = SYSTEM_PROMPT + (f"\n\n{system_extra}" if system_extra else "")
+        return {"model": self.model, "max_tokens": max_tokens,
+                "system": system, "messages": messages}
+
+    def answer(self, plan: QueryPlan, excerpts: list[dict], notes: list[str]) -> str:
         response = self.client.messages.create(
-            model=self.model,
-            max_tokens=max_tokens,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": "\n".join(parts)}],
-        )
+            **self.build_request(plan, excerpts, notes))
         self.usage["input_tokens"] += response.usage.input_tokens
         self.usage["output_tokens"] += response.usage.output_tokens
 
         if response.stop_reason == "refusal":
             return "(the model declined to answer this question)"
         return next((b.text for b in response.content if b.type == "text"), "")
+
+    def answer_stream(self, plan: QueryPlan, excerpts: list[dict],
+                      notes: list[str], history: list[dict] | None = None,
+                      system_extra: str = ""):
+        """Generator of text deltas; records usage when the stream ends."""
+        request = self.build_request(plan, excerpts, notes, history, system_extra)
+        with self.client.messages.stream(**request) as stream:
+            yield from stream.text_stream
+            final = stream.get_final_message()
+        self.usage["input_tokens"] += final.usage.input_tokens
+        self.usage["output_tokens"] += final.usage.output_tokens
 
     # ── export modes ────────────────────────────────────────────────────────
 

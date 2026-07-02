@@ -1,0 +1,86 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #2a2d3a #0f1117;
+  }
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  *::-webkit-scrollbar-track {
+    background: #0f1117;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: #2a2d3a;
+    border-radius: 3px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: #3a3d4a;
+  }
+  button,
+  a,
+  [role="button"] {
+    cursor: pointer;
+  }
+}
+
+@layer utilities {
+  .prose-dark {
+    color: #e8eaf0;
+    line-height: 1.65;
+    font-size: 0.875rem;
+  }
+  .prose-dark h1,
+  .prose-dark h2,
+  .prose-dark h3 {
+    color: #e8eaf0;
+    font-weight: 600;
+    margin: 0.9em 0 0.45em;
+  }
+  .prose-dark h1 { font-size: 1.15rem; }
+  .prose-dark h2 { font-size: 1.05rem; }
+  .prose-dark h3 { font-size: 0.95rem; }
+  .prose-dark p { margin: 0.5em 0; }
+  .prose-dark ul,
+  .prose-dark ol {
+    margin: 0.5em 0;
+    padding-left: 1.25em;
+    list-style: disc;
+  }
+  .prose-dark ol { list-style: decimal; }
+  .prose-dark li { margin: 0.2em 0; }
+  .prose-dark strong { color: #e8eaf0; font-weight: 600; }
+  .prose-dark code {
+    background: #1a1d27;
+    border: 1px solid #2a2d3a;
+    color: #7c6af7;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 0.8em;
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+  }
+  .prose-dark blockquote {
+    border-left: 3px solid #7c6af7;
+    color: #9da3b4;
+    padding-left: 0.75em;
+    margin: 0.6em 0;
+  }
+  .prose-dark hr {
+    border-color: #2a2d3a;
+    margin: 1em 0;
+  }
+  .prose-dark table {
+    font-size: 0.8rem;
+    border-collapse: collapse;
+    margin: 0.6em 0;
+  }
+  .prose-dark th,
+  .prose-dark td {
+    border: 1px solid #2a2d3a;
+    padding: 0.3em 0.6em;
+  }
+}
