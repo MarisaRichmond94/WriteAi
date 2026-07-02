@@ -1,11 +1,11 @@
 import { useState } from "react";
-import { Library, RefreshCw, Info, BookOpen, ChevronRight } from "lucide-react";
+import { Library, RefreshCw, Info, BookOpen, ChevronRight, FileDown } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import IndexStatusBar from "../sidebar/IndexStatusBar";
 import ConfirmModal from "../ui/ConfirmModal";
 import BookDrawer from "./BookDrawer";
-import { triggerRebuild } from "../../api/books";
+import { triggerRebuild, downloadStoryBible } from "../../api/books";
 
 function BookListSkeleton() {
   return (
@@ -126,6 +126,19 @@ export default function StatusPane() {
                           </span>
                         )}
                         <span className="flex-1" />
+                        <span
+                          role="button"
+                          title="Export story bible (.md)"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            showToast(`Exporting story bible for ${book.name}…`);
+                            downloadStoryBible(book.id)
+                              .catch(() => showToast("Failed to export story bible."));
+                          }}
+                          className="mr-1 flex-shrink-0 p-1 rounded text-ink-muted hover:text-accent hover:bg-surface-hover transition-colors"
+                        >
+                          <FileDown className="h-3.5 w-3.5" />
+                        </span>
                         <ChevronRight className="h-3.5 w-3.5 text-ink-muted" />
                       </button>
                     </div>

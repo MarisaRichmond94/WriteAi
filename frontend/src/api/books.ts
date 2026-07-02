@@ -64,6 +64,21 @@ async function bookNumber(bookId: string): Promise<number> {
   return match.id;
 }
 
+export async function downloadStoryBible(bookId: string | number): Promise<void> {
+  const n = typeof bookId === "number" ? bookId : await bookNumber(bookId);
+  const res = await fetch(`/api/books/${n}/bible`);
+  if (!res.ok) throw new Error(`Failed to export story bible: ${res.statusText}`);
+  const blob = await res.blob();
+  const cd = res.headers.get("Content-Disposition") ?? "";
+  const filename = /filename="?([^";]+)"?/.exec(cd)?.[1] ?? `story-bible-book-${n}.md`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export async function triggerRebuild(): Promise<void> {
   const res = await fetch("/api/ingest/run", { method: "POST" });
   if (!res.ok) throw new Error(`Failed to trigger rebuild: ${res.statusText}`);
