@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -111,13 +112,20 @@ def _entity_summary(s, canon, entity, cmap: dict) -> dict:
     }
 
 
+def _loose(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
 def _resolve_book(s, book: str | None) -> int | None:
+    """Accept a book number, exact title, or UI slug ("the-secrets-we-keep");
+    matching is punctuation-insensitive, mirroring the frontend's looseKey."""
     if not book:
         return None
     if book.isdigit():
         return int(book)
+    key = _loose(book)
     for num, title in _titles(s).items():
-        if title.lower() == book.lower():
+        if _loose(title) == key:
             return num
     return None
 

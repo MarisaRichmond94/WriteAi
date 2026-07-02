@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 
 from fastapi import APIRouter, HTTPException
@@ -31,8 +32,10 @@ def list_events(book: str | None = None, pov: str | None = None,
     titles = _titles(s)
     book_num = None
     if book:
+        # number, exact title, or UI slug — punctuation-insensitive
+        loose = lambda x: re.sub(r"[^a-z0-9]", "", x.lower())
         book_num = int(book) if book.isdigit() else next(
-            (n for n, t in titles.items() if t.lower() == book.lower()), None)
+            (n for n, t in titles.items() if loose(t) == loose(book)), None)
 
     clauses, params = [], []
     if book_num is not None:
