@@ -132,7 +132,7 @@ def _resolve_book(s, book: str | None) -> int | None:
 
 @router.get("/characters")
 def list_characters(book: str | None = None, raw: bool = False,
-                    include_hidden: bool = False, min_chunks: int = 3):
+                    include_hidden: bool = False, min_chunks: int = 1):
     s = get_state()
     cmap = _cmap()
     canon = s.canon
