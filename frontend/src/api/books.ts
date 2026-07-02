@@ -50,14 +50,18 @@ export async function fetchIndexStatus(): Promise<IndexStatus> {
   };
 }
 
-async function bookNumber(bookId: string): Promise<number | null> {
+function looseKey(s: string): string {
+  // punctuation-insensitive: "Nobody's Hero", "nobodys-hero", and
+  // "nobody-s-hero" all reduce to "nobodyshero"
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+async function bookNumber(bookId: string): Promise<number> {
   if (/^\d+$/.test(bookId)) return Number(bookId);
   const data = await ourBooks();
-  const match = data.books.find(
-    (b) => b.name.toLowerCase() === bookId.toLowerCase()
-      || b.name.toLowerCase().replace(/[^a-z0-9]+/g, "-") === bookId.toLowerCase(),
-  );
-  return match ? match.id : null;
+  const match = data.books.find((b) => looseKey(b.name) === looseKey(bookId));
+  if (!match) throw new Error(`Unknown book: ${bookId}`);
+  return match.id;
 }
 
 export async function triggerRebuild(): Promise<void> {
