@@ -56,10 +56,46 @@ def file_sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+_FOOTNOTE_ANCHOR = "￼"  # object-replacement char: footnote/image anchors
+
+
+def _strip_footnote_dump(text: str) -> str:
+    """Pages' 'unformatted text' export appends every footnote body to the
+    END of the document, each prefixed with U+FFFC. Left in place, that
+    grab-bag becomes a chunk that vaguely matches every query. Strip it:
+    walk paragraphs backwards while they start with the anchor; if the
+    boundary paragraph has prose glued before its first anchor, keep the
+    prose. Only acts on a document TAIL (never mid-book content)."""
+    if _FOOTNOTE_ANCHOR not in text:
+        return text
+    paragraphs = text.split("\n")
+    cut = len(paragraphs)
+    for i in range(len(paragraphs) - 1, -1, -1):
+        p = paragraphs[i].strip()
+        if not p:
+            cut = i
+            continue
+        if p.startswith(_FOOTNOTE_ANCHOR):
+            cut = i
+            continue
+        if _FOOTNOTE_ANCHOR in p:
+            # last prose paragraph with the first footnote glued on its end
+            paragraphs[i] = paragraphs[i].split(_FOOTNOTE_ANCHOR, 1)[0].rstrip()
+            cut = i + 1
+        break
+    dropped = len(paragraphs) - cut
+    if dropped:
+        log.info("stripped %d trailing footnote paragraph(s)", dropped)
+    # remove any remaining inline anchors (harmless placeholder glyphs)
+    return "\n".join(paragraphs[:cut]).replace(_FOOTNOTE_ANCHOR, "")
+
+
 def _normalize(text: str) -> str:
-    """Unify line endings and strip trailing whitespace per line."""
+    """Unify line endings, strip per-line trailing whitespace, and remove
+    the trailing footnote dump that Pages exports append."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return "\n".join(line.rstrip() for line in text.split("\n"))
+    text = "\n".join(line.rstrip() for line in text.split("\n"))
+    return _strip_footnote_dump(text)
 
 
 def _stage_copy(source: Path, staging_dir: Path) -> Path:
@@ -239,10 +275,11 @@ def extract_text(source: Path, cfg, force_method: str | None = None) -> tuple[st
         log.info("extracted %s via %s (%d words)", source.name, method, len(text.split()))
         return text, method
 
-    # 1. content-hash cache
+    # 1. content-hash cache (re-normalized so normalization improvements
+    #    apply to entries written by older versions of this code)
     if force_method in (None, "cache") and cache_file.exists():
         log.info("extracted-text cache hit for %s", source.name)
-        return cache_file.read_text(encoding="utf-8"), "cache"
+        return _normalize(cache_file.read_text(encoding="utf-8")), "cache"
     if force_method == "cache":
         return None, "failed"
 
