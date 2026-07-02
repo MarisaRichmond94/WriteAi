@@ -3,15 +3,20 @@
 Per book: extract text (read-only, staged copies) -> segment/chunk ->
 LLM metadata -> embeddings -> upsert into ChromaDB + SQLite.
 
-Phase 4 ingests whole books; Phase 5 layers hash-based change detection on
-top so nightly runs only touch new/changed chunks.
+Change detection: every chunk's raw text is SHA-256 hashed and recorded in
+{DATA_DIR}/chunk_hashes.json after a successful ingest. On the next run,
+only chunks whose hash is new or different are re-extracted and re-embedded;
+chunks that disappeared are deleted from both stores. A chunk whose metadata
+extraction failed is deliberately NOT recorded, so the next run retries it.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import shutil
+from dataclasses import dataclass, field
 
 from .chunker import Chunk, chunk_book
 from .discovery import Book
@@ -60,15 +65,66 @@ def ingest_chunks(cfg, chunks: list[Chunk], extractor: MetadataExtractor,
     ]
     store.upsert_chunks(records)
 
-    failed = sum(1 for m in metadata_list if m is None)
+    failed_ids = [c.chunk_id for c, m in zip(chunks, metadata_list) if m is None]
     return {
         "chunks": len(chunks),
-        "metadata_failed": failed,
+        "metadata_failed": len(failed_ids),
+        "failed_chunk_ids": failed_ids,
         "api_calls": extractor.usage["api_calls"],
         "input_tokens": extractor.usage["input_tokens"],
         "output_tokens": extractor.usage["output_tokens"],
         "actual_cost_usd": extractor.actual_cost_usd,
     }
+
+
+def load_hash_index(cfg) -> dict[str, str]:
+    """chunk_id -> sha256 of the chunk text, as of the last successful ingest."""
+    if cfg.chunk_hashes_path.exists():
+        try:
+            return json.loads(cfg.chunk_hashes_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            log.warning("chunk_hashes.json is corrupt — treating everything as new")
+    return {}
+
+
+def save_hash_index(cfg, index: dict[str, str]) -> None:
+    cfg.ensure_data_dirs()
+    cfg.chunk_hashes_path.write_text(
+        json.dumps(index, indent=1, sort_keys=True), encoding="utf-8"
+    )
+
+
+@dataclass
+class BookDiff:
+    """What changed in one book since the last ingest."""
+    new: list[Chunk] = field(default_factory=list)
+    updated: list[Chunk] = field(default_factory=list)
+    unchanged: list[Chunk] = field(default_factory=list)
+    deleted_ids: list[str] = field(default_factory=list)
+
+    @property
+    def changed(self) -> list[Chunk]:
+        return self.new + self.updated
+
+
+def diff_chunks(chunks: list[Chunk], index: dict[str, str],
+                book_number: int) -> BookDiff:
+    """Classify a book's current chunks against the stored hash index."""
+    diff = BookDiff()
+    current_ids = set()
+    for c in chunks:
+        current_ids.add(c.chunk_id)
+        stored = index.get(c.chunk_id)
+        if stored is None:
+            diff.new.append(c)
+        elif stored != chunk_text_hash(c):
+            diff.updated.append(c)
+        else:
+            diff.unchanged.append(c)
+    prefix = f"b{book_number:02d}."
+    diff.deleted_ids = [cid for cid in index
+                        if cid.startswith(prefix) and cid not in current_ids]
+    return diff
 
 
 def clear_staging(cfg) -> None:

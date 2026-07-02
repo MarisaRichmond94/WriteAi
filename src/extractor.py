@@ -106,8 +106,11 @@ OUTPUT_SCHEMA = {
 
 def estimate_extraction_cost(chunks: list[Chunk], model: str) -> dict:
     """Rough token + dollar estimate for extracting metadata for `chunks`."""
+    if not chunks:
+        return {"model": model, "chunks": 0, "estimated_input_tokens": 0,
+                "estimated_output_tokens": 0, "estimated_cost_usd": 0.0}
     total_words = sum(c.word_count for c in chunks)
-    n_batches = max(1, -(-len(chunks) // MAX_BATCH_CHUNKS))
+    n_batches = -(-len(chunks) // MAX_BATCH_CHUNKS)
     input_tokens = int(total_words * TOKENS_PER_WORD) + n_batches * 700  # + system prompt
     output_tokens = len(chunks) * EST_OUTPUT_TOKENS_PER_CHUNK
     in_price, out_price = PRICING_PER_MTOK.get(model, (1.00, 5.00))
