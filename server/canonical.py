@@ -283,6 +283,11 @@ class Canonicalizer:
             name = next((c for c in candidates if "'s " not in c and grounded(c)), None)
             if name is None and "'s " in candidates[0]:
                 name = candidates[0]              # relational descriptor
+            # the user's map applies to normalized names too, so variants
+            # that RESOLVE to a mapped name ("Brianna (Bri)" -> "Bri")
+            # follow the same merge as the name itself
+            if name is not None and name in user_map:
+                name = user_map[name]
             if name is not None:
                 normalized[name] |= cids
                 variant_working[variant] = name
@@ -338,13 +343,15 @@ class Canonicalizer:
             first = variant.split()[0].strip("'s")
             heads = head_by_first.get(first, [])
             if len(heads) == 1:
-                normalized[heads[0]] |= cids
-                variant_working[variant] = heads[0]
-                entity_of.setdefault(heads[0], heads[0])
-                log.debug("remapped ungrounded %r -> %r", variant, heads[0])
+                target = user_map.get(heads[0], heads[0])
+                normalized[target] |= cids
+                variant_working[variant] = target
+                entity_of.setdefault(target, target)
+                log.debug("remapped ungrounded %r -> %r", variant, target)
             elif first in entity_of:              # matches a single-token entity
-                normalized[first] |= cids
-                variant_working[variant] = first
+                target = user_map.get(first, first)
+                normalized[target] |= cids
+                variant_working[variant] = target
             else:
                 self.quarantined.append({
                     "name": variant,
@@ -378,6 +385,16 @@ class Canonicalizer:
         # every raw variant resolves through its working name
         for variant, working in variant_working.items():
             self.variant_to_entity[variant] = entity_of.get(working, working)
+
+        # user-merged variants become visible aliases of their target
+        # ("Bri" -> "Brielle Draper" shows as: Brielle Draper, aka Bri) —
+        # but junk phrases assigned to a character don't become alias pills
+        for variant, target in user_map.items():
+            e = groups.get(target)
+            if (e is not None and variant != target
+                    and variant not in e.aliases
+                    and "'s " not in variant and not _is_generic(variant)):
+                e.aliases.append(variant)
 
         for e in groups.values():
             names = {e.name, *e.aliases}
