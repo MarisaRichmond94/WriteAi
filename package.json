@@ -1,0 +1,15 @@
+{
+  "name": "writeai",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c blue,magenta \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": ".venv/bin/uvicorn server.main:app --port 8000 --reload --reload-dir server --reload-dir src",
+    "dev:web": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "start": ".venv/bin/uvicorn server.main:app --port 8000"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}

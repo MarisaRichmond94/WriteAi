@@ -112,10 +112,14 @@ Tips:
 A local web app ("The Archive") sits on top of the same stores:
 
 ```sh
-cd frontend && npm install && npm run build && cd ..   # once
-.venv/bin/uvicorn server.main:app --port 8000
-# open http://localhost:8000
+npm install && npm install --prefix frontend   # once
+npm run dev                                    # -> open http://localhost:5173
 ```
+
+`npm run dev` starts the API (:8000, hot-reload) and the Vite dev server
+(:5173, proxying /api) together; Ctrl+C stops both. For a production-style
+single process: `npm run build` once, then `npm start` and open
+http://localhost:8000.
 
 Pages: **Explore** (streaming chat with citations you can open to the exact
 passage), **Review** (chapter feedback with focus lenses: Rough Draft /
