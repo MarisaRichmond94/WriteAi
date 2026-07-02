@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Settings as SettingsIcon } from "lucide-react";
 import { fetchBooks, fetchIndexStatus } from "../../api/books";
+import { fetchSessions } from "../../api/sessions";
 import { fetchSettings } from "../../api/settings";
 import { useAppStore } from "../../store/useAppStore";
 import { isMockMode, MOCK_BOOKS, MOCK_INDEX_STATUS, MOCK_APP_SETTINGS } from "../../mocks/mockData";
@@ -49,7 +50,7 @@ function WriterAvatar() {
 }
 
 export default function AppShell() {
-  const { setBooks, setBooksLoading, setIndexStatus, showToast, activePane, setActivePane, setAppSettings, appSettings } = useAppStore();
+  const { setBooks, setBooksLoading, setIndexStatus, showToast, activePane, setActivePane, setAppSettings, appSettings, setChatSessions, setReviewSessions } = useAppStore();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -82,6 +83,14 @@ export default function AppShell() {
         document.title = s.site_name;
       })
       .catch(() => {/* settings not critical — silent */});
+
+    // restore explore/review history from the server
+    fetchSessions()
+      .then(({ chat, review }) => {
+        setChatSessions(chat);
+        setReviewSessions(review);
+      })
+      .catch(() => {/* history not critical — silent */});
   }, []);
 
   return (

@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import type { BookResponse, ChatSession, Citation, IndexStatus, Message, QueryMode, ReviewSession } from "../types";
 import type { AppSettings } from "../types";
+import { persistSession, removeSession } from "../api/sessions";
+
+// server writes are best-effort: a failed save must never break the live UI
+const quiet = (p: Promise<void>) => { p.catch(() => {}); };
 
 function uuid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -47,6 +51,7 @@ interface AppState {
   liveChatSessionId: string | null;
   saveChatAndClear: () => void;
   upsertChatSession: (session: ChatSession) => void;
+  setChatSessions: (sessions: ChatSession[]) => void;
   setLiveChatSessionId: (id: string | null) => void;
   deleteChat: (id: string) => void;
   loadChat: (id: string) => void;
@@ -55,6 +60,7 @@ interface AppState {
   reviewSessions: ReviewSession[];
   viewingReviewSessionId: string | null;
   upsertReview: (session: ReviewSession) => void;
+  setReviewSessions: (sessions: ReviewSession[]) => void;
   deleteReview: (id: string) => void;
   loadReview: (id: string) => void;
   setViewingReviewSessionId: (id: string | null) => void;
@@ -189,22 +195,28 @@ export const useAppStore = create<AppState>((set) => ({
       liveChatSessionId: null,
     })),
 
-  upsertChatSession: (session: ChatSession) =>
+  upsertChatSession: (session: ChatSession) => {
+    quiet(persistSession("chat", session));
     set((state) => ({
       chatSessions: state.chatSessions.some((s) => s.id === session.id)
         ? state.chatSessions.map((s) => (s.id === session.id ? session : s))
         : [...state.chatSessions, session],
-    })),
+    }));
+  },
+
+  setChatSessions: (sessions: ChatSession[]) => set({ chatSessions: sessions }),
 
   setLiveChatSessionId: (id) => set({ liveChatSessionId: id }),
 
-  deleteChat: (id) =>
+  deleteChat: (id) => {
+    quiet(removeSession("chat", id));
     set((state) => ({
       chatSessions: state.chatSessions.filter((s) => s.id !== id),
       ...(state.viewingSessionId === id || state.liveChatSessionId === id
         ? { messages: [], viewingSessionId: null, liveChatSessionId: null }
         : {}),
-    })),
+    }));
+  },
 
   loadChat: (id) =>
     set((state) => {
@@ -221,17 +233,22 @@ export const useAppStore = create<AppState>((set) => ({
 
   reviewSessions: [],
   viewingReviewSessionId: null,
-  upsertReview: (session: ReviewSession) =>
+  upsertReview: (session: ReviewSession) => {
+    quiet(persistSession("review", session));
     set((state) => ({
       reviewSessions: state.reviewSessions.some((s) => s.id === session.id)
         ? state.reviewSessions.map((s) => (s.id === session.id ? session : s))
         : [...state.reviewSessions, session],
-    })),
-  deleteReview: (id) =>
+    }));
+  },
+  setReviewSessions: (sessions: ReviewSession[]) => set({ reviewSessions: sessions }),
+  deleteReview: (id) => {
+    quiet(removeSession("review", id));
     set((state) => ({
       reviewSessions: state.reviewSessions.filter((s) => s.id !== id),
       ...(state.viewingReviewSessionId === id ? { viewingReviewSessionId: null, clearReviewSignal: state.clearReviewSignal + 1 } : {}),
-    })),
+    }));
+  },
   loadReview: (id) => set({ viewingReviewSessionId: id }),
   setViewingReviewSessionId: (id) => set({ viewingReviewSessionId: id }),
   clearReviewSignal: 0,
