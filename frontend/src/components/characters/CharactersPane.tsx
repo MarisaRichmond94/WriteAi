@@ -881,10 +881,6 @@ export default function CharactersPane() {
   const [search, setSearch] = useState(
     () => new URLSearchParams(window.location.search).get("search") ?? ""
   );
-  // corrected / raw AI toggle (default: corrected = true)
-  const [showCorrected, setShowCorrected] = useState(
-    () => new URLSearchParams(window.location.search).get("corrected") !== "false"
-  );
   const [editingCharacter, setEditingCharacter] = useState<CharacterSummary | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -926,8 +922,8 @@ export default function CharactersPane() {
   }, []);
 
   useEffect(() => {
-    load(bookFilter, !showCorrected);
-  }, [bookFilter, load, showCorrected]);
+    load(bookFilter);
+  }, [bookFilter, load]);
 
   // Sync search to URL; clear on unmount (when user leaves the tab)
   useEffect(() => {
@@ -944,17 +940,6 @@ export default function CharactersPane() {
       history.replaceState(null, "", "?" + p.toString());
     };
   }, [search]);
-
-  // Sync corrected toggle to URL
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (!showCorrected) {
-      params.set("corrected", "false");
-    } else {
-      params.delete("corrected");
-    }
-    history.replaceState(null, "", "?" + params.toString());
-  }, [showCorrected]);
 
   const handleSelect = (id: string) => {
     if (activeId === id && panelOpen) {
@@ -1131,7 +1116,7 @@ export default function CharactersPane() {
         <div className="mt-3 border-t border-surface-border" />
       </div>
 
-      {/* Book filter tabs + Corrected/Raw AI toggle */}
+      {/* Book filter tabs */}
       <div className="flex-shrink-0 flex items-center gap-2 px-6 pt-1 pb-3">
         <div className="flex flex-1 items-center gap-1 overflow-x-auto scrollbar-hide">
           {[{ id: null, label: "All Books" }, ...bookOrder.map((b) => ({ id: bookId(b), label: b }))].map(
@@ -1163,24 +1148,6 @@ export default function CharactersPane() {
               );
             }
           )}
-        </div>
-        <div className="flex-shrink-0 flex items-center gap-1 bg-surface-card rounded-lg p-1">
-          <button
-            onClick={() => setShowCorrected(true)}
-            className={`px-3 py-1 rounded text-xs transition-colors ${
-              showCorrected ? 'bg-accent text-white' : 'text-ink-secondary hover:text-ink-primary'
-            }`}
-          >
-            Corrected
-          </button>
-          <button
-            onClick={() => setShowCorrected(false)}
-            className={`px-3 py-1 rounded text-xs transition-colors ${
-              !showCorrected ? 'bg-accent text-white' : 'text-ink-secondary hover:text-ink-primary'
-            }`}
-          >
-            Raw AI
-          </button>
         </div>
       </div>
 
@@ -1305,14 +1272,14 @@ export default function CharactersPane() {
                     active={char.id === activeId}
                     onSelect={handleSelect}
                     onRelationshipClick={handleRelationshipClick}
-                    onUploaded={() => load(bookFilter, !showCorrected)}
+                    onUploaded={() => load(bookFilter)}
                     onAliasClick={handleAliasClick}
                     photoMap={pm}
                     disabledIds={disabledIds}
                     hiddenIds={effectiveHiddenIds}
                     isHidden={hiddenIds.has(char.id)}
                     onToggleHidden={handleToggleHidden}
-                    onEdit={showCorrected ? () => setEditingCharacter(char) : undefined}
+                    onEdit={() => setEditingCharacter(char)}
                   />
                 </div>
               );
@@ -1351,7 +1318,7 @@ export default function CharactersPane() {
               bookFilter={bookFilter}
               onClose={handleClose}
               onRelationshipClick={handleRelationshipClick}
-              onUploaded={() => load(bookFilter, !showCorrected)}
+              onUploaded={() => load(bookFilter)}
               onAliasClick={handleAliasClick}
               onArcSourceClick={handleArcSourceClick}
               onKnowledgeSourceClick={handleKnowledgeSourceClick}
@@ -1401,7 +1368,7 @@ export default function CharactersPane() {
           allCharacters={characters}
           onClose={() => setEditingCharacter(null)}
           onSaved={() => {
-            load(bookFilter, !showCorrected);
+            load(bookFilter);
             // Re-open with fresh data if character is still selected
           }}
         />
