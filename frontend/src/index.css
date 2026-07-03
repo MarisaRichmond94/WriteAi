@@ -28,32 +28,6 @@
   color: rgb(var(--ink-primary));
 }
 
-/* Islands that keep the dark palette even inside .light-body — the pane
-   header strips and the Plan chapter-card chrome. Variables only (plus
-   text color): backgrounds come from the usual bg-surface* utilities,
-   which resolve dark again inside the island. No-op in dark mode. */
-.dark-zone {
-  --surface: 15 17 23;
-  --surface-card: 26 29 39;
-  --surface-hover: 33 37 58;
-  --surface-border: 42 45 58;
-  --accent-subtle: 42 37 80;
-  --ink-primary: 232 234 240;
-  --ink-secondary: 157 163 180;
-  --ink-muted: 92 98 122;
-  color: rgb(var(--ink-primary));
-}
-
-/* In light mode, editable text areas inside dark cards go white. */
-.light-body .editor-light {
-  background-color: #ffffff;
-  --ink-primary: 26 26 42;
-  --ink-secondary: 68 68 68;
-  --ink-muted: 136 136 136;
-  --surface-border: 221 216 204;
-  color: rgb(var(--ink-primary));
-}
-
 @layer base {
   * {
     scrollbar-width: thin;

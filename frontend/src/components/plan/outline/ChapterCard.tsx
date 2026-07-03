@@ -84,8 +84,7 @@ export default function ChapterCard({
   return (
       <div
         className={clsx(
-          // dark-zone: card chrome keeps the dark palette in light mode
-          "dark-zone group relative rounded-lg h-[250px] flex flex-col overflow-hidden transition-colors",
+          "group relative rounded-lg h-[250px] flex flex-col overflow-hidden transition-colors",
           chapter.chapter == null
             ? "border-2 border-dashed border-accent/40 bg-surface-card/70 hover:border-accent/60"
             : "border border-surface-border bg-surface-card hover:border-surface-border/80"
@@ -248,7 +247,7 @@ export default function ChapterCard({
               }}
               editable={!disabled}
               placeholder="Plan / summary…"
-              className="editor-light flex-1 rounded border border-surface-border bg-surface/60 focus-within:border-accent/40 transition-colors"
+              className="flex-1 rounded border border-surface-border bg-surface/60 focus-within:border-accent/40 transition-colors"
             />
           </div>
         </div>
