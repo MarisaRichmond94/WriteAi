@@ -75,6 +75,8 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
     setSyncing,
   } = usePlanStore();
 
+  // undefined = outline not fetched yet (vs. a fetched-but-empty outline)
+  const outlineLoading = outlineByBook[bookId] === undefined;
   const chapters = outlineByBook[bookId] ?? [];
 
 
@@ -204,7 +206,7 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
 
         {/* Chapter grid */}
         <div className="flex flex-1 flex-col overflow-y-auto px-6 pb-6">
-          {syncing ? (
+          {syncing || outlineLoading ? (
             <div className={`grid gap-3 ${reviewOpen ? "grid-cols-2" : "grid-cols-4"}`}>
               {Array.from({ length: chapters.length || 8 }).map((_, i) => (
                 <ChapterCardSkeleton key={i} />

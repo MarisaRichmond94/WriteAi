@@ -86,12 +86,13 @@ export default function PlanPane() {
       .catch(() => {});
   }, []);
 
-  // Load outline whenever selected book changes
+  // Load outline whenever selected book changes. On failure, store an empty
+  // outline so the view leaves its loading skeleton (undefined = not loaded).
   useEffect(() => {
     if (!selectedBook) return;
     fetchOutline(selectedBook)
       .then((data) => setOutlineForBook(selectedBook, data.chapters))
-      .catch(() => {});
+      .catch(() => setOutlineForBook(selectedBook, []));
   }, [selectedBook, setOutlineForBook]);
 
   return (
