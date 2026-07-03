@@ -97,6 +97,16 @@
   animation: indeterminate 1.4s ease-in-out infinite;
 }
 
+/* light sweep across a filled progress bar — transform-only, GPU-composited */
+@keyframes sheen {
+  0%   { transform: translateX(-100%); }
+  60%  { transform: translateX(100%); }
+  100% { transform: translateX(100%); }
+}
+.animate-sheen {
+  animation: sheen 2.2s ease-in-out infinite;
+}
+
 @layer utilities {
   .prose-dark {
     color: rgb(var(--ink-primary));

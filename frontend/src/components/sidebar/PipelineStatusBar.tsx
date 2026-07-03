@@ -68,7 +68,7 @@ export default function PipelineStatusBar() {
         <div className={ingestRunning ? "mt-2.5" : undefined}>
           <div className="flex items-center justify-between text-[10px] font-medium text-ink-secondary">
             <span className="flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3 text-accent" />
+              <Sparkles className="h-3 w-3 animate-pulse-slow text-accent" />
               Enriching insights
             </span>
             <span className="text-ink-muted">
@@ -77,9 +77,11 @@ export default function PipelineStatusBar() {
           </div>
           <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-border">
             <div
-              className="h-full rounded-full bg-accent transition-all duration-700"
+              className="relative h-full overflow-hidden rounded-full bg-accent transition-all duration-700"
               style={{ width: `${Math.max(pct, 2)}%` }}
-            />
+            >
+              <div className="animate-sheen absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+            </div>
           </div>
         </div>
       )}
