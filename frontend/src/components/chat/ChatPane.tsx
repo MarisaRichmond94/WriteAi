@@ -105,7 +105,7 @@ export default function ChatPane() {
             viewerOpen ? "w-[60%]" : "w-full"
           }`}
         >
-          <MessageList onCitationClick={handleCitationClick} activeCitation={activeCitation} onSuggestionClick={setInputValue} />
+          <MessageList onCitationClick={handleCitationClick} activeCitation={activeCitation} />
         </div>
 
         {/* Chapter viewer — grows from 0 → 40% when viewer opens */}

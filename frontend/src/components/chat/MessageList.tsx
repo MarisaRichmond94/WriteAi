@@ -7,10 +7,9 @@ import type { Citation } from "../../types";
 interface Props {
   onCitationClick: (citation: Citation) => void;
   activeCitation: Citation | null;
-  onSuggestionClick: (text: string) => void;
 }
 
-export default function MessageList({ onCitationClick, activeCitation, onSuggestionClick }: Props) {
+export default function MessageList({ onCitationClick, activeCitation }: Props) {
   const { messages } = useAppStore();
 
   if (messages.length === 0) {
@@ -22,24 +21,10 @@ export default function MessageList({ onCitationClick, activeCitation, onSuggest
             Ask anything about your series
           </h2>
           <p className="text-sm text-ink-muted max-w-sm">
-            Select a query mode above, then ask about plot continuity, character arcs,
-            timeline events, or explore alternate scenarios.
+            Ask about plot continuity, character arcs, timeline events, or
+            explore alternate scenarios — answers are grounded in your books
+            and cite their sources.
           </p>
-        </div>
-        <div className="flex flex-wrap justify-center gap-2 text-xs text-ink-muted max-w-md">
-          {[
-            "When did Noah first learn about the existence of The Black Hand?",
-            "What would've happened if Emma hadn't lost the baby?",
-            "Are there any timeline contradictions in Split?",
-          ].map((suggestion) => (
-            <button
-              key={suggestion}
-              onClick={() => onSuggestionClick(suggestion)}
-              className="rounded-full border border-surface-border px-3 py-1 hover:border-accent hover:text-accent transition-colors"
-            >
-              "{suggestion}"
-            </button>
-          ))}
         </div>
       </div>
     );
