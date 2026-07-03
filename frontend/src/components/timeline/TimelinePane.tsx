@@ -918,10 +918,12 @@ function ChartSkeleton() {
 
 function ListSkeleton() {
   const widths = ["w-3/4", "w-2/3", "w-4/5", "w-1/2", "w-3/5", "w-4/5", "w-2/3", "w-3/4"];
+  // enough rows to overflow any viewport; overflow-hidden clips the rest
+  const rows = Array.from({ length: 20 }, (_, i) => widths[i % widths.length]);
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-3">
+    <div className="flex-1 overflow-hidden px-4 py-3">
       <div className="flex flex-col gap-3">
-        {widths.map((w, i) => (
+        {rows.map((w, i) => (
           <div key={i} className="flex animate-pulse items-center gap-3 rounded-lg border border-surface-border bg-surface px-4 py-3">
             <div className="h-4 w-16 flex-shrink-0 rounded bg-surface-border" />
             <div className="min-w-0 flex-1 space-y-1.5">
