@@ -416,7 +416,12 @@ function ChapterRow({
       <button
         ref={headerRef}
         onClick={onToggle}
-        className="flex w-full items-center gap-3 px-6 py-2.5 text-left transition-colors hover:bg-surface-hover"
+        className={clsx(
+          "flex w-full items-center gap-3 px-6 py-2.5 text-left transition-colors hover:bg-surface-hover",
+          // while expanded, the chapter header pins to the top of the drawer
+          // scroll so you always know which chapter you're reading
+          isExpanded && "sticky top-0 z-20 border-b border-surface-border bg-surface"
+        )}
       >
         <span className="text-ink-muted">
           {isExpanded
@@ -474,7 +479,7 @@ function ChapterRow({
                 {/* Summary */}
                 {data.summary.length > 0 && (
                   <NavSection sectionRef={summaryRef} onScrollUp={prev(summaryRef)} onScrollDown={next(summaryRef)}>
-                    <p className="sticky top-0 z-10 -mt-3 mb-2 bg-surface pt-3 pb-1 text-xs font-bold uppercase tracking-widest text-ink-primary">
+                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Summary
                     </p>
                     <CappedScroll>
@@ -493,7 +498,7 @@ function ChapterRow({
                 {/* Characters */}
                 {data.characters.length > 0 && (
                   <NavSection sectionRef={charRef} onScrollUp={prev(charRef)} onScrollDown={next(charRef)}>
-                    <p className="sticky top-0 z-10 -mt-3 mb-2 bg-surface pt-3 pb-1 text-xs font-bold uppercase tracking-widest text-ink-primary">
+                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Characters ({data.characters.length})
                     </p>
                     <CappedScroll maxHeight={150}>
@@ -534,7 +539,7 @@ function ChapterRow({
                 {/* Events */}
                 {data.events.length > 0 && (
                   <NavSection sectionRef={eventsRef} onScrollUp={prev(eventsRef)} onScrollDown={next(eventsRef)}>
-                    <p className="sticky top-0 z-10 -mt-3 mb-2 bg-surface pt-3 pb-1 text-xs font-bold uppercase tracking-widest text-ink-primary">
+                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Events ({data.events.length})
                     </p>
                     <CappedScroll>
@@ -563,7 +568,7 @@ function ChapterRow({
                 {/* Facts */}
                 {data.facts.length > 0 && (
                   <NavSection sectionRef={factsRef} onScrollUp={prev(factsRef)} onScrollDown={next(factsRef)}>
-                    <p className="sticky top-0 z-10 -mt-3 mb-2 bg-surface pt-3 pb-1 text-xs font-bold uppercase tracking-widest text-ink-primary">
+                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Facts ({data.facts.length})
                     </p>
                     <div className="mb-1 flex items-center gap-3 border-b border-surface-border pb-1.5">
