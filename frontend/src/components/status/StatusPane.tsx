@@ -83,7 +83,7 @@ function BookCard({ book, active, condensed, lastSynced, onClick, onRebuild }: {
     >
       {/* Cover */}
       {coverState !== "error" && (
-        <div className="relative flex-shrink-0 overflow-hidden rounded" style={{ width: coverState === "loaded" ? "auto" : 100 }}>
+        <div className="relative h-[180px] flex-shrink-0 overflow-hidden rounded" style={{ width: coverState === "loaded" ? "auto" : 100 }}>
           {coverState === "loading" && <div className="absolute inset-0 animate-pulse rounded bg-surface-border" />}
           <img
             src={`/api/settings/book-cover/${slug}`}
