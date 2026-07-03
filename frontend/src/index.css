@@ -45,6 +45,24 @@
 .light-body .text-fuchsia-300 { color: #a21caf; }
 .light-body .text-red-300     { color: #b91c1c; }
 
+/* Same treatment for -400 shades (status pills, event-type tags, error
+   text): deepen to -600 so they hold contrast on the light palette. */
+.light-body .text-red-400     { color: #dc2626; }
+.light-body .text-amber-400   { color: #d97706; }
+.light-body .text-emerald-400 { color: #059669; }
+.light-body .text-violet-400  { color: #7c3aed; }
+.light-body .text-teal-400    { color: #0d9488; }
+.light-body .text-rose-400    { color: #e11d48; }
+.light-body .text-blue-400    { color: #2563eb; }
+.light-body .text-yellow-400  { color: #ca8a04; }
+.light-body .text-pink-400    { color: #db2777; }
+.light-body .text-orange-400  { color: #ea580c; }
+.light-body .text-indigo-400  { color: #4f46e5; }
+.light-body .text-cyan-400    { color: #0891b2; }
+.light-body .text-sky-400     { color: #0284c7; }
+.light-body .text-green-400   { color: #16a34a; }
+.light-body .text-gray-400    { color: #4b5563; }
+
 @layer base {
   * {
     scrollbar-width: thin;
