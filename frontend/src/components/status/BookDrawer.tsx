@@ -443,7 +443,7 @@ function ChapterRow({
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Summary
                     </p>
-                    <ul className="max-h-72 space-y-1 overflow-y-auto pr-1">
+                    <ul className="max-h-[200px] space-y-1 overflow-y-auto pr-1">
                       {data.summary.map((bullet, i) => (
                         <li key={i} className="flex items-start gap-1.5">
                           <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-ink-muted/50" />
@@ -460,7 +460,7 @@ function ChapterRow({
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Characters ({data.characters.length})
                     </p>
-                    <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
+                    <div className="max-h-[200px] space-y-3 overflow-y-auto pr-1">
                       {data.characters.map((c, i) => {
                         // no POV badge: the chapter header already names the POV
                         const role = c.role.replace(/^POV character[;,]?\s*/i, "");
@@ -499,7 +499,7 @@ function ChapterRow({
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Events ({data.events.length})
                     </p>
-                    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                    <div className="max-h-[200px] space-y-2 overflow-y-auto pr-1">
                       {data.events.map((e, i) => (
                         <div key={i} className="group flex items-start gap-1.5">
                           <div className="flex-1 min-w-0">
@@ -538,7 +538,7 @@ function ChapterRow({
                       </button>
                       <span className="text-[9px] font-semibold uppercase tracking-widest text-ink-muted">Detail</span>
                     </div>
-                    <div className="max-h-72 divide-y divide-surface-border/40 overflow-y-auto pr-1">
+                    <div className="max-h-[200px] divide-y divide-surface-border/40 overflow-y-auto pr-1">
                       {sorted.map((f, i) => (
                         <div key={i} className="group flex items-center gap-3 py-2.5">
                           <span className={clsx("w-20 flex-shrink-0 rounded px-1.5 py-0.5 text-center text-[9px] font-medium", factCategoryColor(f.category))}>
