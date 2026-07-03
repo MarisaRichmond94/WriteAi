@@ -300,6 +300,17 @@ def relationship_evidence(db, canon, name: str, others: list[str],
     return evidence
 
 
+def _cap_per_book(rows: list[tuple], budget: int) -> list[tuple]:
+    """Spread a row budget evenly across books. A flat LIMIT ordered by book
+    let early books exhaust the budget, so main characters lost their later
+    books entirely — and with them their arcs for those books."""
+    by_book: dict[int, list] = {}
+    for row in rows:
+        by_book.setdefault(row[0], []).append(row)
+    per = max(1, budget // max(1, len(by_book)))
+    return [r for b in sorted(by_book) for r in by_book[b][:per]]
+
+
 def _profile_inputs(db, canon, min_chunks: int = 8) -> list[dict]:
     """Per-character payloads for the profile pass (main cast only)."""
     canon.ensure_built()
@@ -308,29 +319,30 @@ def _profile_inputs(db, canon, min_chunks: int = 8) -> list[dict]:
         if len(e.chunk_ids) < min_chunks or e.kind != "character":
             continue
         names = [e.name, *e.aliases]
-        knowledge = db.execute(
+        knowledge = _cap_per_book(db.execute(
             f"""SELECT c.book_number, k.learns FROM character_knowledge k
                 JOIN chunks c ON c.chunk_id = k.chunk_id
                 WHERE {' OR '.join('k.character LIKE ?' for _ in names)}
-                ORDER BY c.book_number, c.chapter_number LIMIT 220""",
-            [f"%{n}%" for n in names]).fetchall()
-        beats = db.execute(
+                ORDER BY c.book_number, c.chapter_number""",
+            [f"%{n}%" for n in names]).fetchall(), 220)
+        beats = _cap_per_book(db.execute(
             f"""SELECT c.book_number, c.metadata_json FROM chunks c
                 JOIN characters ch ON ch.chunk_id = c.chunk_id
                 WHERE ch.name IN ({','.join('?' for _ in names)})
-                ORDER BY c.book_number, c.chapter_number LIMIT 400""",
-            names).fetchall()
-        beat_lines = []
+                ORDER BY c.book_number, c.chapter_number""",
+            names).fetchall(), 400)
+        beat_rows = []
         for book, meta_json in beats:
             if meta_json:
                 for b in json.loads(meta_json).get("emotional_beats", []):
                     if any(n.split()[0] in b for n in names):
-                        beat_lines.append(f"[Book {book}] {b}")
+                        beat_rows.append((book, f"[Book {book}] {b}"))
+        beat_lines = [line for _b, line in _cap_per_book(beat_rows, 200)]
         co = [n for n, _ in canon.co_occurrence(e.name)[:8]]
         payload = {
             "name": e.name,
             "knowledge": [f"[Book {b}] {v}" for b, v in knowledge],
-            "beats": beat_lines[:200],
+            "beats": beat_lines,
             "co_occurring": co,
         }
         payload["content_hash"] = _hash(["v2", payload["knowledge"][:50],
