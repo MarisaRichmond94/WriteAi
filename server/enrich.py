@@ -708,6 +708,12 @@ class EnrichmentRunner:
                 # atmospheric quote cannot establish a nature
                 if not kw_re.search(ev_norm):
                     ok, reason = False, "no relationship keyword in evidence"
+                elif re.search(r"\byour\s+(?:\w+'?s?\s+){0,2}(?:%s)"
+                               % "|".join(re.escape(k) for k in _REL_KEYWORDS),
+                               ev_norm):
+                    # second-person possessive ("your girlfriend") describes
+                    # the ADDRESSEE, whose identity we cannot verify — null
+                    ok, reason = False, "second-person possessive evidence"
                 else:
                     m = re.search(r"\[narrator: ([^\]]+)\]", src)
                     narrator = (m.group(1).split()[0].lower() if m else "")

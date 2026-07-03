@@ -93,7 +93,10 @@ def get_outline(book: int):
         prose = {}
     changed = False
     for c in outlines[key]:
-        if (c.get("writer_summary") or "").strip():
+        ws = (c.get("writer_summary") or "").strip()
+        # untouched bullet auto-backfill upgrades itself once prose exists;
+        # anything the writer edited (even one character) never matches
+        if ws and ws != _bullets_html(c.get("extracted_bullets") or []):
             continue
         if c.get("chapter") in prose:
             c["writer_summary"] = f"<p>{_html.escape(prose[c['chapter']])}</p>"
