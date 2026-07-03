@@ -11,6 +11,7 @@ from src.query_router import Scope, classify
 
 from ..deps import get_state
 from ..sse import citations_payload, stream_response
+from .books import _build_bible
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -76,14 +77,36 @@ def chat_stream(req: ChatRequest):
                    for m in req.conversation_history[-8:]
                    if m.get("role") in ("user", "assistant") and m.get("content")]
 
-        extra = ALTERNATE_EXTRA if req.mode == "alternate" else ""
+        extra_parts = []
+        bible_parts = []
+        for book_num in books:
+            try:
+                _, md = _build_bible(s, book_num, compact=True)
+                bible_parts.append(md)
+            except Exception:
+                log.warning("could not build bible for book %s", book_num)
+        if bible_parts:
+            extra_parts.append(
+                "The following condensed story bibles cover the books the "
+                "author has in scope — major characters plus a chapter-by-"
+                "chapter summary of each book. Use them for overarching, "
+                "cross-book questions; the retrieved excerpts remain the "
+                "source of truth for verbatim detail.\n\n"
+                + "\n\n---\n\n".join(bible_parts))
+        if req.mode == "alternate":
+            extra_parts.append(ALTERNATE_EXTRA)
+        extra = "\n\n".join(extra_parts)
         for delta in answerer.answer_stream(plan, excerpts, notes,
                                             history=history, system_extra=extra):
             yield {"type": "chunk", "content": delta}
         yield citations_payload(excerpts)
+        u = answerer.usage
         yield {"type": "usage", "model": answerer.model,
-               "input_tokens": answerer.usage["input_tokens"],
-               "output_tokens": answerer.usage["output_tokens"],
+               # full prompt size — cached tokens included, cost already
+               # reflects their discounted (or premium write) rates
+               "input_tokens": (u["input_tokens"] + u["cache_write_tokens"]
+                                + u["cache_read_tokens"]),
+               "output_tokens": u["output_tokens"],
                "cost_usd": answerer.actual_cost_usd}
 
     return stream_response(generate())

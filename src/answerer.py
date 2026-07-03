@@ -28,12 +28,24 @@ class Answerer:
         self.client = anthropic.Anthropic(api_key=cfg.anthropic_api_key or None,
                                           max_retries=3)
         self.model = cfg.query_model
-        self.usage = {"input_tokens": 0, "output_tokens": 0}
+        self.usage = {"input_tokens": 0, "output_tokens": 0,
+                      "cache_write_tokens": 0, "cache_read_tokens": 0}
+
+    def _record_usage(self, u) -> None:
+        self.usage["input_tokens"] += u.input_tokens
+        self.usage["output_tokens"] += u.output_tokens
+        self.usage["cache_write_tokens"] += \
+            getattr(u, "cache_creation_input_tokens", 0) or 0
+        self.usage["cache_read_tokens"] += \
+            getattr(u, "cache_read_input_tokens", 0) or 0
 
     @property
     def actual_cost_usd(self) -> float:
         in_p, out_p = PRICING_PER_MTOK.get(self.model, (3.00, 15.00))
+        # cache writes bill at 1.25x input, cache reads at 0.1x
         return round((self.usage["input_tokens"] * in_p
+                      + self.usage["cache_write_tokens"] * in_p * 1.25
+                      + self.usage["cache_read_tokens"] * in_p * 0.10
                       + self.usage["output_tokens"] * out_p) / 1_000_000, 4)
 
     def build_request(self, plan: QueryPlan, excerpts: list[dict],
@@ -72,14 +84,19 @@ class Answerer:
         messages.append({"role": "user", "content": "\n".join(parts)})
         system = ((system_base or SYSTEM_PROMPT)
                   + (f"\n\n{system_extra}" if system_extra else ""))
+        # Cache the system block (base prompt + injected reference material,
+        # e.g. Explore's story bibles). Messages come after the breakpoint, so
+        # follow-up turns reuse the cache as long as the system text is stable.
+        # Below the model's minimum cacheable size this is a silent no-op.
         return {"model": self.model, "max_tokens": max_tokens,
-                "system": system, "messages": messages}
+                "system": [{"type": "text", "text": system,
+                            "cache_control": {"type": "ephemeral"}}],
+                "messages": messages}
 
     def answer(self, plan: QueryPlan, excerpts: list[dict], notes: list[str]) -> str:
         response = self.client.messages.create(
             **self.build_request(plan, excerpts, notes))
-        self.usage["input_tokens"] += response.usage.input_tokens
-        self.usage["output_tokens"] += response.usage.output_tokens
+        self._record_usage(response.usage)
 
         if response.stop_reason == "refusal":
             return "(the model declined to answer this question)"
@@ -96,8 +113,7 @@ class Answerer:
         with self.client.messages.stream(**request) as stream:
             yield from stream.text_stream
             final = stream.get_final_message()
-        self.usage["input_tokens"] += final.usage.input_tokens
-        self.usage["output_tokens"] += final.usage.output_tokens
+        self._record_usage(final.usage)
 
     # ── export modes ────────────────────────────────────────────────────────
 
