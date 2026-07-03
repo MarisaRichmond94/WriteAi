@@ -366,15 +366,15 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-10"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm py-10"
       onClick={onClose}
     >
       <div
-        className="relative mx-4 w-full max-w-lg rounded-xl border border-surface-border bg-surface-card shadow-2xl"
+        className="relative mx-4 flex max-h-full w-full max-w-lg flex-col rounded-xl border border-surface-border bg-surface-card shadow-2xl"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-surface-border px-5 py-4">
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-surface-border px-5 py-4">
           <p className="text-sm font-semibold text-ink-primary">
             Edit Character — <span className="text-accent">{character.name}</span>
           </p>
@@ -392,7 +392,7 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
           onChange={handleOrphanPhotoChange}
         />
 
-        <div className="flex flex-col gap-6 px-5 py-5">
+        <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto px-5 py-5">
 
           {/* Section 1: Name */}
           <div>
@@ -615,8 +615,8 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
 
         </div>
 
-        {/* Sticky footer */}
-        <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-surface-border bg-surface-card px-5 py-4 rounded-b-xl">
+        {/* Footer — pinned outside the scroll body */}
+        <div className="flex flex-shrink-0 items-center justify-between gap-3 border-t border-surface-border bg-surface-card px-5 py-4 rounded-b-xl">
           {saveErr
             ? <p className="text-xs text-red-400">{saveErr}</p>
             : <p className="text-xs text-ink-muted">{hasPending ? "You have unsaved changes." : "No changes."}</p>
