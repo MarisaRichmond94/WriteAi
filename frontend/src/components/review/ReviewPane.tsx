@@ -735,34 +735,42 @@ export default function ReviewPane() {
             {/* Review + Resync buttons */}
             {filterBook && (
               <div className="ml-auto flex items-center gap-2">
-                <button
-                  onClick={handleReviewClick}
-                  disabled={!canSend}
-                  title={`Start a ${filterFocus} review`}
-                  className={clsx(
-                    "flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                    canSend
-                      ? "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
-                      : "border-surface-border text-ink-muted/30 cursor-not-allowed"
-                  )}
-                >
-                  <ScanText className="h-3 w-3" />
-                  Review
-                </button>
-                <button
-                  onClick={() => { if (!resyncing) setResyncModalOpen(true); }}
-                  disabled={resyncing}
-                  title="Re-run extraction for this book (phases A → B → C)"
-                  className={clsx(
-                    "flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] transition-colors",
-                    resyncing
-                      ? "border-surface-border text-ink-muted cursor-not-allowed"
-                      : "border-surface-border bg-surface text-ink-secondary hover:border-accent/50 hover:text-ink-primary"
-                  )}
-                >
-                  <RefreshCw className={clsx("h-3 w-3", resyncing && "animate-spin")} />
-                  {resyncing ? "Syncing…" : "Resync"}
-                </button>
+                <div className="relative group/revbtn">
+                  <button
+                    onClick={handleReviewClick}
+                    disabled={!canSend}
+                    className={clsx(
+                      "flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                      canSend
+                        ? "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
+                        : "border-surface-border text-ink-muted/30 cursor-not-allowed"
+                    )}
+                  >
+                    <ScanText className="h-3 w-3" />
+                    Review
+                  </button>
+                  <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-60 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/revbtn:opacity-100">
+                    {`Send this chapter to your selected reviewer (${filterFocus}). The review streams into the chat below, grounded in earlier books for continuity.`}
+                  </div>
+                </div>
+                <div className="relative group/resyncbtn">
+                  <button
+                    onClick={() => { if (!resyncing) setResyncModalOpen(true); }}
+                    disabled={resyncing}
+                    className={clsx(
+                      "flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] transition-colors",
+                      resyncing
+                        ? "border-surface-border text-ink-muted cursor-not-allowed"
+                        : "border-surface-border bg-surface text-ink-secondary hover:border-accent/50 hover:text-ink-primary"
+                    )}
+                  >
+                    <RefreshCw className={clsx("h-3 w-3", resyncing && "animate-spin")} />
+                    {resyncing ? "Syncing…" : "Resync"}
+                  </button>
+                  <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-60 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/resyncbtn:opacity-100">
+                    Pull your latest manuscript edits into the app: re-ingests this book (only changed chapters are processed), so the review sees your current text. Shows a cost estimate before running.
+                  </div>
+                </div>
               </div>
             )}
           </div>

@@ -184,13 +184,18 @@ export default function PlanPane() {
 
         {planView === "outline" && (
           <div className="flex items-center flex-shrink-0" style={{ gap: "8px" }}>
-            <button
-              onClick={() => setReviewModalOpen(true)}
-              className="flex items-center gap-1.5 rounded-md border border-surface-border px-3 py-1.5 text-xs text-ink-secondary hover:border-accent hover:text-accent transition-colors"
-            >
-              <MessageSquare className="h-3 w-3" />
-              Review
-            </button>
+            <div className="relative group/planreview">
+              <button
+                onClick={() => setReviewModalOpen(true)}
+                className="flex items-center gap-1.5 rounded-md border border-surface-border px-3 py-1.5 text-xs text-ink-secondary hover:border-accent hover:text-accent transition-colors"
+              >
+                <MessageSquare className="h-3 w-3" />
+                Review
+              </button>
+              <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-60 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/planreview:opacity-100">
+                Ask AI to review your outline for this book — pacing, POV balance, dropped threads, and where planned chapters conflict with what the written chapters establish. You pick which chapters to include.
+              </div>
+            </div>
             <div className="relative group/sync">
               <button
                 onClick={handleResync}
@@ -202,11 +207,11 @@ export default function PlanPane() {
                   : <RefreshCw className="h-3 w-3" />}
                 {syncing ? "Checking..." : "Sync"}
               </button>
-              {pipelineRunning && !syncing && (
-                <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-52 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 group-hover/sync:opacity-100 transition-opacity">
-                  Sync is unavailable while the extraction pipeline is running.
-                </div>
-              )}
+              <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-60 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/sync:opacity-100">
+                {pipelineRunning && !syncing
+                  ? "Sync is unavailable while the extraction pipeline is running."
+                  : "Compare this outline against the latest synced manuscript and stage the differences (chapter numbering, POV, dates, extracted beats) for your approval — nothing changes without your OK."}
+              </div>
             </div>
           </div>
         )}
