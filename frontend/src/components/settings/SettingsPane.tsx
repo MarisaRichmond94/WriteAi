@@ -177,7 +177,7 @@ function FolderInput({
         onClick={handlePick}
         disabled={picking}
         title="Browse for folder"
-        className="flex-shrink-0 px-1 py-1.5 text-white disabled:opacity-50 transition-opacity"
+        className="flex-shrink-0 rounded px-1 py-1.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-accent disabled:opacity-50"
       >
         <FolderOpen className="h-4 w-4" />
       </button>

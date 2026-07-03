@@ -93,6 +93,14 @@ export async function deleteBookCover(_slug: string): Promise<void> {
   throw new Error("Book covers come from your Dust Jacket folders and are read-only here.");
 }
 
-export async function pickFolder(_current?: string): Promise<string | null> {
-  return null; // native folder picker not available in this app
+export async function pickFolder(current?: string): Promise<string | null> {
+  // native macOS folder chooser, presented by the local server
+  const res = await fetch("/api/settings/pick-folder", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ current: current ?? null }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data.path ?? null;
 }
