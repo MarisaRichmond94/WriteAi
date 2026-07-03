@@ -99,14 +99,9 @@ export default function PipelineStatusBar() {
       )}
       {enrich && (
         <div className={ingestRunning ? "mt-2.5" : undefined}>
-          <div className="flex items-center justify-between text-[10px] font-medium text-ink-secondary">
-            <span className="flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3 flex-shrink-0 animate-pulse-slow text-accent" />
-              <span key={enrichPhrase} className="animate-phrase inline-block">{enrichPhrase}</span>
-            </span>
-            <span className="text-ink-muted">
-              {enrich.done}/{enrich.total} · {pct}%
-            </span>
+          <div className="flex items-center gap-1.5 text-[10px] font-medium text-ink-secondary">
+            <Sparkles className="h-3 w-3 flex-shrink-0 animate-pulse-slow text-accent" />
+            <span key={enrichPhrase} className="animate-phrase inline-block truncate">{enrichPhrase}</span>
           </div>
           <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-border">
             <div
@@ -116,6 +111,9 @@ export default function PipelineStatusBar() {
               <div className="animate-sheen absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent" />
             </div>
           </div>
+          <p className="mt-1 text-center text-[10px] text-ink-muted">
+            {enrich.done}/{enrich.total} · {pct}%
+          </p>
         </div>
       )}
     </button>
