@@ -3,7 +3,6 @@ import { Library, RefreshCw, Info, ChevronRight, FileDown } from "lucide-react";
 import { clsx } from "clsx";
 import type { BookResponse, BookSummary } from "../../types";
 import { useAppStore } from "../../store/useAppStore";
-import IndexStatusBar from "../sidebar/IndexStatusBar";
 import ConfirmModal from "../ui/ConfirmModal";
 import BookDrawer from "./BookDrawer";
 import { fetchBookSummary, triggerRebuild, triggerBookUpdate, downloadStoryBible } from "../../api/books";
@@ -244,18 +243,15 @@ export default function StatusPane() {
           </div>
 
           {/* Footer */}
-          <div className="flex-shrink-0 border-t border-surface-border bg-surface-card p-4 space-y-3">
+          <div className="flex-shrink-0 border-t border-surface-border bg-surface-card p-4">
             <button
               onClick={() => setConfirmOpen(true)}
               disabled={rebuilding}
-              className="flex w-full items-center justify-center gap-2 rounded-md border border-surface-border bg-surface px-3 py-[13px] text-xs text-ink-secondary hover:border-accent hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-surface-border bg-surface px-3 py-[6.5px] text-xs text-ink-secondary hover:border-accent hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw className={clsx("h-3 w-3", rebuilding && "animate-spin")} />
               {rebuilding ? "Rebuilding Index..." : "Rebuild Index"}
             </button>
-            <div className="pl-5">
-              <IndexStatusBar />
-            </div>
           </div>
         </div>
 
