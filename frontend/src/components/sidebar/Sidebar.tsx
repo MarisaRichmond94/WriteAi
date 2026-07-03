@@ -11,7 +11,6 @@ const NAV_GROUPS = [
       { pane: "plan", label: "Plan", icon: Kanban },
       { pane: "review", label: "Review", icon: ScanText },
       { pane: "explore", label: "Explore", icon: Compass },
-      { pane: "timeline", label: "Timeline", icon: Clock },
     ],
   },
   {
@@ -19,6 +18,7 @@ const NAV_GROUPS = [
     items: [
       { pane: "status", label: "Books", icon: Library },
       { pane: "characters", label: "Characters", icon: Users },
+      { pane: "timeline", label: "Events", icon: Clock },
     ],
   },
 ] as const;

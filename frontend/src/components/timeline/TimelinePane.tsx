@@ -1111,12 +1111,12 @@ export default function TimelinePane() {
           <div>
             <div className="flex items-center gap-2">
               <p className="text-xs font-semibold uppercase tracking-widest text-ink-primary">
-                Timeline
+                Events
               </p>
               <div className="group relative">
                 <Info className="h-3.5 w-3.5 cursor-default text-ink-muted transition-colors hover:text-ink-secondary" />
                 <div className="pointer-events-none absolute left-0 top-5 z-50 w-72 rounded-md border border-surface-border bg-surface-card px-3 py-2 text-[11px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                  The Timeline page visualises significant events extracted from your books. Use the List view
+                  The Events page visualises significant events extracted from your books. Use the List view
                   for a scannable overview, or the Chart view for a visual timeline you can pan and zoom.
                   Click any event to see full details including character knowledge impact, cross-book connections,
                   and direct source passages from the text.
