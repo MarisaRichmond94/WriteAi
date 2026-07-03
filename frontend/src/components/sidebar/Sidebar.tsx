@@ -1,4 +1,5 @@
 import { Compass, Clock, Library, MapPin, Users, Info, Kanban, ScanText, FlaskConical } from "lucide-react";
+import { FaTimeline } from "react-icons/fa6";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import ChatHistory from "./ChatHistory";
@@ -10,6 +11,7 @@ const NAV_GROUPS = [
     label: "Tools",
     items: [
       { pane: "plan", label: "Plan", icon: Kanban },
+      { pane: "writer-timeline", label: "Timeline", icon: FaTimeline },
       { pane: "review", label: "Review", icon: ScanText },
       { pane: "explore", label: "Explore", icon: Compass },
     ],

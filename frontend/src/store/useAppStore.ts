@@ -76,8 +76,8 @@ interface AppState {
   clearToast: () => void;
 
   // Pane navigation
-  activePane: "explore" | "timeline" | "locations" | "plan" | "review" | "status" | "characters" | "import" | "pipeline" | "quality-review" | "odv-lab" | "settings";
-  setActivePane: (pane: "explore" | "timeline" | "locations" | "plan" | "review" | "status" | "characters" | "import" | "pipeline" | "quality-review" | "odv-lab" | "settings") => void;
+  activePane: "explore" | "timeline" | "writer-timeline" | "locations" | "plan" | "review" | "status" | "characters" | "import" | "pipeline" | "quality-review" | "odv-lab" | "settings";
+  setActivePane: (pane: "explore" | "timeline" | "writer-timeline" | "locations" | "plan" | "review" | "status" | "characters" | "import" | "pipeline" | "quality-review" | "odv-lab" | "settings") => void;
   pendingPipelineBook: string | null;
   setPendingPipelineBook: (book: string | null) => void;
 
@@ -258,7 +258,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   activePane: ((): AppState["activePane"] => {
     const p = new URLSearchParams(window.location.search).get("pane");
-    const valid = ["explore", "timeline", "locations", "plan", "review", "status", "characters", "import", "pipeline", "quality-review", "odv-lab", "settings"];
+    const valid = ["explore", "timeline", "writer-timeline", "locations", "plan", "review", "status", "characters", "import", "pipeline", "quality-review", "odv-lab", "settings"];
     return (valid.includes(p ?? "") ? p : "explore") as AppState["activePane"];
   })(),
   setActivePane: (pane) => set({ activePane: pane }),
