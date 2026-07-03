@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { MessageSquare, Trash2 } from "lucide-react";
+import { MessageSquare, SquarePen, Trash2 } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import type { ChatSession } from "../../types";
@@ -43,17 +43,32 @@ function DeleteDialog({
 }
 
 export default function ChatHistory() {
-  const { chatSessions, viewingSessionId, loadChat, deleteChat } = useAppStore();
+  const { chatSessions, viewingSessionId, loadChat, deleteChat, saveChatAndClear, setLiveChatSessionId, closeExploreViewer } = useAppStore();
   const [pendingDelete, setPendingDelete] = useState<ChatSession | null>(null);
 
   if (chatSessions.length === 0) return null;
 
+  const startNewChat = () => {
+    saveChatAndClear();
+    setLiveChatSessionId(null);
+    closeExploreViewer();
+  };
+
   return (
     <>
       <div className="flex flex-col h-64 mb-[100px]">
-        <p className="flex-shrink-0 px-4 pt-3 pb-1.5 text-[10px] font-semibold uppercase tracking-widest text-ink-muted">
-          Chat History
-        </p>
+        <div className="flex-shrink-0 flex items-center justify-between px-4 pt-3 pb-1.5">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-muted">
+            Chat History
+          </p>
+          <button
+            onClick={startNewChat}
+            title="Start a new chat"
+            className="rounded p-0.5 text-ink-muted hover:text-accent hover:bg-surface-hover transition-colors"
+          >
+            <SquarePen className="h-3.5 w-3.5" />
+          </button>
+        </div>
         <div className="flex-1 min-h-0 overflow-y-auto pb-3">
           {[...chatSessions].reverse().map((session) => {
             const isActive = session.id === viewingSessionId;
