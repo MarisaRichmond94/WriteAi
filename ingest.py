@@ -20,6 +20,18 @@ import sys
 import time
 
 from config import load_config
+
+
+def _notify(title: str, body: str, ok: bool = True) -> None:
+    """Post to the UI notification bell — best-effort; the CLI never fails
+    because of it (and quietly skips if the server package is unavailable)."""
+    try:
+        from server import notify
+        notify.add("sync_complete" if ok else "error", title, body,
+                   action_url="/?pane=status")
+    except Exception:
+        pass
+
 from src.discovery import discover_books
 from src.extractor import estimate_extraction_cost
 from src.ingestion import (BookDiff, chunk_text_hash, clear_staging,
@@ -43,6 +55,8 @@ def main() -> int:
     ap.add_argument("--full", action="store_true",
                     help="ignore stored hashes and re-ingest everything")
     ap.add_argument("--book", type=int, default=None, help="only this book number")
+    ap.add_argument("--label", default="Sync",
+                    help='notification label, e.g. --label "Nightly sync"')
     args = ap.parse_args()
 
     started = time.time()
@@ -100,6 +114,8 @@ def main() -> int:
     if not changed and not deleted:
         print("\nNothing to do.")
         clear_staging(cfg)
+        _notify(f"{args.label} complete",
+                "No changes — every chapter matches the index.")
         return 0
 
     # ── cost gate (before any API call) ────────────────────────────────────
@@ -119,6 +135,7 @@ def main() -> int:
 
     # ── ingest per book ────────────────────────────────────────────────────
     new_index = dict(stored_index)
+    book_reports: list[str] = []
     total_failed = 0
     for num in sorted(diffs):
         b, chunks, d = diffs[num]
@@ -126,6 +143,7 @@ def main() -> int:
             continue
         print(f"\n== book {num}: {b.title} "
               f"({len(d.changed)} chunk(s) to process) ==")
+        book_reports.append(f"{b.title} ({len(d.changed)} chunk(s))")
         summary = ingest_chunks(cfg, d.changed, extractor, embedder, store)
         if d.deleted_ids:
             store.delete_chunks(d.deleted_ids)
@@ -158,8 +176,19 @@ def main() -> int:
           f"({u['input_tokens']:,} in / {u['output_tokens']:,} out tokens)")
     print(f"  actual cost: ${extractor.actual_cost_usd}")
     print(f"  elapsed: {elapsed/60:.1f} min")
+    failures = (f" {total_failed} chunk(s) failed and will retry next run."
+                if total_failed else "")
+    _notify(f"{args.label} complete",
+            f"{len(book_reports)} book(s) updated: {', '.join(book_reports)}. "
+            f"Cost ${extractor.actual_cost_usd}.{failures}")
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except SystemExit:
+        raise
+    except Exception as e:  # scheduled runs must surface failures in the UI
+        _notify("Sync failed", f"{type(e).__name__}: {e}", ok=False)
+        raise

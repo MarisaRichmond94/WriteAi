@@ -92,7 +92,7 @@ Expect roughly 1–1.5 hours for a series this size.
 
 ```cron
 # refresh the index at 2:30am; only changed chapters are re-processed
-30 2 * * * cd /path/to/repo && .venv/bin/python ingest.py --yes >> logs/ingest.log 2>&1
+30 2 * * * cd /path/to/repo && .venv/bin/python ingest.py --yes --label "Nightly sync" >> logs/ingest.log 2>&1
 ```
 
 `mkdir -p logs` once beforehand. Nightly increments cost pennies: only
