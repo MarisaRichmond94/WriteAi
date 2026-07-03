@@ -78,7 +78,9 @@ def _relationships(s, canon, name: str, cmap: dict) -> list[dict]:
         rels.append({
             "target": other,
             "character_id": other,
-            "status": nature or f"{count} shared scenes",
+            # status carries only a real (verified or writer-set) nature;
+            # the scene count travels separately in appearance_count
+            "status": nature or "",
             "gendered_status": None,
             "inferred": nature is None and override is None,
             "appearance_count": count,

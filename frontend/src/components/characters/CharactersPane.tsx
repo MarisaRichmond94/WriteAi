@@ -613,6 +613,9 @@ function DetailPanel({
                               <span className="ml-1.5 text-[11px] italic text-ink-muted">({rel.gendered_status || rel.status})</span>
                             )}
                           </div>
+                          {rel.appearance_count != null && (
+                            <span className="flex-shrink-0 text-[10px] text-ink-muted/60">{rel.appearance_count} scenes</span>
+                          )}
                           {!relDisabled && <ChevronRight className="flex-shrink-0 h-3.5 w-3.5 text-ink-muted/40" />}
                         </RowEl>
                       );
