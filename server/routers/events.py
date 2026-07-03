@@ -21,6 +21,58 @@ def _titles(s) -> dict[int, str]:
     return dict(s.db.execute("SELECT DISTINCT book_number, book_title FROM chunks"))
 
 
+_STOP = set(
+    "the a an and or but of to in on at for with from by is was were are be "
+    "been being he she it they them him his her hers their its i you we me my "
+    "your our this that these those as not no so if then than there when while "
+    "what who whom how why said says say had has have having did does do about "
+    "into out up down over under after before just very".split())
+
+
+def _words(t: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z']{3,}", t.lower())} - _STOP
+
+
+_ABBREV = {"Mr", "Mrs", "Ms", "Dr", "St", "Jr", "Sr", "Prof", "Lt", "Sgt", "Capt"}
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) spans of sentences, not splitting after honorifics."""
+    spans, start = [], 0
+    for m in re.finditer(r"[.!?…]+[\"'”’]*\s+|\n+", text):
+        prev = re.search(r"([A-Za-z]+)$", text[:m.start()])
+        if prev and prev.group(1) in _ABBREV:
+            continue
+        if text[start:m.end()].strip():
+            spans.append((start, m.end()))
+        start = m.end()
+    if text[start:].strip():
+        spans.append((start, len(text)))
+    return spans
+
+
+def _relevant_excerpt(text: str, probe: str, max_len: int = 300) -> str:
+    """The sentence run in `text` that best matches `probe` (event title +
+    summary), as a contiguous verbatim slice snapped to sentence boundaries —
+    still a substring of the chapter text, so the viewer can highlight it."""
+    spans = _sentence_spans(text)
+    if not spans:
+        return text[:max_len]
+    pw = _words(probe)
+    best = max(range(len(spans)),
+               key=lambda i: len(_words(text[spans[i][0]:spans[i][1]]) & pw))
+    start, end = spans[best]
+    # extend forward whole sentences while the budget allows
+    j = best + 1
+    while j < len(spans) and spans[j][1] - start <= max_len:
+        end = spans[j][1]
+        j += 1
+    if end - start > max_len:  # single overlong sentence: cut at a word break
+        cut = text.rfind(" ", start, start + max_len)
+        end = cut if cut > start else start + max_len
+    return text[start:end].strip()
+
+
 @router.get("/events")
 def list_events(book: str | None = None, pov: str | None = None,
                 granularity: str | None = None):
@@ -71,9 +123,9 @@ def list_events(book: str | None = None, pov: str | None = None,
             if row is None:
                 continue
             text = row[0].strip()
-            # a verbatim opening excerpt — substring of the chapter text, so
-            # the chapter viewer can locate and highlight it
-            quote = text[:280]
+            # the passage most relevant to this event, sentence-aligned and
+            # verbatim so the chapter viewer can locate and highlight it
+            quote = _relevant_excerpt(text, f"{r[4]} {r[8] or ''}")
             source_quotes.append({"book": row[1], "chapter": row[2], "quote": quote})
             if row[3]:
                 setups.extend(json.loads(row[3]).get("foreshadowing", [])[:1])
