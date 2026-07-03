@@ -6,22 +6,25 @@ export default {
   theme: {
     extend: {
       colors: {
+        // RGB-channel CSS variables so the page body can flip to light mode
+        // (.light-body) while opacity modifiers like text-ink-muted/50 keep
+        // working. Dark values live in :root in index.css.
         surface: {
-          DEFAULT: "#0f1117",
-          card: "#1a1d27",
-          hover: "#21253a",
-          border: "#2a2d3a",
+          DEFAULT: "rgb(var(--surface) / <alpha-value>)",
+          card: "rgb(var(--surface-card) / <alpha-value>)",
+          hover: "rgb(var(--surface-hover) / <alpha-value>)",
+          border: "rgb(var(--surface-border) / <alpha-value>)",
         },
         accent: {
           DEFAULT: "#7c6af7",
           hover: "#6b59e8",
           muted: "#4a3fa6",
-          subtle: "#2a2550",
+          subtle: "rgb(var(--accent-subtle) / <alpha-value>)",
         },
         ink: {
-          primary: "#e8eaf0",
-          secondary: "#9da3b4",
-          muted: "#5c627a",
+          primary: "rgb(var(--ink-primary) / <alpha-value>)",
+          secondary: "rgb(var(--ink-secondary) / <alpha-value>)",
+          muted: "rgb(var(--ink-muted) / <alpha-value>)",
         },
         mode: {
           plot: "#f87171",

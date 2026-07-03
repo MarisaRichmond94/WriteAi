@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Theme tokens as RGB channels (see tailwind.config.ts). Dark is the
+   default; .light-body flips the page body only — the sidebar keeps the
+   dark palette. Light values borrowed from Loom for cross-app consistency. */
+:root {
+  --surface: 15 17 23;
+  --surface-card: 26 29 39;
+  --surface-hover: 33 37 58;
+  --surface-border: 42 45 58;
+  --accent-subtle: 42 37 80;
+  --ink-primary: 232 234 240;
+  --ink-secondary: 157 163 180;
+  --ink-muted: 92 98 122;
+}
+.light-body {
+  --surface: 245 242 235;
+  --surface-card: 237 233 224;
+  --surface-hover: 229 224 213;
+  --surface-border: 221 216 204;
+  --accent-subtle: 224 219 247;
+  --ink-primary: 26 26 42;
+  --ink-secondary: 68 68 68;
+  --ink-muted: 136 136 136;
+  background-color: rgb(var(--surface));
+  color: rgb(var(--ink-primary));
+}
+
 @layer base {
   * {
     scrollbar-width: thin;
@@ -30,14 +56,14 @@
 
 @layer utilities {
   .prose-dark {
-    color: #e8eaf0;
+    color: rgb(var(--ink-primary));
     line-height: 1.65;
     font-size: 0.875rem;
   }
   .prose-dark h1,
   .prose-dark h2,
   .prose-dark h3 {
-    color: #e8eaf0;
+    color: rgb(var(--ink-primary));
     font-weight: 600;
     margin: 0.9em 0 0.45em;
   }
@@ -53,10 +79,10 @@
   }
   .prose-dark ol { list-style: decimal; }
   .prose-dark li { margin: 0.2em 0; }
-  .prose-dark strong { color: #e8eaf0; font-weight: 600; }
+  .prose-dark strong { color: rgb(var(--ink-primary)); font-weight: 600; }
   .prose-dark code {
-    background: #1a1d27;
-    border: 1px solid #2a2d3a;
+    background: rgb(var(--surface-card));
+    border: 1px solid rgb(var(--surface-border));
     color: #7c6af7;
     font-family: "JetBrains Mono", monospace;
     font-size: 0.8em;
@@ -65,12 +91,12 @@
   }
   .prose-dark blockquote {
     border-left: 3px solid #7c6af7;
-    color: #9da3b4;
+    color: rgb(var(--ink-secondary));
     padding-left: 0.75em;
     margin: 0.6em 0;
   }
   .prose-dark hr {
-    border-color: #2a2d3a;
+    border-color: rgb(var(--surface-border));
     margin: 1em 0;
   }
   .prose-dark table {
@@ -80,7 +106,7 @@
   }
   .prose-dark th,
   .prose-dark td {
-    border: 1px solid #2a2d3a;
+    border: 1px solid rgb(var(--surface-border));
     padding: 0.3em 0.6em;
   }
 }

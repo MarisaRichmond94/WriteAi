@@ -75,13 +75,13 @@ export default function MessageBubble({ message, onCitationClick, activeCitation
             <div className="flex-shrink-0 flex items-center justify-between px-1 mb-1.5">
               <button
                 onClick={() => setSourcesOpen((o) => !o)}
-                className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-white hover:text-accent transition-colors"
+                className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-ink-primary hover:text-accent transition-colors"
               >
                 {sourcesOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 Sources ({message.citations!.length})
               </button>
               {sourcesOpen && (
-                <p className="text-[10px] text-white">
+                <p className="text-[10px] text-ink-muted">
                   Click a row to view the sourced text in context
                 </p>
               )}

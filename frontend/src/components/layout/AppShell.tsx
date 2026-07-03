@@ -1,5 +1,6 @@
-import { useEffect } from "react";
-import { Settings as SettingsIcon } from "lucide-react";
+import { useEffect, useState } from "react";
+import { clsx } from "clsx";
+import { Moon, Settings as SettingsIcon, Sun } from "lucide-react";
 import { fetchBooks, fetchIndexStatus } from "../../api/books";
 import { fetchSessions } from "../../api/sessions";
 import { fetchSettings } from "../../api/settings";
@@ -51,6 +52,16 @@ function WriterAvatar() {
 
 export default function AppShell() {
   const { setBooks, setBooksLoading, setIndexStatus, showToast, activePane, setActivePane, setAppSettings, appSettings, setChatSessions, setReviewSessions } = useAppStore();
+  // light mode applies to the page body only; sidebar stays dark (Loom's pattern)
+  const [lightMode, setLightMode] = useState(
+    () => localStorage.getItem("writeai-light-mode") === "true"
+  );
+  const toggleLightMode = () =>
+    setLightMode((prev) => {
+      const next = !prev;
+      localStorage.setItem("writeai-light-mode", String(next));
+      return next;
+    });
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -102,16 +113,35 @@ export default function AppShell() {
       )}
       <div className="flex flex-1 overflow-hidden bg-surface">
       <Sidebar />
-      <main className="relative flex flex-1 flex-col overflow-hidden">
+      <main className={clsx("relative flex flex-1 flex-col overflow-hidden", lightMode && "light-body")}>
         <div className="absolute right-6 top-5 z-50 flex items-center gap-2">
-          <span className="text-xs text-white">
+          <span className="text-xs text-ink-primary">
             Good {timeOfDay()}, {appSettings?.writer_name ?? "Writer"}
           </span>
+          <button
+            role="switch"
+            aria-checked={lightMode}
+            onClick={toggleLightMode}
+            title={lightMode ? "Switch to dark mode" : "Switch to light mode"}
+            className="mx-1 flex items-center gap-1.5 text-ink-muted hover:text-ink-primary transition-colors"
+          >
+            <Moon className="h-3 w-3" />
+            <span className={clsx(
+              "relative inline-flex w-9 h-5 rounded-full transition-colors duration-200",
+              lightMode ? "bg-accent" : "bg-surface-hover"
+            )}>
+              <span className={clsx(
+                "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-200",
+                lightMode ? "left-4" : "left-0.5"
+              )} />
+            </span>
+            <Sun className="h-3 w-3" />
+          </button>
           <NotificationBell />
           <button
             onClick={() => setActivePane("settings")}
             title="Settings"
-            className="rounded-md p-1 text-white/60 hover:text-white transition-colors"
+            className="rounded-md p-1 text-ink-muted hover:text-ink-primary transition-colors"
           >
             <SettingsIcon className="h-4 w-4" strokeWidth={1.5} />
           </button>
