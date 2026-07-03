@@ -1111,7 +1111,7 @@ export default function CharactersPane() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-3">
+      <div className="dark-zone bg-surface flex-shrink-0 px-6 pt-4 pb-3">
         <div className="flex items-center gap-2">
           <Users className="h-6 w-6 flex-shrink-0 text-accent" />
           <div>

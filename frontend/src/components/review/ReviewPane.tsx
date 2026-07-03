@@ -747,7 +747,7 @@ export default function ReviewPane() {
       )}
 
       {/* Title block */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-3">
+      <div className="dark-zone bg-surface flex-shrink-0 px-6 pt-4 pb-3">
         <div className="flex items-center gap-2">
           <ScanText className="h-6 w-6 flex-shrink-0 text-accent" />
           <div>

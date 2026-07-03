@@ -723,7 +723,7 @@ export default function SettingsPane() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-0">
+      <div className="dark-zone bg-surface flex-shrink-0 px-6 pt-4 pb-0">
         <p className="text-xs font-semibold uppercase tracking-widest text-ink-primary">
           Settings
         </p>
