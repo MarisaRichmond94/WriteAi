@@ -182,8 +182,9 @@ export default function StatusPane() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Header — full width, static */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-3">
+      {/* Header — full width, static; no bottom padding so the drawer's
+          left border meets the divider line */}
+      <div className="flex-shrink-0 px-6 pt-4">
         <div className="flex items-center gap-2">
           <Library className="h-6 w-6 flex-shrink-0 text-accent" />
           <div>
@@ -214,7 +215,7 @@ export default function StatusPane() {
           activeBookId ? "w-1/2" : "w-full"
         )}>
           {/* Book list */}
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1 overflow-y-auto pt-3">
             {booksLoading || rebuilding ? (
               <BookListSkeleton />
             ) : (
