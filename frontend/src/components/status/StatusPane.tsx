@@ -12,14 +12,22 @@ import { bookSlug } from "../../api/settings";
 function BookListSkeleton() {
   return (
     <div className="flex flex-col gap-4 px-6">
-      {[120, 80, 200, 150, 90].map((w, i) => (
-        <div key={i} className="overflow-hidden rounded-lg border border-surface-border bg-surface-card">
-          <div className="flex items-center gap-2 px-4 py-3">
-            <div className="h-4 w-4 flex-shrink-0 rounded bg-surface-border animate-pulse" />
-            <div className="h-4 rounded bg-surface-border animate-pulse" style={{ width: w }} />
-            <div className="h-4 w-36 rounded bg-surface-border animate-pulse ml-2" />
-            <div className="flex-1" />
-            <div className="h-4 w-4 rounded bg-surface-border animate-pulse" />
+      {[...Array(5)].map((_, i) => (
+        <div key={i} className="flex items-stretch gap-4 rounded-lg border border-surface-border bg-surface-card p-5">
+          {/* cover */}
+          <div className="h-[180px] w-[100px] flex-shrink-0 animate-pulse rounded bg-surface-border" />
+          {/* title + stats */}
+          <div className="flex h-[180px] min-w-0 flex-1 flex-col gap-3">
+            <div className="space-y-1.5">
+              <div className="h-5 w-44 animate-pulse rounded bg-surface-border" />
+              <div className="h-3 w-64 animate-pulse rounded bg-surface-border" />
+              <div className="h-2.5 w-52 animate-pulse rounded bg-surface-border" />
+            </div>
+            <div className="grid min-h-0 flex-1 grid-cols-6 gap-2">
+              {[...Array(6)].map((_, j) => (
+                <div key={j} className="animate-pulse rounded-lg bg-surface-border" />
+              ))}
+            </div>
           </div>
         </div>
       ))}
@@ -215,7 +223,7 @@ export default function StatusPane() {
           activeBookId ? "w-1/2" : "w-full"
         )}>
           {/* Book list */}
-          <div className="flex-1 overflow-y-auto pt-3">
+          <div className="flex-1 overflow-y-auto pt-3 pb-2">
             {booksLoading || rebuilding ? (
               <BookListSkeleton />
             ) : (
