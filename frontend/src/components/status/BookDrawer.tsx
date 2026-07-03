@@ -366,12 +366,17 @@ function ChapterRow({
             return (
               <div className="divide-y divide-surface-border">
                 {/* Summary */}
-                {data.summary.length > 0 && (
+                {(data.summary_text || data.summary.length > 0) && (
                   <NavSection sectionRef={summaryRef} onScrollUp={prev(summaryRef)} onScrollDown={next(summaryRef)}>
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Summary
                     </p>
                     <CappedScroll>
+                    {data.summary_text ? (
+                      <p className="text-[11px] leading-relaxed text-ink-secondary">
+                        {data.summary_text}
+                      </p>
+                    ) : (
                     <ul className="space-y-1">
                       {data.summary.map((bullet, i) => (
                         <li key={i} className="flex items-start gap-1.5">
@@ -380,6 +385,7 @@ function ChapterRow({
                         </li>
                       ))}
                     </ul>
+                    )}
                     </CappedScroll>
                   </NavSection>
                 )}

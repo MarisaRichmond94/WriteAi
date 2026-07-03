@@ -54,6 +54,13 @@ CREATE TABLE IF NOT EXISTS character_profiles (
     arcs_json TEXT
 );
 
+CREATE TABLE IF NOT EXISTS chapter_summaries (
+    book_number INTEGER NOT NULL,
+    chapter_number INTEGER NOT NULL,
+    summary TEXT NOT NULL,
+    PRIMARY KEY (book_number, chapter_number)
+);
+
 CREATE TABLE IF NOT EXISTS enrich_state (
     scope TEXT PRIMARY KEY,
     content_hash TEXT NOT NULL
@@ -72,12 +79,14 @@ _EVENTS_SCHEMA = {
             "participants": {"type": "array", "items": {"type": "string"}},
             "location": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "source_chunk_ids": {"type": "array", "items": {"type": "string"}},
+            "quote": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         },
         "required": ["title", "type", "granularity", "summary", "participants",
-                     "location", "source_chunk_ids"],
+                     "location", "source_chunk_ids", "quote"],
         "additionalProperties": False,
-    }}},
-    "required": ["events"],
+    }},
+    "chapter_summary": {"type": "string"}},
+    "required": ["events", "chapter_summary"],
     "additionalProperties": False,
 }
 
@@ -142,14 +151,17 @@ _REL_KEYWORDS = (
 
 _SENT_SPLIT = re.compile(r"(?<=[.!?”\"])\s+")
 
-EVENTS_PROMPT = """You are curating a story timeline from extraction notes for chapters of a fiction series. For each chapter below, consolidate its raw key-event notes into 1-4 real EVENTS (merge notes describing the same happening; skip trivia).
+EVENTS_PROMPT = """You are curating a story timeline from a chapter of a fiction series. You get the chapter PROSE plus raw key-event notes. Consolidate the notes into 1-4 real EVENTS (merge notes describing the same happening; skip trivia), and write one chapter summary.
 
-Rules:
+Event rules:
 - title: short and specific (5-10 words).
 - participants: choose ONLY from the character names listed for that chapter — copy them exactly; never invent, expand, or normalize a name.
 - location: choose from the listed locations, or null.
 - source_chunk_ids: the chunk IDs (given per note) the event is drawn from.
-- granularity: major = changes the course of the story; moderate = advances a plotline; minor = character/flavor beat."""
+- granularity: major = changes the course of the story; moderate = advances a plotline; minor = character/flavor beat.
+- quote: the single most dramatic or representative line of the PROSE for this event — the line a reader would underline. Copy it EXACTLY, character for character, from the prose (1-2 sentences, under 300 characters). If no line stands out, null. Never paraphrase.
+
+chapter_summary: 3-5 sentences of flowing prose (present tense) summarizing the chapter for the author's own reference: what happens, what shifts emotionally, what it sets up. No headers, no bullets, no editorializing about craft."""
 
 PROFILE_PROMPT = """You are summarizing one fiction character from extraction notes (their knowledge gained and emotional beats).
 
@@ -161,7 +173,20 @@ Never invent facts not supported by the notes. Do NOT describe how characters ar
 
 def ensure_tables(db: sqlite3.Connection) -> None:
     db.executescript(_SCHEMA)
+    try:  # added after the table shipped
+        db.execute("ALTER TABLE events ADD COLUMN quote TEXT")
+    except sqlite3.OperationalError:
+        pass
     db.commit()
+
+
+def norm_quote(s: str) -> str:
+    """Normalize for verbatim-quote matching: models straighten curly quotes
+    and collapse whitespace when copying, but the words must match exactly."""
+    for a, b in (("\u2019", "'"), ("\u2018", "'"), ("\u201c", '"'), ("\u201d", '"'),
+                 ("\u2014", "-"), ("\u2026", "...")):
+        s = s.replace(a, b)
+    return re.sub(r"\s+", " ", s).strip().lower()
 
 
 # ── incremental hashing ─────────────────────────────────────────────────────
@@ -193,12 +218,16 @@ def _chapter_inputs(db, canon) -> list[dict]:
         """SELECT chunk_id, book_number, chapter_number, date_line, metadata_json
            FROM chunks WHERE metadata_json IS NOT NULL
            ORDER BY book_number, chapter_number, chunk_index""").fetchall()
+    texts = dict(db.execute("SELECT chunk_id, text FROM chunks"))
+    povs = dict(db.execute("SELECT chunk_id, pov_character FROM chunks"))
     for cid, book, ch, date_line, meta_json in rows:
         meta = json.loads(meta_json)
         key = (book, ch)
         entry = chapters.setdefault(key, {
             "book_number": book, "chapter_number": ch, "date_line": date_line,
+            "pov": povs.get(cid), "prose": [],
             "notes": [], "characters": set(), "locations": set(), "hash_parts": []})
+        entry["prose"].append({"chunk_id": cid, "text": texts.get(cid, "")})
         for ev in meta.get("key_events", []):
             entry["notes"].append({"chunk_id": cid, "note": ev})
         entry["characters"] |= {
@@ -211,7 +240,9 @@ def _chapter_inputs(db, canon) -> list[dict]:
         entry["characters"] = sorted(entry["characters"])
         entry["locations"] = sorted(entry["locations"])[:12]
         entry["content_hash"] = _hash(
-            [entry["notes"], entry["characters"], entry["locations"]])
+            ["ev2", entry["notes"], entry["characters"], entry["locations"],
+             hashlib.sha256("".join(t["text"] for t in entry["prose"])
+                            .encode()).hexdigest()])
         del entry["hash_parts"]
         if entry["notes"]:
             out.append(entry)
@@ -379,10 +410,12 @@ def preview(db, cfg, canon) -> dict:
                 if _state(db, f"profile:{p['name']}") != p["content_hash"]]
     rels = [r for r in _rel_inputs(db, canon)
             if _state(db, f"rels:{r['name']}") != r["content_hash"]]
-    in_tok = sum(len(json.dumps(c["notes"])) // 3 + 400 for c in chapters) \
+    in_tok = sum(len(json.dumps(c["notes"])) // 3
+                 + sum(len(t["text"]) for t in c["prose"]) // 3 + 400
+                 for c in chapters) \
         + sum((len(p["knowledge"]) + len(p["beats"])) * 20 + 500 for p in profiles) \
         + sum(len(json.dumps(r["evidence"])) // 3 + 400 for r in rels)
-    out_tok = len(chapters) * 350 + len(profiles) * 500 + len(rels) * 250
+    out_tok = len(chapters) * 550 + len(profiles) * 500 + len(rels) * 250
     in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))
     return {
         "chapters_to_process": len(chapters),
@@ -448,13 +481,27 @@ class EnrichmentRunner:
                     raise RuntimeError(f"enrichment call ended with {r.stop_reason}")
                 return json.loads(next(b.text for b in r.content if b.type == "text"))
 
-            # events — one small call per chapter (log-and-continue on failure)
+            # events + chapter summary — one call per chapter, with prose
             for c in chapters:
                 try:
                     data = call(EVENTS_PROMPT, json.dumps(
                         {k: v for k, v in c.items() if k != "content_hash"},
                         ensure_ascii=False), _EVENTS_SCHEMA)
+                    # a quote only survives if it is verbatim chapter prose
+                    prose_norm = norm_quote(" ".join(t["text"] for t in c["prose"]))
+                    for ev in data.get("events", []):
+                        q = ev.get("quote")
+                        if q and norm_quote(q) not in prose_norm:
+                            log.info("rejected unverified quote for %r", ev.get("title"))
+                            ev["quote"] = None
                     self._store_events(db, c, data.get("events", []))
+                    summary = (data.get("chapter_summary") or "").strip()
+                    if summary:
+                        db.execute(
+                            """INSERT INTO chapter_summaries (book_number, chapter_number, summary)
+                               VALUES (?,?,?) ON CONFLICT(book_number, chapter_number)
+                               DO UPDATE SET summary = excluded.summary""",
+                            (c["book_number"], c["chapter_number"], summary))
                     _set_state(db, f"events:{c['book_number']}.{c['chapter_number']}",
                                c["content_hash"])
                     db.commit()
@@ -543,13 +590,14 @@ class EnrichmentRunner:
             db.execute(
                 """INSERT INTO events (book_number, chapter_number, position, title,
                        type, granularity, date_line, summary, location,
-                       participants_json, knowledge_json, source_chunk_ids_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       participants_json, knowledge_json, source_chunk_ids_json,
+                       quote)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (book, ch, pos, ev["title"], ev["type"], ev["granularity"],
                  chapter.get("date_line"), ev.get("summary"), location,
                  json.dumps(participants, ensure_ascii=False),
                  json.dumps(knowledge[:12], ensure_ascii=False),
-                 json.dumps(sources)))
+                 json.dumps(sources), ev.get("quote")))
 
     @staticmethod
     def _store_profile(db, payload: dict, data: dict) -> None:

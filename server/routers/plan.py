@@ -80,11 +80,25 @@ def get_outline(book: int):
         outlines[key] = _seed_outline(book)
         writer_store.save_plan_outline(outlines)
     # Backfill: cards display writer_summary; where the writer hasn't written
-    # one yet, show the extracted chapter summary (key events) as bullets.
-    # Only ever fills EMPTY summaries — never overwrites the writer's words.
+    # one yet, show the enriched prose chapter summary (falling back to key
+    # events as bullets). Only ever fills EMPTY summaries — never overwrites
+    # the writer's words.
+    import html as _html
+    s = get_state()
+    try:
+        prose = dict(s.db.execute(
+            "SELECT chapter_number, summary FROM chapter_summaries "
+            "WHERE book_number = ?", (book,)))
+    except Exception:
+        prose = {}
     changed = False
     for c in outlines[key]:
-        if not (c.get("writer_summary") or "").strip() and c.get("extracted_bullets"):
+        if (c.get("writer_summary") or "").strip():
+            continue
+        if c.get("chapter") in prose:
+            c["writer_summary"] = f"<p>{_html.escape(prose[c['chapter']])}</p>"
+            changed = True
+        elif c.get("extracted_bullets"):
             c["writer_summary"] = _bullets_html(c["extracted_bullets"])
             changed = True
     if changed:

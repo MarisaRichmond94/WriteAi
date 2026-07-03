@@ -114,12 +114,30 @@ def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
                 ORDER BY book_number, chapter_number, position""", params).fetchall()
     except sqlite3.OperationalError:    # enrichment hasn't run yet
         return []
+    # for the reviewed book itself, prose chapter summaries (when enriched)
+    # replace per-event lines — tighter and more narrative
+    try:
+        ch_cond = ("chapter_number < ?" if chapter is not None else "1=1")
+        ch_params = [book, chapter] if chapter is not None else [book]
+        prose = db.execute(
+            f"""SELECT chapter_number, summary FROM chapter_summaries
+                WHERE book_number = ? AND {ch_cond}
+                ORDER BY chapter_number""", ch_params).fetchall()
+    except sqlite3.OperationalError:
+        prose = []
+    if prose:
+        covered = {cn for cn, _ in prose}
+        rows = [r for r in rows if not (r[0] == book and r[1] in covered)]
+        rows += [(book, cn, None, "summary", text) for cn, text in prose]
+        rows.sort(key=lambda r: (r[0], r[1]))
     if not rows:
         return []
     lines = []
     for i, (bn, cn, title, gran, summary) in enumerate(rows):
         ch = "Prologue" if cn == 0 else f"Ch {cn}"
-        if i >= len(rows) - _DIGEST_TAIL:
+        if gran == "summary":               # prose chapter summary line
+            lines.append(f"- (Book {bn}, {ch}) {summary}")
+        elif i >= len(rows) - _DIGEST_TAIL:
             lines.append(f"- (Book {bn}, {ch}) {title}: {summary}")
         elif gran == "major":
             lines.append(f"- (Book {bn}, {ch}) {title}")

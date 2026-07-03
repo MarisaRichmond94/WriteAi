@@ -210,11 +210,18 @@ def chapter_extracted(book: int, chapter: int):
                       "source_quote": None}
                      for f in meta.get("new_information_revealed", []))
         locations.update(meta.get("locations", []))
+    try:
+        srow = s.db.execute(
+            "SELECT summary FROM chapter_summaries WHERE book_number = ? "
+            "AND chapter_number = ?", (book, chapter)).fetchone()
+    except sqlite3.OperationalError:
+        srow = None
     return {
         "chapter": chapter,
         "pov": rows[0][0] or "",
         "date": rows[0][1],
         "summary": summary[:10],
+        "summary_text": srow[0] if srow else None,
         "characters": list(characters.values()),
         "events": [],
         "facts": facts[:20],
@@ -334,6 +341,12 @@ def _build_bible(s, book: int) -> tuple[str, str]:
             out(f"- **Relationships:** {'; '.join(rel_lines)}")
         out("")
 
+    try:
+        ch_prose = dict(db.execute(
+            "SELECT chapter_number, summary FROM chapter_summaries "
+            "WHERE book_number = ?", (book,)))
+    except sqlite3.OperationalError:
+        ch_prose = {}
     out("## Chapter-by-Chapter")
     out("")
     for ch in chs:
@@ -344,6 +357,9 @@ def _build_bible(s, book: int) -> tuple[str, str]:
         if meta["date"]:
             head += f" — {meta['date']}"
         out(head)
+        if ch in ch_prose:
+            out(ch_prose[ch])
+            out("")
         evs = events_by_ch.get(ch, [])
         if evs:
             for t, typ, gran, summ in evs:

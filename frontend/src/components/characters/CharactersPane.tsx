@@ -459,7 +459,10 @@ function CharacterCard({
                   <div className="flex-1 min-w-0">
                     <span className="text-[11px] font-medium text-ink-primary">{rel.target}</span>
                     {label && (
-                      <span className="ml-1 text-[10px] italic text-ink-muted">({label})</span>
+                      <span
+                        className="ml-1 text-[10px] italic text-ink-muted"
+                        title={rel.evidence ? `"${rel.evidence}"` : undefined}
+                      >({label})</span>
                     )}
                   </div>
                   {!relDisabled && <ChevronRight className="flex-shrink-0 h-3 w-3 text-ink-muted/40" />}
@@ -612,7 +615,11 @@ function DetailPanel({
                           <div className="flex-1 min-w-0">
                             <span className="text-[12px] font-medium text-ink-primary">{rel.target}</span>
                             {(rel.gendered_status || rel.status) && (
-                              <span className="ml-1.5 text-[11px] italic text-ink-muted">({rel.gendered_status || rel.status})</span>
+                              <span
+                                className={clsx("ml-1.5 text-[11px] italic text-ink-muted",
+                                  rel.evidence && "cursor-help underline decoration-dotted decoration-ink-muted/40 underline-offset-2")}
+                                title={rel.evidence ? `"${rel.evidence}"` : undefined}
+                              >({rel.gendered_status || rel.status})</span>
                             )}
                           </div>
                           {rel.appearance_count != null && (

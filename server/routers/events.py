@@ -100,7 +100,8 @@ def list_events(book: str | None = None, pov: str | None = None,
     rows = s.db.execute(
         f"""SELECT id, book_number, chapter_number, position, title, type,
                    granularity, date_line, summary, location,
-                   participants_json, knowledge_json, source_chunk_ids_json
+                   participants_json, knowledge_json, source_chunk_ids_json,
+                   quote
             FROM events {where}
             ORDER BY book_number, chapter_number, position""", params).fetchall()
     s.canon.ensure_built()
@@ -115,7 +116,9 @@ def list_events(book: str | None = None, pov: str | None = None,
         if pov and pov not in participants:
             continue
         sources = json.loads(r[12] or "[]")
+        curated = r[13]  # model-chosen quote, verified verbatim at enrich time
         source_quotes, setups = [], []
+        loose_curated = re.sub(r"\s+", " ", curated).strip().lower() if curated else None
         for cid in sources[:3]:
             row = s.db.execute(
                 "SELECT text, book_title, chapter_number, metadata_json "
@@ -123,10 +126,16 @@ def list_events(book: str | None = None, pov: str | None = None,
             if row is None:
                 continue
             text = row[0].strip()
-            # the passage most relevant to this event, sentence-aligned and
-            # verbatim so the chapter viewer can locate and highlight it
-            quote = _relevant_excerpt(text, f"{r[4]} {r[8] or ''}")
-            source_quotes.append({"book": row[1], "chapter": row[2], "quote": quote})
+            if curated:
+                # one curated quote, attributed to the chunk that contains it
+                if not source_quotes and (loose_curated in
+                        re.sub(r"\s+", " ", text).lower() or cid == sources[-1]):
+                    source_quotes.append(
+                        {"book": row[1], "chapter": row[2], "quote": curated})
+            else:
+                # fallback: sentence-aligned lexical excerpt
+                quote = _relevant_excerpt(text, f"{r[4]} {r[8] or ''}")
+                source_quotes.append({"book": row[1], "chapter": row[2], "quote": quote})
             if row[3]:
                 setups.extend(json.loads(row[3]).get("foreshadowing", [])[:1])
         events.append({

@@ -46,9 +46,10 @@ def _profiles(s) -> dict:
     for name, traits, rels, arcs in s.db.execute(
             "SELECT name, traits_json, relationships_json, arcs_json "
             "FROM character_profiles"):
+        parsed = json.loads(rels or "[]")
         out[name] = {"traits": json.loads(traits or "[]"),
-                     "natures": {r["name"]: r.get("nature")
-                                 for r in json.loads(rels or "[]")},
+                     "natures": {r["name"]: r.get("nature") for r in parsed},
+                     "evidence": {r["name"]: r.get("evidence") for r in parsed},
                      "arcs": json.loads(arcs or "{}")}
     return out
 
@@ -78,14 +79,17 @@ def _relationships(s, canon, name: str, cmap: dict) -> list[dict]:
         # which must NOT fall back to the AI-inferred nature
         if override is not None:
             nature = override.get("status") or None
+            evidence = None  # writer-set natures carry no prose evidence
         else:
             nature = prof.get("natures", {}).get(other)
+            evidence = prof.get("evidence", {}).get(other) if nature else None
         rels.append({
             "target": other,
             "character_id": other,
             # status carries only a real (verified or writer-set) nature;
             # the scene count travels separately in appearance_count
             "status": nature or "",
+            "evidence": evidence,
             "gendered_status": None,
             "inferred": nature is None and override is None,
             "appearance_count": count,

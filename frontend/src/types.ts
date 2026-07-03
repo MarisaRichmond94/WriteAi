@@ -64,6 +64,7 @@ export interface ChatMessage {
 }
 
 export interface CharacterRelationship {
+  evidence?: string | null;
   target: string;
   character_id: string;
   status: string;
@@ -399,6 +400,7 @@ export interface PipelineCostEstimate {
 }
 
 export interface ExtractedChapter {
+  summary_text?: string | null;
   chapter: number;
   pov: string;
   date: string | null;
