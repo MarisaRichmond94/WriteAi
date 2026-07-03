@@ -28,6 +28,23 @@
   color: rgb(var(--ink-primary));
 }
 
+/* POV / tag pills use fixed *-300 text shades tuned for dark backgrounds;
+   deepen them to the -700 shades in light mode so they stay readable on
+   the pale pill tints. */
+.light-body .text-violet-300  { color: #6d28d9; }
+.light-body .text-blue-300    { color: #1d4ed8; }
+.light-body .text-emerald-300 { color: #047857; }
+.light-body .text-amber-300   { color: #b45309; }
+.light-body .text-rose-300    { color: #be123c; }
+.light-body .text-cyan-300    { color: #0e7490; }
+.light-body .text-orange-300  { color: #c2410c; }
+.light-body .text-pink-300    { color: #be185d; }
+.light-body .text-teal-300    { color: #0f766e; }
+.light-body .text-indigo-300  { color: #4338ca; }
+.light-body .text-sky-300     { color: #0369a1; }
+.light-body .text-fuchsia-300 { color: #a21caf; }
+.light-body .text-red-300     { color: #b91c1c; }
+
 @layer base {
   * {
     scrollbar-width: thin;
