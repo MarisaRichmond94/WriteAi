@@ -74,7 +74,12 @@ def _relationships(s, canon, name: str, cmap: dict) -> list[dict]:
     rels = []
     for other, count in canon.co_occurrence(name)[:12]:
         override = overrides.get(other)
-        nature = (override or {}).get("status") or prof.get("natures", {}).get(other)
+        # an override always wins — including an explicit clear (empty status),
+        # which must NOT fall back to the AI-inferred nature
+        if override is not None:
+            nature = override.get("status") or None
+        else:
+            nature = prof.get("natures", {}).get(other)
         rels.append({
             "target": other,
             "character_id": other,

@@ -310,9 +310,11 @@ function AliasPills({ aliases, onAliasClick }: { aliases: AliasWithProvenance[];
             {a.alias}{a.count != null && a.count > 0 && <span className="rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-surface-border text-ink-muted">{a.count}</span>}
           </button>
         ) : (
+          // same accent styling as sourced pills — just not clickable, since
+          // this alias never appears verbatim in the prose (no passage to open)
           <span
             key={a.alias}
-            className="inline-flex items-center gap-1.5 rounded-full border border-surface-border px-2 py-0.5 text-[10px] text-ink-muted cursor-default"
+            className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] text-accent cursor-default"
           >
             {a.alias}{a.count != null && a.count > 0 && <span className="rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-surface-border text-ink-muted">{a.count}</span>}
           </span>
