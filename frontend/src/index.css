@@ -107,6 +107,15 @@
   animation: sheen 2.2s ease-in-out infinite;
 }
 
+/* rotating status phrases fade/rise in on change */
+@keyframes phrase-in {
+  0%   { opacity: 0; transform: translateY(5px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.animate-phrase {
+  animation: phrase-in 0.45s ease-out;
+}
+
 @layer utilities {
   .prose-dark {
     color: rgb(var(--ink-primary));

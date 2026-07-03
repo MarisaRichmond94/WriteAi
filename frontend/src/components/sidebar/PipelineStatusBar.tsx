@@ -3,6 +3,36 @@ import { RefreshCw, Sparkles } from "lucide-react";
 import { useAppStore } from "../../store/useAppStore";
 
 const POLL_MS = 8000;
+const PHRASE_MS = 3400;
+
+const SYNC_PHRASES = [
+  "Syncing books…",
+  "Reading your latest pages…",
+  "Comparing chapters…",
+  "Spotting what changed…",
+  "Refreshing the index…",
+];
+
+const ENRICH_PHRASES = [
+  "Enriching insights…",
+  "Reading between the lines…",
+  "Connecting plot threads…",
+  "Studying your characters…",
+  "Cataloguing revelations…",
+  "Tracing story arcs…",
+  "Taking careful notes…",
+  "Cross-referencing chapters…",
+];
+
+function usePhrase(phrases: string[], active: boolean): string {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setI((n) => n + 1), PHRASE_MS);
+    return () => clearInterval(id);
+  }, [active]);
+  return phrases[i % phrases.length];
+}
 
 interface EnrichStatus {
   state: string;
@@ -42,6 +72,9 @@ export default function PipelineStatusBar() {
     };
   }, []);
 
+  const syncPhrase = usePhrase(SYNC_PHRASES, ingestRunning);
+  const enrichPhrase = usePhrase(ENRICH_PHRASES, enrich !== null);
+
   if (!ingestRunning && !enrich) return null;
   const pct = enrich && enrich.total > 0
     ? Math.round((enrich.done / enrich.total) * 100)
@@ -56,8 +89,8 @@ export default function PipelineStatusBar() {
       {ingestRunning && (
         <div>
           <div className="flex items-center gap-1.5 text-[10px] font-medium text-ink-secondary">
-            <RefreshCw className="h-3 w-3 animate-spin text-accent" />
-            Syncing books…
+            <RefreshCw className="h-3 w-3 flex-shrink-0 animate-spin text-accent" />
+            <span key={syncPhrase} className="animate-phrase inline-block">{syncPhrase}</span>
           </div>
           <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-border">
             <div className="animate-indeterminate h-full w-1/3 rounded-full bg-accent" />
@@ -68,8 +101,8 @@ export default function PipelineStatusBar() {
         <div className={ingestRunning ? "mt-2.5" : undefined}>
           <div className="flex items-center justify-between text-[10px] font-medium text-ink-secondary">
             <span className="flex items-center gap-1.5">
-              <Sparkles className="h-3 w-3 animate-pulse-slow text-accent" />
-              Enriching insights
+              <Sparkles className="h-3 w-3 flex-shrink-0 animate-pulse-slow text-accent" />
+              <span key={enrichPhrase} className="animate-phrase inline-block">{enrichPhrase}</span>
             </span>
             <span className="text-ink-muted">
               {enrich.done}/{enrich.total} · {pct}%
