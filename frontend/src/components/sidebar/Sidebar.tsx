@@ -1,4 +1,4 @@
-import { Compass, Clock, Library, MapPin, Users, Info, Kanban, ScanText, FlaskConical } from "lucide-react";
+import { Compass, Clock, Library, MapPin, Users, Info, Kanban, PenLine, ScanText, FlaskConical } from "lucide-react";
 import { FaTimeline } from "react-icons/fa6";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
@@ -12,6 +12,8 @@ const NAV_GROUPS = [
     items: [
       { pane: "plan", label: "Plan", icon: Kanban },
       { pane: "writer-timeline", label: "Timeline", icon: FaTimeline },
+      // Not a pane — jumps to the companion Loom app (see the map below).
+      { pane: "loom-write", label: "Write", icon: PenLine },
       { pane: "review", label: "Review", icon: ScanText },
       { pane: "explore", label: "Explore", icon: Compass },
     ],
@@ -41,7 +43,7 @@ export default function Sidebar() {
           </span>
           <div className="flex items-center gap-1">
             <span className="text-[10px] text-ink-muted">
-              A RAG-Powered Analysis Hub
+              An AI-Powered Writing Hub
             </span>
             <div className="group relative">
               <Info className="h-2.5 w-2.5 text-ink-muted hover:text-ink-secondary transition-colors cursor-default" />
@@ -61,6 +63,22 @@ export default function Sidebar() {
               {groupLabel}
             </p>
             {items.map(({ pane, label, icon: Icon }) => {
+              // "Write" is an external jump into Loom rather than a pane.
+              // Loom resolves the series by name (our site name) and lands
+              // on its author view; same tab so Back returns here.
+              if (pane === "loom-write") {
+                const loomUrl = import.meta.env.VITE_LOOM_URL ?? "http://localhost:3000";
+                return (
+                  <a
+                    key={pane}
+                    href={`${loomUrl}/author/by-title/${encodeURIComponent(siteName)}`}
+                    className="flex w-full items-center gap-3 border-l-2 border-transparent px-4 py-2.5 text-sm text-ink-secondary transition-colors hover:bg-surface hover:text-ink-primary"
+                  >
+                    <Icon className="h-4 w-4 flex-shrink-0" strokeWidth={1.5} />
+                    {label}
+                  </a>
+                );
+              }
               const active = activePane === pane;
               return (
                 <button
