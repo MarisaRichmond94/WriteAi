@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, BookOpen, Calendar, ChevronDown, ChevronLeft, ChevronRight, Clock, Info, MapPin, Search, Users, X, Zap } from "lucide-react";
+import { ArrowLeft, BookOpen, Calendar, ChevronDown, ChevronLeft, ChevronRight, Clock, Info, MapPin, Search, Users, X, Zap } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import type { Citation, TimelineEvent, EventSourceQuote } from "../../types";
@@ -1012,8 +1012,8 @@ export default function TimelinePane() {
     const v = new URLSearchParams(window.location.search).get("tlview");
     return v === "list" || v === "chart" ? v : "chart";
   });
-  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
   const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState("");
   const [filterBook, setFilterBook] = useState("");
   const [filterPov, setFilterPov] = useState("");
   const [events, setEvents] = useState<TimelineEvent[]>([]);
@@ -1061,13 +1061,13 @@ export default function TimelinePane() {
   }, [view]);
 
   const query = search.trim().toLowerCase();
-  const searchedEvents = view === "list" && query
-    ? events.filter((e) =>
-        [e.title, e.summary, e.location ?? "", e.book, e.type,
-         ...(e.participants ?? [])].join(" ").toLowerCase().includes(query))
-    : events;
+  const typeOptions = [...new Set(events.map((e) => e.type))].sort();
   const visibleEvents = view === "list"
-    ? (sortOrder === "asc" ? searchedEvents : [...searchedEvents].reverse())
+    ? events.filter((e) =>
+        (!filterType || e.type === filterType) &&
+        (!query ||
+          [e.title, e.summary, e.location ?? "", e.book, e.type,
+           ...(e.participants ?? [])].join(" ").toLowerCase().includes(query)))
     : events;
 
   const selectedIndex = selectedEvent ? visibleEvents.findIndex((e) => e.id === selectedEvent.id) : -1;
@@ -1153,21 +1153,6 @@ export default function TimelinePane() {
               </button>
             ))}
           </div>
-          {/* Sort button — list only */}
-          <button
-            onClick={() => setSortOrder(o => o === "asc" ? "desc" : "asc")}
-            className={clsx(
-              "flex items-center gap-1 rounded border px-2.5 py-1 text-[11px] font-medium transition-all duration-200",
-              view === "list"
-                ? "border-surface-border bg-surface text-ink-muted opacity-100 hover:bg-surface-hover hover:text-ink-primary"
-                : "pointer-events-none opacity-0"
-            )}
-          >
-            {sortOrder === "asc"
-              ? <><ArrowUp className="h-3 w-3" />Oldest First</>
-              : <><ArrowDown className="h-3 w-3" />Newest First</>
-            }
-          </button>
           {/* Search — list only */}
           <div className={clsx(
             "relative transition-all duration-200",
@@ -1188,6 +1173,18 @@ export default function TimelinePane() {
                 <X className="h-3 w-3" />
               </button>
             )}
+          </div>
+          {/* Event type filter — list only */}
+          <div className={clsx(
+            "transition-all duration-200",
+            view === "list" ? "opacity-100" : "pointer-events-none opacity-0"
+          )}>
+            <Dropdown
+              value={filterType}
+              options={typeOptions}
+              allLabel="All Types"
+              onChange={setFilterType}
+            />
           </div>
         </div>
 
@@ -1219,9 +1216,9 @@ export default function TimelinePane() {
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Chart / list */}
           {view === "list" ? (
-            visibleEvents.length === 0 && query ? (
+            visibleEvents.length === 0 && (query || filterType) ? (
               <div className="flex flex-1 items-center justify-center text-xs text-ink-muted">
-                No events matched "{search}"
+                No events matched{query ? ` "${search}"` : ""}{filterType ? ` (type: ${filterType})` : ""}
               </div>
             ) : (
             <ListView
