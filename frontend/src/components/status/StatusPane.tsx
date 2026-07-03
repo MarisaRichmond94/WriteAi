@@ -223,7 +223,7 @@ export default function StatusPane() {
           activeBookId ? "w-1/2" : "w-full"
         )}>
           {/* Book list */}
-          <div className="flex-1 overflow-y-auto pt-3 pb-2">
+          <div className="flex-1 overflow-y-auto pt-3 pb-4">
             {booksLoading || rebuilding ? (
               <BookListSkeleton />
             ) : (
