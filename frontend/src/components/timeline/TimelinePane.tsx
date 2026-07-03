@@ -1065,9 +1065,7 @@ export default function TimelinePane() {
   const visibleEvents = view === "list"
     ? events.filter((e) =>
         (!filterType || e.type === filterType) &&
-        (!query ||
-          [e.title, e.summary, e.location ?? "", e.book, e.type,
-           ...(e.participants ?? [])].join(" ").toLowerCase().includes(query)))
+        (!query || e.title.toLowerCase().includes(query)))
     : events;
 
   const selectedIndex = selectedEvent ? visibleEvents.findIndex((e) => e.id === selectedEvent.id) : -1;
