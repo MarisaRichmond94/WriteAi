@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, KeyboardEvent } from "react";
-import { BookOpen, ChevronDown, ChevronRight, Eye, Info, Loader2, Moon, RefreshCw, Send, ScanText, ClipboardCheck, Sun, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, Info, Loader2, RefreshCw, Send, ScanText, ClipboardCheck, X } from "lucide-react";
 import { clsx } from "clsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -103,97 +103,6 @@ function Dropdown<T extends string | number>({
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-// ── Review confirm modal ───────────────────────────────────────────────────────
-
-function ReviewConfirmModal({
-  book,
-  chapter,
-  chapterText,
-  focus,
-  onConfirm,
-  onCancel,
-}: {
-  book: string;
-  chapter: number;
-  chapterText: string;
-  focus: ReviewFocus;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  const [lightMode, setLightMode] = useState(() => useAppStore.getState().appSettings?.viewer_light_mode ?? true);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="relative flex w-full max-w-2xl flex-col rounded-xl border border-surface-border bg-surface-card shadow-2xl" style={{ maxHeight: "80vh" }}>
-
-        {/* Header */}
-        <div className="flex-shrink-0 flex items-start justify-between border-b border-surface-border px-5 py-4">
-          <div>
-            <p className="text-sm font-semibold text-ink-primary">Confirm chapter text</p>
-            <p className="mt-0.5 text-[11px] text-ink-muted">
-              This is the text that will be sent for a <span className="text-ink-secondary font-medium">{focus}</span> review. Make sure it's up to date before proceeding.
-            </p>
-          </div>
-          <div className="flex items-center gap-1 ml-4 flex-shrink-0">
-            <button
-              onClick={() => setLightMode((v) => !v)}
-              title={lightMode ? "Switch to dark mode" : "Switch to light mode"}
-              className="rounded-md p-1.5 text-ink-muted hover:bg-surface-hover hover:text-ink-primary transition-colors"
-            >
-              {lightMode ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-            </button>
-            <button
-              onClick={onCancel}
-              className="rounded-md p-1.5 text-ink-muted hover:bg-surface-hover hover:text-ink-primary transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Chapter metadata bar */}
-        <div className="flex-shrink-0 flex items-center gap-3 border-b border-surface-border bg-surface px-5 py-2.5">
-          <BookOpen className="h-4 w-4 flex-shrink-0 text-accent" />
-          <div>
-            <p className="text-[11px] font-semibold text-ink-primary">{book}</p>
-            <p className="text-[10px] text-ink-muted">{chapter === 0 ? "Prologue" : `Chapter ${chapter}`}</p>
-          </div>
-        </div>
-
-        {/* Chapter text */}
-        <div className={clsx("flex-1 min-h-0 overflow-y-auto px-6 py-5 select-text cursor-default", lightMode ? "bg-white" : "bg-surface-card")}>
-          <p className={clsx("text-sm leading-relaxed whitespace-pre-wrap", lightMode ? "text-gray-700" : "text-ink-secondary")}>
-            {chapterText}
-          </p>
-        </div>
-
-        {/* Footer */}
-        <div className="flex-shrink-0 flex items-center justify-between border-t border-surface-border px-5 py-3">
-          <p className="text-[10px] text-ink-muted">
-            If this text is outdated, close and use Resync to update it first.
-          </p>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onCancel}
-              className="rounded-lg border border-surface-border bg-surface px-4 py-1.5 text-[11px] text-ink-secondary transition-colors hover:border-accent/40 hover:text-ink-primary"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={onConfirm}
-              className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-4 py-1.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent/20"
-            >
-              <ScanText className="h-3 w-3" />
-              Send for Review
-            </button>
-          </div>
-        </div>
-
-      </div>
     </div>
   );
 }
@@ -435,8 +344,6 @@ export default function ReviewPane() {
   const [resyncing, setResyncing] = useState(false);
   const [resyncModalOpen, setResyncModalOpen] = useState(false);
 
-  // Review confirm state
-  const [reviewConfirmOpen, setReviewConfirmOpen] = useState(false);
 
   // Conversation state
   const [messages, setMessages] = useState<ReviewMessage[]>([]);
@@ -651,16 +558,6 @@ export default function ReviewPane() {
   }, [canSend, chapterText, filterBook, filterFocus, messages, model, selectedChapter, upsertReview]);
 
   const handleReviewClick = () => {
-    // For synced chapters, show confirmation modal first; for pasted text, send directly
-    if (selectedChapter !== "new" && selectedChapter !== null) {
-      setReviewConfirmOpen(true);
-    } else {
-      sendMessage(`Please give me a ${filterFocus} review of this chapter.`);
-    }
-  };
-
-  const handleReviewConfirm = () => {
-    setReviewConfirmOpen(false);
     sendMessage(`Please give me a ${filterFocus} review of this chapter.`);
   };
 
@@ -732,17 +629,6 @@ export default function ReviewPane() {
           book={filterBook}
           onConfirm={handleResyncConfirm}
           onCancel={() => setResyncModalOpen(false)}
-        />
-      )}
-
-      {reviewConfirmOpen && filterBook && typeof selectedChapter === "number" && (
-        <ReviewConfirmModal
-          book={filterBook}
-          chapter={selectedChapter}
-          chapterText={chapterText}
-          focus={filterFocus}
-          onConfirm={handleReviewConfirm}
-          onCancel={() => setReviewConfirmOpen(false)}
         />
       )}
 
