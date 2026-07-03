@@ -23,14 +23,6 @@ function toCharId(name: string): string {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const RELATIONSHIP_STATUSES = [
-  "parent", "child", "stepparent", "stepchild", "sibling", "half-sibling",
-  "grandparent", "grandchild", "spouse", "dating", "parent-in-law",
-  "sibling-in-law", "child-in-law", "uncle/aunt", "nephew/niece", "cousin",
-  "mentor", "mentee", "student", "teacher", "friend", "enemy", "rival",
-  "boss", "employee", "patient", "doctor", "acquaintance", "colleague",
-];
-
 const INVERSE_STATUSES: Record<string, string> = {
   parent: "child", child: "parent",
   stepparent: "stepchild", stepchild: "stepparent",
@@ -71,95 +63,41 @@ function Err({ msg }: { msg: string }) {
 }
 
 function StatusSelect({ value, onChange, highlighted }: { value: string; onChange: (v: string) => void; highlighted?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState("");
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const popRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (btnRef.current?.contains(e.target as Node)) return;
-      if (popRef.current?.contains(e.target as Node)) return;
-      setOpen(false); setFilter("");
-    };
-    // the dropdown is position:fixed — close if anything scrolls under it
-    const onScroll = (e: Event) => {
-      if (popRef.current?.contains(e.target as Node)) return;
-      setOpen(false); setFilter("");
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("scroll", onScroll, true);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("scroll", onScroll, true);
-    };
-  }, [open]);
-
-  const toggleOpen = () => {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      const width = 176; // w-44
-      setPos({ top: r.bottom + 4, left: Math.max(8, r.right - width) });
-    }
-    setOpen(o => !o);
-    setFilter("");
+  const commit = () => {
+    const t = draft.trim();
+    if (t !== value) onChange(t);
   };
-
-  const filtered = RELATIONSHIP_STATUSES.filter(s => s.includes(filter.toLowerCase()));
 
   return (
     <div className="relative flex-shrink-0">
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={toggleOpen}
-        className={`rounded border px-2 py-1 text-xs transition-colors min-w-[90px] text-left ${
+      <input
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          else if (e.key === "Escape") setDraft(value);
+        }}
+        placeholder="Set status\u2026"
+        className={`w-32 rounded border px-2 py-1 pr-6 text-xs transition-colors focus:outline-none ${
           highlighted
-            ? "border-accent bg-accent-subtle text-accent"
-            : "border-surface-border bg-surface text-ink-primary hover:border-accent"
+            ? "border-accent bg-accent-subtle text-accent placeholder:text-accent/50"
+            : "border-surface-border bg-surface text-ink-primary placeholder:text-ink-muted/60 focus:border-accent"
         }`}
-      >
-        {value || <span className="text-ink-muted/60">Set status…</span>}
-      </button>
-      {open && pos && createPortal(
-        // portaled + fixed: escapes the relationships list's overflow clipping
-        <div
-          ref={popRef}
-          className="fixed z-[60] w-44 rounded-lg border border-surface-border bg-surface-card shadow-xl overflow-hidden"
-          style={{ top: pos.top, left: pos.left }}
+      />
+      {draft && (
+        <button
+          type="button"
+          title="Clear status"
+          onMouseDown={e => e.preventDefault()}
+          onClick={() => { setDraft(""); if (value) onChange(""); }}
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-muted/50 hover:text-ink-primary transition-colors"
         >
-          <div className="border-b border-surface-border p-1.5">
-            <input
-              autoFocus
-              className="w-full rounded bg-surface px-2 py-1 text-xs text-ink-primary placeholder:text-ink-muted focus:outline-none"
-              placeholder="Filter…"
-              value={filter}
-              onChange={e => setFilter(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === "Enter" && filtered.length > 0) { onChange(filtered[0]); setOpen(false); setFilter(""); }
-                else if (e.key === "Escape") { setOpen(false); setFilter(""); }
-              }}
-            />
-          </div>
-          <div className="max-h-40 overflow-y-auto">
-            {filtered.map(s => (
-              <button
-                key={s}
-                type="button"
-                onMouseDown={e => { e.preventDefault(); onChange(s); setOpen(false); setFilter(""); }}
-                className={`w-full px-3 py-1.5 text-left text-xs transition-colors ${
-                  s === value ? "bg-accent-subtle text-accent" : "text-ink-primary hover:bg-surface-hover"
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-            {filtered.length === 0 && <p className="px-3 py-2 text-xs text-ink-muted">No match</p>}
-          </div>
-        </div>,
-        document.body
+          <X className="h-3 w-3" />
+        </button>
       )}
     </div>
   );
@@ -182,7 +120,7 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
   const [relOverrides, setRelOverrides] = useState<Record<string, string>>({});
   const [relAdditions, setRelAdditions] = useState<Array<{ target: string; status: string }>>([]);
   const [newRelTarget, setNewRelTarget] = useState("");
-  const [newRelStatus, setNewRelStatus] = useState(RELATIONSHIP_STATUSES[0]);
+  const [newRelStatus, setNewRelStatus] = useState("");
   const [relTargetDropdownOpen, setRelTargetDropdownOpen] = useState(false);
   const relTargetRef = useRef<HTMLDivElement>(null);
 
@@ -217,7 +155,7 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
     setRelAdditions([]);
     setPendingHidden(null);
     setNewAlias(""); setNewAliasCtx("");
-    setNewRelTarget(""); setNewRelStatus(RELATIONSHIP_STATUSES[0]);
+    setNewRelTarget(""); setNewRelStatus("");
     setMergeOpen(false); setMergeSearch(""); setMergeTarget(null);
     setMergeAlias(character.name); setMergeErr("");
     setSaveErr("");
@@ -310,7 +248,7 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
   const handleQueueRelAdd = () => {
     if (!newRelTarget.trim()) return;
     setRelAdditions(prev => [...prev, { target: newRelTarget.trim(), status: newRelStatus }]);
-    setNewRelTarget(""); setNewRelStatus(RELATIONSHIP_STATUSES[0]);
+    setNewRelTarget(""); setNewRelStatus("");
   };
 
   // ── Save ──────────────────────────────────────────────────────────────────
