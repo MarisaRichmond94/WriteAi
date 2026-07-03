@@ -81,7 +81,7 @@ function StatusSelect({ value, onChange, highlighted }: { value: string; onChang
           if (e.key === "Enter") (e.target as HTMLInputElement).blur();
           else if (e.key === "Escape") setDraft(value);
         }}
-        placeholder="Set status\u2026"
+        placeholder="Set status…"
         className={`w-32 rounded border px-2 py-1 pr-6 text-xs transition-colors focus:outline-none ${
           highlighted
             ? "border-accent bg-accent-subtle text-accent placeholder:text-accent/50"
