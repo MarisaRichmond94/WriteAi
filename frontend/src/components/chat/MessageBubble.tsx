@@ -1,6 +1,7 @@
+import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import type { Citation, Message } from "../../types";
 import CitationCard from "./CitationCard";
 import StreamingIndicator from "./StreamingIndicator";
@@ -41,12 +42,13 @@ export default function MessageBubble({ message, onCitationClick, activeCitation
 
   // Assistant message
   const hasCitations = !message.isStreaming && !!message.citations && message.citations.length > 0;
+  const [sourcesOpen, setSourcesOpen] = useState(false);
 
   return (
     <div className="flex justify-start h-full">
       <div className="flex w-[90%] flex-col h-full gap-4">
-        {/* Response box — flex-[55] of available height */}
-        <div className="relative min-h-0" style={{ flex: "55 55 0%" }}>
+        {/* Response box — takes the sources' share of height while collapsed */}
+        <div className="relative min-h-0" style={{ flex: sourcesOpen ? "55 55 0%" : "1 1 0%" }}>
           <div className="rounded-2xl rounded-tl-sm bg-surface-card px-4 py-3 border border-surface-border h-full overflow-y-auto">
             {message.isStreaming && !message.content ? (
               <StreamingIndicator />
@@ -65,18 +67,25 @@ export default function MessageBubble({ message, onCitationClick, activeCitation
           )}
         </div>
 
-        {/* Citations — flex-[35] of available height, always reserves space */}
-        <div className="min-h-0 flex flex-col" style={{ flex: "35 35 0%" }}>
+        {/* Citations — collapsed to a header row by default */}
+        <div className="min-h-0 flex flex-col" style={sourcesOpen ? { flex: "35 35 0%" } : { flex: "0 0 auto" }}>
           {hasCitations && (<>
             <div className="flex-shrink-0 flex items-center justify-between px-1 mb-1.5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-white">
+              <button
+                onClick={() => setSourcesOpen((o) => !o)}
+                className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-white hover:text-accent transition-colors"
+              >
+                {sourcesOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 Sources ({message.citations!.length})
-              </p>
-              <p className="text-[10px] text-white">
-                Click a row to view the sourced text in context
-              </p>
+              </button>
+              {sourcesOpen && (
+                <p className="text-[10px] text-white">
+                  Click a row to view the sourced text in context
+                </p>
+              )}
             </div>
 
+            {sourcesOpen && (
             <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
               {[...message.citations!]
                 .sort((a, b) => a.distance - b.distance)
@@ -90,6 +99,7 @@ export default function MessageBubble({ message, onCitationClick, activeCitation
                   />
                 ))}
             </div>
+            )}
 
             {message.timestamp && (
               <p className="flex-shrink-0 mt-1.5 pl-1 text-[10px] text-ink-muted">

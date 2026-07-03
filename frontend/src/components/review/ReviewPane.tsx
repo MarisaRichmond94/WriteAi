@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, KeyboardEvent } from "react";
-import { BookOpen, ChevronDown, Eye, Info, Loader2, Moon, RefreshCw, Send, ScanText, ClipboardCheck, Sun, X } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, Eye, Info, Loader2, Moon, RefreshCw, Send, ScanText, ClipboardCheck, Sun, X } from "lucide-react";
 import { clsx } from "clsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -323,6 +323,7 @@ function ReviewBubble({
   activeCitation: Citation | null;
 }) {
   const isUser = message.role === "user";
+  const [sourcesOpen, setSourcesOpen] = useState(false);
 
   if (isUser) {
     const timestamp = message.timestamp
@@ -366,13 +367,20 @@ function ReviewBubble({
           )}
         </div>
         {!message.isStreaming && message.citations && message.citations.length > 0 && (
-          <div className="mt-2 flex flex-col min-h-0 flex-1">
+          <div className={clsx("mt-2 flex flex-col min-h-0", sourcesOpen && "flex-1")}>
             <div className="flex-shrink-0 flex items-center justify-between px-1 mb-1.5">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-white">
+              <button
+                onClick={() => setSourcesOpen((o) => !o)}
+                className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-white hover:text-accent transition-colors"
+              >
+                {sourcesOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 Sources ({message.citations.length})
-              </p>
-              <p className="text-[10px] text-white">Click a row to view the sourced text in context</p>
+              </button>
+              {sourcesOpen && (
+                <p className="text-[10px] text-white">Click a row to view the sourced text in context</p>
+              )}
             </div>
+            {sourcesOpen && (
             <div className="flex-1 min-h-0 overflow-y-auto space-y-1.5">
               {[...message.citations]
                 .sort((a, b) => a.distance - b.distance)
@@ -386,6 +394,7 @@ function ReviewBubble({
                   />
                 ))}
             </div>
+            )}
             {message.timestamp && (
               <p className="flex-shrink-0 mt-1.5 pl-1 text-[10px] text-ink-muted">
                 {new Date(message.timestamp).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
