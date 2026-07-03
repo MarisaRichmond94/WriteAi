@@ -97,7 +97,7 @@ export default function ChatPane() {
       <FilterBar />
 
       {/* Middle area: horizontal split when viewer is open */}
-      <div className="flex flex-1 min-h-0">
+      <div className="flex flex-1 min-h-0 pt-2">
 
         {/* Message list — narrows from 100% → 60% when viewer opens */}
         <div

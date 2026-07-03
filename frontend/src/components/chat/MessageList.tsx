@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAppStore } from "../../store/useAppStore";
 import MessageBubble from "./MessageBubble";
 import { MessageSquare } from "lucide-react";
@@ -11,6 +11,11 @@ interface Props {
 
 export default function MessageList({ onCitationClick, activeCitation }: Props) {
   const { messages } = useAppStore();
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
 
   if (messages.length === 0) {
     return (
@@ -31,15 +36,16 @@ export default function MessageList({ onCitationClick, activeCitation }: Props) 
   }
 
   return (
-    <div className="flex flex-col h-full px-4">
+    <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4">
       {messages.map((message) => (
-        <div
+        <MessageBubble
           key={message.id}
-          className={message.role === "user" ? "flex-shrink-0 h-[10%]" : "flex-1 min-h-0"}
-        >
-          <MessageBubble message={message} onCitationClick={onCitationClick} activeCitation={activeCitation} />
-        </div>
+          message={message}
+          onCitationClick={onCitationClick}
+          activeCitation={activeCitation}
+        />
       ))}
+      <div ref={bottomRef} />
     </div>
   );
 }

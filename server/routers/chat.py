@@ -75,6 +75,7 @@ def chat_stream(req: ChatRequest):
         history = [{"role": m["role"], "content": m["content"]}
                    for m in req.conversation_history[-8:]
                    if m.get("role") in ("user", "assistant") and m.get("content")]
+
         extra = ALTERNATE_EXTRA if req.mode == "alternate" else ""
         for delta in answerer.answer_stream(plan, excerpts, notes,
                                             history=history, system_extra=extra):
