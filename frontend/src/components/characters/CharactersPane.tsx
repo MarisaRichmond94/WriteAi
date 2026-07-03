@@ -787,11 +787,8 @@ function ScrollableList({ children }: { children: React.ReactNode }) {
 function ArcEntryRow({ entry, onSourceClick }: { entry: ArcEntry; onSourceClick?: (entry: ArcEntry) => void }) {
   return (
     <div className="group flex items-start gap-2">
-      {entry.chapter != null && (
-        <span className="mt-0.5 flex-shrink-0 rounded bg-accent-subtle px-1.5 py-0.5 text-[10px] font-medium text-accent">
-          {chapterLabel(entry.chapter)}
-        </span>
-      )}
+      {/* no chapter badge: arc insights are book-level summaries — the
+          backend's chapter field is a 0 placeholder, not a real chapter */}
       <p className="flex-1 text-[11px] text-ink-secondary leading-relaxed">{entry.insight}</p>
       {entry.source_quote && onSourceClick && (
         <button
