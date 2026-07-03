@@ -605,16 +605,6 @@ function ChapterRow({
             );
           })()}
 
-          {/* Scroll to top */}
-          <div className="flex justify-center border-t border-surface-border py-3">
-            <button
-              onClick={() => headerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
-              className="flex items-center gap-1.5 text-[11px] text-ink-muted transition-colors hover:text-ink-secondary"
-            >
-              <ChevronUp className="h-3 w-3" />
-              Scroll To Top
-            </button>
-          </div>
         </div>
       )}
     </div>
