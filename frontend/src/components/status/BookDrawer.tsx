@@ -122,6 +122,40 @@ function ChapterSkeleton() {
   );
 }
 
+// ── Capped scroll area — gradients hint at hidden content above/below ──────
+function CappedScroll({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [canUp, setCanUp] = useState(false);
+  const [canDown, setCanDown] = useState(false);
+  const check = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setCanUp(el.scrollTop > 4);
+    setCanDown(el.scrollTop + el.clientHeight < el.scrollHeight - 4);
+  }, []);
+  useEffect(() => {
+    check();
+    const el = ref.current;
+    if (!el) return;
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [check]);
+  return (
+    <div className="relative">
+      <div ref={ref} onScroll={check} className="max-h-[100px] overflow-y-auto pr-1">
+        {children}
+      </div>
+      {canUp && (
+        <div className="pointer-events-none absolute left-0 right-0 top-0 h-6 bg-gradient-to-b from-surface to-transparent" />
+      )}
+      {canDown && (
+        <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-surface to-transparent" />
+      )}
+    </div>
+  );
+}
+
 // ── Summary card ─────────────────────────────────────────────────
 function StatChip({ label, value }: { label: string; value: number }) {
   return (
@@ -443,7 +477,8 @@ function ChapterRow({
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Summary
                     </p>
-                    <ul className="max-h-[200px] space-y-1 overflow-y-auto pr-1">
+                    <CappedScroll>
+                    <ul className="space-y-1">
                       {data.summary.map((bullet, i) => (
                         <li key={i} className="flex items-start gap-1.5">
                           <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-ink-muted/50" />
@@ -451,6 +486,7 @@ function ChapterRow({
                         </li>
                       ))}
                     </ul>
+                    </CappedScroll>
                   </NavSection>
                 )}
 
@@ -460,7 +496,8 @@ function ChapterRow({
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Characters ({data.characters.length})
                     </p>
-                    <div className="max-h-[200px] space-y-3 overflow-y-auto pr-1">
+                    <CappedScroll>
+                    <div className="space-y-3">
                       {data.characters.map((c, i) => {
                         // no POV badge: the chapter header already names the POV
                         const role = c.role.replace(/^POV character[;,]?\s*/i, "");
@@ -490,6 +527,7 @@ function ChapterRow({
                         );
                       })}
                     </div>
+                    </CappedScroll>
                   </NavSection>
                 )}
 
@@ -499,7 +537,8 @@ function ChapterRow({
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Events ({data.events.length})
                     </p>
-                    <div className="max-h-[200px] space-y-2 overflow-y-auto pr-1">
+                    <CappedScroll>
+                    <div className="space-y-2">
                       {data.events.map((e, i) => (
                         <div key={i} className="group flex items-start gap-1.5">
                           <div className="flex-1 min-w-0">
@@ -517,6 +556,7 @@ function ChapterRow({
                         </div>
                       ))}
                     </div>
+                    </CappedScroll>
                   </NavSection>
                 )}
 
@@ -538,7 +578,8 @@ function ChapterRow({
                       </button>
                       <span className="text-[9px] font-semibold uppercase tracking-widest text-ink-muted">Detail</span>
                     </div>
-                    <div className="max-h-[200px] divide-y divide-surface-border/40 overflow-y-auto pr-1">
+                    <CappedScroll>
+                    <div className="divide-y divide-surface-border/40">
                       {sorted.map((f, i) => (
                         <div key={i} className="group flex items-center gap-3 py-2.5">
                           <span className={clsx("w-20 flex-shrink-0 rounded px-1.5 py-0.5 text-center text-[9px] font-medium", factCategoryColor(f.category))}>
@@ -551,6 +592,7 @@ function ChapterRow({
                         </div>
                       ))}
                     </div>
+                    </CappedScroll>
                   </NavSection>
                 )}
 
