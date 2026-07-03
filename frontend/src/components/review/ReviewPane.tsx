@@ -61,6 +61,8 @@ function Dropdown<T extends string | number>({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  // explicit emptiness check — chapter 0 (the prologue) is a valid value
+  const hasValue = value !== "";
 
   useEffect(() => {
     if (!open) return;
@@ -77,12 +79,12 @@ function Dropdown<T extends string | number>({
         onClick={() => setOpen((v) => !v)}
         className={clsx(
           "flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-          value
+          hasValue
             ? "border-accent bg-accent/10 text-accent"
             : "border-surface-border bg-surface text-ink-secondary hover:border-accent/50 hover:text-ink-primary"
         )}
       >
-        <span>{value ? (renderValue ? renderValue(value as T) : value) : placeholder}</span>
+        <span>{hasValue ? (renderValue ? renderValue(value as T) : value) : placeholder}</span>
         <ChevronDown className={clsx("h-3 w-3 flex-shrink-0 transition-transform", open && "rotate-180")} />
       </button>
       {open && (
