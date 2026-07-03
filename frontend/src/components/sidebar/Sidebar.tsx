@@ -2,6 +2,7 @@ import { Compass, Clock, Library, Users, Info, Kanban, ScanText, FlaskConical } 
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import ChatHistory from "./ChatHistory";
+import PipelineStatusBar from "./PipelineStatusBar";
 import ReviewHistory from "./ReviewHistory";
 
 const NAV_GROUPS = [
@@ -85,6 +86,7 @@ export default function Sidebar() {
       {activePane === "explore" && <ChatHistory />}
       {activePane === "review" && <ReviewHistory />}
 
+      <PipelineStatusBar />
     </aside>
   );
 }
