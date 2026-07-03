@@ -15,8 +15,8 @@ from fastapi.staticfiles import StaticFiles
 
 from config import REPO_ROOT
 
-from .routers import (books, characters, chat, events, notifications,
-                      plan, review, sessions, settings)
+from .routers import (books, characters, chat, events, locations,
+                      notifications, plan, review, sessions, settings)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
@@ -28,8 +28,8 @@ app.add_middleware(  # dev server on :5173 talks to us directly
     CORSMiddleware, allow_origins=["http://localhost:5173"],
     allow_methods=["*"], allow_headers=["*"])
 
-for r in (books, chat, review, characters, events, notifications, plan,
-          sessions, settings):
+for r in (books, chat, review, characters, events, locations,
+          notifications, plan, sessions, settings):
     app.include_router(r.router)
 
 dist = REPO_ROOT / "frontend" / "dist"

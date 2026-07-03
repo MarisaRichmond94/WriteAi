@@ -9,6 +9,7 @@ import { isMockMode, MOCK_BOOKS, MOCK_INDEX_STATUS, MOCK_APP_SETTINGS } from "..
 import Sidebar from "../sidebar/Sidebar";
 import ChatPane from "../chat/ChatPane";
 import TimelinePane from "../timeline/TimelinePane";
+import LocationsPane from "../locations/LocationsPane";
 import StatusPane from "../status/StatusPane";
 import CharactersPane from "../characters/CharactersPane";
 import PlanPane from "../plan/PlanPane";
@@ -160,6 +161,7 @@ export default function AppShell() {
 
         {activePane === "explore" && <ChatPane />}
         {activePane === "timeline" && <TimelinePane />}
+        {activePane === "locations" && <LocationsPane />}
         {activePane === "plan" && <PlanPane />}
         {activePane === "review" && <ReviewPane />}
         {activePane === "status" && <StatusPane />}

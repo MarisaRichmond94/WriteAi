@@ -1,4 +1,4 @@
-import { Compass, Clock, Library, Users, Info, Kanban, ScanText, FlaskConical } from "lucide-react";
+import { Compass, Clock, Library, MapPin, Users, Info, Kanban, ScanText, FlaskConical } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import ChatHistory from "./ChatHistory";
@@ -20,6 +20,7 @@ const NAV_GROUPS = [
       { pane: "status", label: "Books", icon: Library },
       { pane: "characters", label: "Characters", icon: Users },
       { pane: "timeline", label: "Events", icon: Clock },
+      { pane: "locations", label: "Locations", icon: MapPin },
     ],
   },
 ] as const;

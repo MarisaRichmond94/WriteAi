@@ -61,6 +61,12 @@ CREATE TABLE IF NOT EXISTS chapter_summaries (
     PRIMARY KEY (book_number, chapter_number)
 );
 
+CREATE TABLE IF NOT EXISTS location_map (
+    raw TEXT PRIMARY KEY,
+    place TEXT,
+    parent TEXT
+);
+
 CREATE TABLE IF NOT EXISTS enrich_state (
     scope TEXT PRIMARY KEY,
     content_hash TEXT NOT NULL
@@ -89,6 +95,42 @@ _EVENTS_SCHEMA = {
     "required": ["events", "chapter_summary"],
     "additionalProperties": False,
 }
+
+_LOC_SCHEMA = {
+    "type": "object",
+    "properties": {"mappings": {"type": "array", "items": {
+        "type": "object",
+        "properties": {
+            "raw": {"type": "string"},
+            "place": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "parent": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+        "required": ["raw", "place", "parent"],
+        "additionalProperties": False,
+    }}},
+    "required": ["mappings"],
+    "additionalProperties": False,
+}
+
+LOC_PROMPT = """You are normalizing location strings extracted from a fiction series into a clean two-level gazetteer.
+
+For each raw string, return:
+- place: the canonical location at one of exactly two granularities —
+  a SETTLEMENT (town, city, e.g. "Los Angeles") or a VENUE (a specific home,
+  school, business, or landmark, e.g. "Emma's house", "Crestwood High School").
+  Sub-areas collapse to their venue: "Emma's house - porch" -> "Emma's house";
+  "gym at Crestwood High" -> "Crestwood High School".
+- parent: the settlement the venue is in, when the strings make it clear;
+  null otherwise. A settlement's own parent is null.
+- place = null for NON-places and unusable fragments: phone/video calls,
+  events described as places, vehicles and driving, roads and highways,
+  street addresses with no named venue, and generic unanchored rooms
+  ("a basement room", "a dark alleyway"). A missing location is better
+  than a bad one.
+
+CONSISTENCY: known_places lists canonical names already established (with
+their parents). When a raw string refers to one of them, copy that name
+EXACTLY. Never invent multiple spellings of the same place."""
 
 _PROFILE_SCHEMA = {
     "type": "object",
@@ -342,6 +384,14 @@ def _cap_per_book(rows: list[tuple], budget: int) -> list[tuple]:
     return [r for b in sorted(by_book) for r in by_book[b][:per]]
 
 
+def _loc_inputs(db) -> tuple[list[list[str]], str]:
+    """Distinct raw location strings in batches, plus a content hash."""
+    raws = [r[0] for r in db.execute(
+        "SELECT DISTINCT name FROM locations ORDER BY name")]
+    batches = [raws[i:i + 120] for i in range(0, len(raws), 120)]
+    return batches, _hash(["locmap-v1", raws])
+
+
 def _profile_inputs(db, canon, min_chunks: int = 8) -> list[dict]:
     """Per-character payloads for the profile pass (main cast only)."""
     canon.ensure_built()
@@ -410,17 +460,22 @@ def preview(db, cfg, canon) -> dict:
                 if _state(db, f"profile:{p['name']}") != p["content_hash"]]
     rels = [r for r in _rel_inputs(db, canon)
             if _state(db, f"rels:{r['name']}") != r["content_hash"]]
-    in_tok = sum(len(json.dumps(c["notes"])) // 3
+    loc_batches, loc_hash = _loc_inputs(db)
+    if _state(db, "locmap") == loc_hash:
+        loc_batches = []
+    in_tok = sum(len(json.dumps(b)) // 3 + 600 for b in loc_batches) + sum(len(json.dumps(c["notes"])) // 3
                  + sum(len(t["text"]) for t in c["prose"]) // 3 + 400
                  for c in chapters) \
         + sum((len(p["knowledge"]) + len(p["beats"])) * 20 + 500 for p in profiles) \
         + sum(len(json.dumps(r["evidence"])) // 3 + 400 for r in rels)
-    out_tok = len(chapters) * 550 + len(profiles) * 500 + len(rels) * 250
+    out_tok = (len(chapters) * 550 + len(profiles) * 500 + len(rels) * 250
+               + sum(len(b) * 25 for b in loc_batches))
     in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))
     return {
         "chapters_to_process": len(chapters),
         "profiles_to_process": len(profiles),
         "relationships_to_process": len(rels),
+        "location_batches_to_process": len(loc_batches),
         "estimated_cost_usd": round((in_tok * in_p + out_tok * out_p) / 1e6, 3),
         "model": cfg.extraction_model,
     }
@@ -465,8 +520,12 @@ class EnrichmentRunner:
                         if _state(db, f"profile:{p['name']}") != p["content_hash"]]
             rels = [r for r in _rel_inputs(db, canon)
                     if _state(db, f"rels:{r['name']}") != r["content_hash"]]
+            loc_batches, loc_hash = _loc_inputs(db)
+            if _state(db, "locmap") == loc_hash:
+                loc_batches = []
             self.status.update(state="running", done=0,
-                               total=len(chapters) + len(profiles) + len(rels),
+                               total=(len(chapters) + len(profiles) + len(rels)
+                                      + len(loc_batches)),
                                cost_usd=0.0, error=None)
 
             def call(system, user, schema):
@@ -560,6 +619,39 @@ class EnrichmentRunner:
                 except Exception as e:
                     log.warning("relationship enrichment failed for %s: %s", r["name"], e)
                 self.status["done"] += 1
+
+            # location gazetteer — sequential batches share the growing canon
+            if loc_batches:
+                known: dict[str, str | None] = {}
+                failed_batches = 0
+                for batch in loc_batches:
+                    try:
+                        data = call(LOC_PROMPT, json.dumps({
+                            "known_places": [
+                                {"place": k, "parent": v}
+                                for k, v in sorted(known.items())],
+                            "locations": batch,
+                        }, ensure_ascii=False), _LOC_SCHEMA)
+                        valid = set(batch)
+                        for m in data.get("mappings", []):
+                            if m.get("raw") not in valid:
+                                continue
+                            place, parent = m.get("place"), m.get("parent")
+                            if place:
+                                known.setdefault(place, parent)
+                            db.execute(
+                                "INSERT INTO location_map (raw, place, parent) "
+                                "VALUES (?,?,?) ON CONFLICT(raw) DO UPDATE SET "
+                                "place = excluded.place, parent = excluded.parent",
+                                (m["raw"], place, parent))
+                        db.commit()
+                    except Exception as e:
+                        failed_batches += 1
+                        log.warning("location batch failed: %s", e)
+                    self.status["done"] += 1
+                if not failed_batches:
+                    _set_state(db, "locmap", loc_hash)
+                    db.commit()
 
             self._reconcile_directions(db)
             self.status["state"] = "done"
