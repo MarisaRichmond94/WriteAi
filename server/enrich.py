@@ -394,7 +394,7 @@ def _rel_inputs(db, canon) -> list[dict]:
             "name": p["name"],
             "others": others,
             "evidence": evidence,
-            "content_hash": _hash(["rel-v4", evidence]),
+            "content_hash": _hash(["rel-v5", evidence]),
         })
     return out
 
@@ -563,9 +563,23 @@ class EnrichmentRunner:
 
             self._reconcile_directions(db)
             self.status["state"] = "done"
+            try:
+                from . import notify
+                notify.add("extraction_complete", "Enrichment complete",
+                           f"{self.status['total']} tasks processed "
+                           f"(${self.status['cost_usd']:.2f}). Events, summaries, "
+                           "and profiles are up to date.",
+                           action_url="/?pane=timeline")
+            except Exception:
+                log.exception("failed to write enrichment notification")
         except Exception as e:
             log.exception("enrichment run failed")
             self.status.update(state="error", error=str(e))
+            try:
+                from . import notify
+                notify.add("error", "Enrichment failed", str(e))
+            except Exception:
+                pass
 
     @staticmethod
     def _store_events(db, chapter: dict, events: list[dict]) -> None:
@@ -670,6 +684,13 @@ class EnrichmentRunner:
             return re.sub(r"\s+", " ", s).strip().lower()
 
         valid = set(payload["others"])
+        me_first = payload["name"].split()[0].lower()
+        kw_re = re.compile("|".join(re.escape(k) for k in _REL_KEYWORDS))
+        # first-person possessive claim ("my girlfriend", "my little
+        # brother's girlfriend") — only valid evidence when the narrator IS
+        # the profile owner; otherwise it's someone else's relationship
+        poss_re = re.compile(r"\bmy\s+(?:\w+'?s?\s+){0,2}(?:%s)"
+                             % "|".join(re.escape(k) for k in _REL_KEYWORDS))
         verified = []
         for r in data.get("relationships", []):
             name = r.get("name")
@@ -677,11 +698,26 @@ class EnrichmentRunner:
                 continue
             nature, evidence = r.get("nature"), r.get("evidence")
             snippets = payload["evidence"].get(name, [])
-            ok = bool(nature and evidence
-                      and any(norm(evidence) in norm(s) for s in snippets))
+            src = next((s for s in snippets
+                        if evidence and norm(evidence) in norm(s)), None)
+            ok = bool(nature and evidence and src)
+            reason = "quote not found in snippets"
+            if ok:
+                ev_norm = norm(evidence)
+                # evidence must actually contain a relationship word — an
+                # atmospheric quote cannot establish a nature
+                if not kw_re.search(ev_norm):
+                    ok, reason = False, "no relationship keyword in evidence"
+                else:
+                    m = re.search(r"\[narrator: ([^\]]+)\]", src)
+                    narrator = (m.group(1).split()[0].lower() if m else "")
+                    if poss_re.search(ev_norm) and narrator != me_first:
+                        ok, reason = False, (
+                            f"first-person possessive narrated by {narrator!r},"
+                            f" not the profile owner")
             if nature and not ok:
-                log.info("rejected unverified nature %r for %s -> %s",
-                         nature, payload["name"], name)
+                log.info("rejected nature %r for %s -> %s (%s)",
+                         nature, payload["name"], name, reason)
             verified.append({
                 "name": name,
                 "nature": nature if ok else None,

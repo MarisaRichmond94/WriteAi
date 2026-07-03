@@ -35,7 +35,13 @@ def get_settings():
     counts = {t: s.db.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
               for t in ("chunks", "characters", "character_knowledge",
                         "foreshadowing", "unresolved_questions")}
-    return {"fields": fields, "profile": writer_store.ui_settings(),
+    from src.discovery import discover_books
+    try:
+        discovered = [b.title for b in discover_books(get_state().cfg)]
+    except Exception:
+        discovered = []
+    return {"fields": fields, "discovered_books": discovered,
+            "profile": writer_store.ui_settings(),
             "store_counts": counts}
 
 
@@ -109,3 +115,32 @@ def validate_settings():
     books = settings_cli.find_books(values)
     return {"ok": not problems, "problems": problems,
             "books": books if isinstance(books, list) else []}
+
+
+class PickFolderBody(BaseModel):
+    current: str | None = None
+
+
+@router.post("/settings/pick-folder")
+def pick_folder(body: PickFolderBody):
+    """Native macOS folder chooser — fine for a local single-user app.
+    Returns {path: null} when the user cancels."""
+    import os
+    import subprocess
+    from pathlib import Path as _P
+
+    script = 'POSIX path of (choose folder with prompt "Select a folder")'
+    if body.current:
+        cur = _P(os.path.expanduser(body.current))
+        if cur.is_dir():
+            script = ('POSIX path of (choose folder with prompt '
+                      f'"Select a folder" default location POSIX file "{cur}")')
+    try:
+        out = subprocess.run(["osascript", "-e", script],
+                             capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        return {"path": None}
+    if out.returncode != 0:  # user cancelled the dialog
+        return {"path": None}
+    path = out.stdout.strip().rstrip("/")
+    return {"path": path or None}

@@ -48,13 +48,13 @@ SYSTEM_PROMPT = """You are analyzing chunks of a fiction series the way a carefu
 For EVERY chunk you receive, extract metadata based only on what the text of that chunk says. Never invent details that are not present in the text.
 
 Field guidance:
-- characters_present: characters who appear or speak in the chunk (canonical full names when known, e.g. "Jared Gatlin").
+- characters_present: characters who appear or speak in the chunk (canonical full names when known, e.g. "Maria Santos" rather than "Maria").
 - locations: physical places where the chunk's action occurs or that are meaningfully referenced.
 - timeline_position: when this happens relative to the story (use the chunk's date header and in-text time cues), or null if nothing indicates it.
 - key_events: the concrete plot events that happen in this chunk.
 - new_information_revealed: facts the READER learns for the first time in this chunk.
 - character_knowledge_updates: for each character who LEARNS something in this chunk, what they learn. Only include knowledge gained here, by that character — not things the reader knows but the character does not. Never use "Reader" as a character here; what the reader learns belongs in new_information_revealed.
-- emotional_beats: character emotional states and shifts (e.g. "Jared feels cornered and ashamed").
+- emotional_beats: character emotional states and shifts (e.g. "the narrator feels cornered and ashamed").
 - foreshadowing: hints, planted details, or ominous notes that seem intended to pay off later.
 - unresolved_questions: questions this chunk raises that it does not answer.
 

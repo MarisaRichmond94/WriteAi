@@ -469,6 +469,27 @@ def ingest_run(book: int | None = None):
                 cmd, cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT)
         _ingest["log_path"] = log_path
         _ingest["started_at"] = datetime.now().isoformat()
+
+        # notify the bell when the background sync exits
+        proc = _ingest["proc"]
+        s = get_state()
+        title = (dict(s.db.execute(
+            "SELECT DISTINCT book_number, book_title FROM chunks")).get(book)
+            if book is not None else None)
+        scope = title or "all books"
+
+        def _watch(proc=proc, scope=scope, title=title):
+            # success and no-op runs self-report from ingest.py with a full
+            # summary; the watcher only covers crashes that never got there
+            code = proc.wait()
+            if code != 0:
+                from .. import notify
+                notify.add("error", "Sync failed",
+                           f"Re-ingest of {scope} exited with code {code}. "
+                           "See logs/ingest_ui.log.",
+                           book=title, action_url="/?pane=status")
+
+        threading.Thread(target=_watch, daemon=True).start()
     return {"started": True}
 
 
