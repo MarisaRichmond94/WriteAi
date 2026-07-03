@@ -140,8 +140,10 @@ export default function ChapterCard({
                 placeholder="Enter POV"
                 autoComplete="off"
                 disabled={disabled}
+                size={Math.max((inlinePov || "Enter POV").length, 4)}
+                style={{ width: `calc(${Math.max((inlinePov || "Enter POV").length, 4)}ch + 18px)` }}
                 className={clsx(
-                  "rounded-full px-2 py-0.5 text-[10px] font-medium border-none outline-none w-28 transition-colors cursor-text",
+                  "rounded-full px-2 py-0.5 text-[10px] font-medium border-none outline-none transition-colors cursor-text",
                   "focus:ring-1 focus:ring-accent/40",
                   povFocused ? "text-left" : "text-center",
                   inlinePov
