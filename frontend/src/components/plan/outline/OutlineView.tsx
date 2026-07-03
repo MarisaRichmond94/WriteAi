@@ -1,6 +1,23 @@
 import { useState } from "react";
 import { clsx } from "clsx";
 import { Plus, Kanban } from "lucide-react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+  type DragStartEvent,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  rectSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { usePlanStore } from "../../../store/usePlanStore";
 import { useAppStore } from "../../../store/useAppStore";
 import {
@@ -14,6 +31,50 @@ import ResyncModal from "./ResyncModal";
 import OutlineReviewPanel from "./OutlineReviewPanel";
 import ConfirmModal from "../../ui/ConfirmModal";
 import { chapterLabel } from "../../../lib/format";
+
+// Blocks drag initiation when the pointer goes down on an interactive element
+// (anything marked data-no-dnd="true" or its ancestors).
+class NoDndPointerSensor extends PointerSensor {
+  static activators = [
+    {
+      eventName: "onPointerDown" as const,
+      handler: ({ nativeEvent }: { nativeEvent: PointerEvent }) => {
+        let el: Element | null = nativeEvent.target as Element;
+        while (el) {
+          if ((el as HTMLElement).dataset?.noDnd === "true") return false;
+          el = el.parentElement;
+        }
+        return true;
+      },
+    },
+  ];
+}
+
+function SortableChapterCard(props: {
+  chapter: OutlineChapter;
+  sortedIndex: number;
+  hasDiff: boolean;
+  diffCount: number;
+  povSuggestions: string[];
+  onDiffClick: () => void;
+  onDelete: () => void;
+  onSave: (partial: Omit<OutlineChapter, "id"> & { id?: string }) => void;
+  disabled: boolean;
+}) {
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } =
+    useSortable({ id: props.chapter.id });
+
+  return (
+    <ChapterCard
+      {...props}
+      dragRef={setNodeRef}
+      dragListeners={listeners ?? undefined}
+      dragAttributes={attributes}
+      dragStyle={{ transform: CSS.Transform.toString(transform), transition }}
+      isDragging={isDragging}
+    />
+  );
+}
 
 function ChapterCardSkeleton() {
   return (
@@ -79,6 +140,11 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
   const outlineLoading = outlineByBook[bookId] === undefined;
   const chapters = outlineByBook[bookId] ?? [];
 
+  const [activeId, setActiveId] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(NoDndPointerSensor, { activationConstraint: { distance: 8 } })
+  );
 
   const [editModal, setEditModal] = useState<{
     open: boolean;
@@ -175,6 +241,38 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
     handleInsertChapter(position, prev.date || todayAsStoryDate());
   };
 
+  const handleDragStart = ({ active }: DragStartEvent) => {
+    setActiveId(active.id as string);
+  };
+
+  const handleDragEnd = async ({ active, over }: DragEndEvent) => {
+    setActiveId(null);
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = sorted.findIndex((c) => c.id === active.id);
+    const newIndex = sorted.findIndex((c) => c.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+
+    const reordered = arrayMove(sorted, oldIndex, newIndex).map((c, i) => ({
+      ...c,
+      position: i + 1,
+      chapter: i + 1,
+    }));
+
+    // Optimistic update
+    setOutlineForBook(bookId, reordered);
+
+    if (!isMock) {
+      try {
+        const result = await saveOutline(bookId, reordered);
+        setOutlineForBook(bookId, result.chapters);
+      } catch {
+        showToast("Failed to save new chapter order.");
+        setOutlineForBook(bookId, chapters); // rollback
+      }
+    }
+  };
+
   const handleApproveResync = async (approvedDiffIds: string[]) => {
     setResyncModalOpen(false);
     setSyncing(true);
@@ -235,32 +333,63 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
             </div>
           )}
 
-          <div className={`grid gap-3 ${reviewOpen ? "grid-cols-2" : "grid-cols-4"}`}>
-            {sorted.map((ch, i) => (
-              <div key={ch.id} className="relative group/insert">
-                <ChapterCard
-                  chapter={ch}
-                  sortedIndex={i}
-                  hasDiff={ch.id in diffCountById}
-                  diffCount={diffCountById[ch.id] ?? 0}
-                  onDiffClick={() => setResyncModalOpen(true)}
-                  onDelete={() => setPendingDeleteId(ch.id)}
-                  onSave={handleSave}
-                  povSuggestions={povSuggestions}
-                  disabled={syncing}
-                />
-                {i < sorted.length - 1 && !syncing && (
-                  <button
-                    onClick={() => handleInsert(ch, sorted[i + 1])}
-                    className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20 h-5 w-5 rounded-full bg-accent flex items-center justify-center opacity-0 group-hover/insert:opacity-100 transition-opacity shadow-md hover:bg-accent/80"
-                    title="Insert chapter here"
-                  >
-                    <Plus className="h-3 w-3 text-white" />
-                  </button>
-                )}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={sorted.map((c) => c.id)} strategy={rectSortingStrategy}>
+              <div className={`grid gap-3 ${reviewOpen ? "grid-cols-2" : "grid-cols-4"}`}>
+                {sorted.map((ch, i) => (
+                  <div key={ch.id} className="relative group/insert">
+                    <SortableChapterCard
+                      chapter={ch}
+                      sortedIndex={i}
+                      hasDiff={ch.id in diffCountById}
+                      diffCount={diffCountById[ch.id] ?? 0}
+                      onDiffClick={() => setResyncModalOpen(true)}
+                      onDelete={() => setPendingDeleteId(ch.id)}
+                      onSave={handleSave}
+                      povSuggestions={povSuggestions}
+                      disabled={syncing}
+                    />
+                    {i < sorted.length - 1 && !syncing && (
+                      <button
+                        data-no-dnd="true"
+                        onClick={() => handleInsert(ch, sorted[i + 1])}
+                        className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20 h-5 w-5 rounded-full bg-accent flex items-center justify-center opacity-0 group-hover/insert:opacity-100 transition-opacity shadow-md hover:bg-accent/80"
+                        title="Insert chapter here"
+                      >
+                        <Plus className="h-3 w-3 text-white" />
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </SortableContext>
+            <DragOverlay>
+              {activeId && (() => {
+                const ch = sorted.find((c) => c.id === activeId);
+                if (!ch) return null;
+                return (
+                  <div className="rotate-1 scale-105 opacity-95 shadow-2xl">
+                    <ChapterCard
+                      chapter={ch}
+                      sortedIndex={sorted.indexOf(ch)}
+                      hasDiff={false}
+                      diffCount={0}
+                      onDiffClick={() => {}}
+                      onDelete={() => {}}
+                      onSave={() => {}}
+                      povSuggestions={[]}
+                      disabled
+                    />
+                  </div>
+                );
+              })()}
+            </DragOverlay>
+          </DndContext>
           </>
           )}
         </div>
