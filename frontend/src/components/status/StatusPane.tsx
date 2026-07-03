@@ -1,11 +1,13 @@
-import { useState } from "react";
-import { Library, RefreshCw, Info, BookOpen, ChevronRight, FileDown } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Library, RefreshCw, Info, ChevronRight, FileDown } from "lucide-react";
 import { clsx } from "clsx";
+import type { BookResponse, BookSummary } from "../../types";
 import { useAppStore } from "../../store/useAppStore";
 import IndexStatusBar from "../sidebar/IndexStatusBar";
 import ConfirmModal from "../ui/ConfirmModal";
 import BookDrawer from "./BookDrawer";
-import { triggerRebuild, downloadStoryBible } from "../../api/books";
+import { fetchBookSummary, triggerRebuild, triggerBookUpdate, downloadStoryBible } from "../../api/books";
+import { bookSlug } from "../../api/settings";
 
 function BookListSkeleton() {
   return (
@@ -36,11 +38,129 @@ function formatLastSynced(iso: string | null | undefined): string | null {
   return `Last synced ${month} ${day}${suffix}, ${year} at ${time}`;
 }
 
+
+function CardStat({ label, value }: { label: string; value: number | null }) {
+  return (
+    <div className="rounded-lg border border-surface-border bg-surface p-2.5 text-center">
+      {value === null
+        ? <div className="mx-auto h-4 w-8 animate-pulse rounded bg-surface-border" />
+        : <p className="text-sm font-semibold text-ink-primary">{value.toLocaleString()}</p>}
+      <p className="text-[10px] text-ink-muted">{label}</p>
+    </div>
+  );
+}
+
+function BookCard({ book, active, lastSynced, onClick, onRebuild }: {
+  book: BookResponse;
+  active: boolean;
+  lastSynced: string | null;
+  onClick: () => void;
+  onRebuild: () => void;
+}) {
+  const { showToast } = useAppStore();
+  const [summary, setSummary] = useState<BookSummary | null>(null);
+  const [coverState, setCoverState] = useState<"loading" | "loaded" | "error">("loading");
+  const slug = bookSlug(book.name);
+
+  useEffect(() => {
+    fetchBookSummary(String(book.id)).then(setSummary).catch(() => {});
+  }, [book.id]);
+
+  const dates = summary?.date_span.first
+    ? summary.date_span.first
+      + (summary.date_span.last && summary.date_span.last !== summary.date_span.first
+        ? ` - ${summary.date_span.last}` : "")
+    : null;
+
+  return (
+    <div
+      onClick={onClick}
+      className={clsx(
+        "flex cursor-pointer items-start gap-4 overflow-hidden rounded-lg border bg-surface-card p-5 transition-colors",
+        active ? "border-accent/40" : "border-surface-border hover:border-accent/30"
+      )}
+    >
+      {/* Cover */}
+      {coverState !== "error" && (
+        <div className="relative flex-shrink-0 overflow-hidden rounded" style={{ height: 150, width: coverState === "loaded" ? "auto" : 100 }}>
+          {coverState === "loading" && <div className="absolute inset-0 animate-pulse rounded bg-surface-border" />}
+          <img
+            src={`/api/settings/book-cover/${slug}`}
+            alt={book.name}
+            onLoad={() => setCoverState("loaded")}
+            onError={() => setCoverState("error")}
+            className={clsx("h-full w-auto rounded", coverState !== "loaded" && "invisible")}
+            style={{ height: 150 }}
+          />
+        </div>
+      )}
+
+      {/* Title + stats */}
+      <div className="flex min-w-0 flex-1 flex-col gap-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className={clsx("truncate text-lg font-bold", active ? "text-accent" : "text-ink-primary")}>
+              {book.name}
+            </h2>
+            {dates && <p className="mt-0.5 text-[11px] text-ink-muted">{dates}</p>}
+            {lastSynced && <p className="mt-0.5 text-[10px] text-ink-muted/70">{lastSynced}</p>}
+          </div>
+          <div className="flex flex-shrink-0 items-center gap-1">
+            <span
+              role="button"
+              title="Export story bible (.md)"
+              onClick={(e) => {
+                e.stopPropagation();
+                showToast(`Exporting story bible for ${book.name}…`);
+                downloadStoryBible(book.id).catch(() => showToast("Failed to export story bible."));
+              }}
+              className="rounded p-1 text-ink-muted transition-colors hover:bg-surface-hover hover:text-accent"
+            >
+              <FileDown className="h-3.5 w-3.5" />
+            </span>
+            <span
+              role="button"
+              title={`Re-index "${book.name}"`}
+              onClick={(e) => { e.stopPropagation(); onRebuild(); }}
+              className="rounded p-1 text-ink-muted transition-colors hover:bg-surface-hover hover:text-accent"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </span>
+            <ChevronRight className={clsx("h-4 w-4 transition-transform", active ? "rotate-90 text-accent" : "text-ink-muted")} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2">
+          <CardStat label="Chapters" value={book.chapter_count} />
+          <CardStat label="Characters" value={summary?.character_count ?? null} />
+          <CardStat label="Locations" value={summary?.location_count ?? null} />
+          <CardStat label="Events" value={summary?.event_count ?? null} />
+          <CardStat label="Facts" value={summary?.fact_count ?? null} />
+          <CardStat label="POV(s)" value={summary?.pov_breakdown.length ?? null} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function StatusPane() {
   const { books, booksLoading, indexStatus, showToast } = useAppStore();
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildBook, setRebuildBook] = useState<string | null>(null);
+
+  const handleBookRebuild = async () => {
+    const name = rebuildBook;
+    setRebuildBook(null);
+    if (!name) return;
+    try {
+      await triggerBookUpdate(name);
+      showToast(`Re-indexing "${name}" — this may take a minute.`);
+    } catch {
+      showToast(`Failed to start re-index for "${name}".`);
+    }
+  };
 
   const activeBook = books.find((b) => b.id === activeBookId) ?? null;
 
@@ -99,51 +219,16 @@ export default function StatusPane() {
               <BookListSkeleton />
             ) : (
               <div className="flex flex-col gap-4 px-6">
-                {books.map((book) => {
-                  const active = book.id === activeBookId;
-                  return (
-                    <div
-                      key={book.id}
-                      className={clsx(
-                        "overflow-hidden rounded-lg border bg-surface-card transition-colors",
-                        active ? "border-accent/40" : "border-surface-border"
-                      )}
-                    >
-                      <button
-                        onClick={() => handleBookClick(book.id)}
-                        className="flex w-full items-center gap-2 px-4 py-3 hover:bg-surface-hover transition-colors"
-                      >
-                        <BookOpen className="h-3.5 w-3.5 flex-shrink-0 text-accent" />
-                        <span className={clsx(
-                          "text-left text-[11px] font-semibold uppercase tracking-widest",
-                          active ? "text-accent" : "text-ink-secondary"
-                        )}>
-                          {book.name}
-                        </span>
-                        {formatLastSynced(indexStatus?.book_last_indexed?.[book.name]) && (
-                          <span className="ml-2 flex-shrink-0 text-[10px] text-ink-muted">
-                            {formatLastSynced(indexStatus?.book_last_indexed?.[book.name])}
-                          </span>
-                        )}
-                        <span className="flex-1" />
-                        <span
-                          role="button"
-                          title="Export story bible (.md)"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            showToast(`Exporting story bible for ${book.name}…`);
-                            downloadStoryBible(book.id)
-                              .catch(() => showToast("Failed to export story bible."));
-                          }}
-                          className="mr-1 flex-shrink-0 p-1 rounded text-ink-muted hover:text-accent hover:bg-surface-hover transition-colors"
-                        >
-                          <FileDown className="h-3.5 w-3.5" />
-                        </span>
-                        <ChevronRight className="h-3.5 w-3.5 text-ink-muted" />
-                      </button>
-                    </div>
-                  );
-                })}
+                {books.map((book) => (
+                  <BookCard
+                    key={book.id}
+                    book={book}
+                    active={book.id === activeBookId}
+                    lastSynced={formatLastSynced(indexStatus?.book_last_indexed?.[book.name])}
+                    onClick={() => handleBookClick(book.id)}
+                    onRebuild={() => setRebuildBook(book.name)}
+                  />
+                ))}
               </div>
             )}
           </div>
@@ -171,6 +256,15 @@ export default function StatusPane() {
           chapters={activeBook?.chapters ?? []}
         />
       </div>
+
+      <ConfirmModal
+        open={rebuildBook !== null}
+        title={`Re-index "${rebuildBook}"?`}
+        message={`This will re-read every chapter in "${rebuildBook}", extract fresh data, and update its entries in the search index. It typically takes 1-2 minutes. Search results for this book may be incomplete while the update runs.`}
+        confirmLabel="Re-index"
+        onConfirm={handleBookRebuild}
+        onCancel={() => setRebuildBook(null)}
+      />
 
       <ConfirmModal
         open={confirmOpen}

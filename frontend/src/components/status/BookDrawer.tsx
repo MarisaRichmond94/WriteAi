@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronRight, ChevronUp, ChevronsUpDown, Link, RefreshCw } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, ChevronUp, ChevronsUpDown, Link } from "lucide-react";
 import { clsx } from "clsx";
-import type { BookSummary, ChapterSummary, Citation, ExtractedChapter, ExtractedKnowledgeItem } from "../../types";
-import { fetchBookSummary, fetchExtractedChapter, fetchMissingChapters, triggerBookUpdate } from "../../api/books";
-import { bookSlug } from "../../api/settings";
+import type { ChapterSummary, Citation, ExtractedChapter, ExtractedKnowledgeItem } from "../../types";
+import { fetchExtractedChapter, fetchMissingChapters } from "../../api/books";
 import { chapterLabel } from "../../lib/format";
 import { useAppStore } from "../../store/useAppStore";
-import ConfirmModal from "../ui/ConfirmModal";
 import ChapterViewer from "../chat/ChapterViewer";
 
 interface Props {
@@ -18,46 +16,6 @@ interface Props {
 // ── Skeleton helpers ──────────────────────────────────────────────
 function SkeletonLine({ className, style }: { className?: string; style?: React.CSSProperties }) {
   return <div className={clsx("animate-pulse rounded bg-surface-border", className)} style={style} />;
-}
-
-function SummarySkeleton({ bookName }: { bookName: string }) {
-  const slug = bookSlug(bookName);
-  const [coverExists, setCoverExists] = useState<boolean | null>(null);
-
-  return (
-    <div className="border-b border-surface-border p-6 flex items-start gap-4">
-      {/* Hidden img purely to detect cover existence — never shown */}
-      <img
-        src={`/api/settings/book-cover/${slug}`}
-        onLoad={() => setCoverExists(true)}
-        onError={() => setCoverExists(false)}
-        className="hidden"
-      />
-      {/* Skeleton placeholder shown while unknown or confirmed present */}
-      {coverExists !== false && (
-        <SkeletonLine className="flex-shrink-0 rounded" style={{ height: "204px", width: "136px" }} />
-      )}
-
-      {/* Text skeleton */}
-      <div className="flex flex-1 flex-col gap-4 min-w-0">
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1.5">
-            <SkeletonLine className="h-4 w-40" />
-            <SkeletonLine className="h-3 w-56" />
-          </div>
-          <SkeletonLine className="h-8 w-28 flex-shrink-0 rounded-md" />
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="rounded-lg border border-surface-border bg-surface p-3 space-y-2">
-              <SkeletonLine className="mx-auto h-5 w-1/2" />
-              <SkeletonLine className="mx-auto h-2.5 w-2/3" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function ChapterSkeleton() {
@@ -152,75 +110,6 @@ function CappedScroll({ children, maxHeight = 100 }: { children: React.ReactNode
       {canDown && (
         <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-6 bg-gradient-to-t from-surface to-transparent" />
       )}
-    </div>
-  );
-}
-
-// ── Summary card ─────────────────────────────────────────────────
-function StatChip({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-surface-border bg-surface p-3 text-center">
-      <p className="text-base font-semibold text-ink-primary">{value.toLocaleString()}</p>
-      <p className="text-[10px] text-ink-muted">{label}</p>
-    </div>
-  );
-}
-
-function SummaryCard({ bookName, summary, chapterCount, onRebuild }: { bookName: string; summary: BookSummary; chapterCount: number; onRebuild: () => void }) {
-  const slug = bookSlug(bookName);
-  const [coverState, setCoverState] = useState<"loading" | "loaded" | "error">("loading");
-
-  return (
-    <div className="border-b border-surface-border p-6 flex items-start gap-4">
-      {/* Book cover — skeleton while loading, real image once ready, hidden on error */}
-      {coverState !== "error" && (
-        <div className="relative flex-shrink-0 rounded overflow-hidden" style={{ height: "204px", width: coverState === "loaded" ? "auto" : "136px" }}>
-          {coverState === "loading" && (
-            <div className="absolute inset-0 animate-pulse rounded bg-surface-border" />
-          )}
-          <img
-            src={`/api/settings/book-cover/${slug}`}
-            alt={bookName}
-            onLoad={() => setCoverState("loaded")}
-            onError={() => setCoverState("error")}
-            className={clsx("h-full w-auto rounded", coverState !== "loaded" && "invisible")}
-            style={{ height: "204px" }}
-          />
-        </div>
-      )}
-
-      {/* Title + stats */}
-      <div className="flex flex-1 flex-col gap-4 min-w-0">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-2xl font-bold text-ink-primary">{bookName}</h2>
-            {(summary.date_span.first || summary.date_span.last) && (
-              <p className="mt-0.5 text-xs text-ink-muted">
-                {summary.date_span.first}
-                {summary.date_span.last && summary.date_span.last !== summary.date_span.first
-                  ? ` - ${summary.date_span.last}`
-                  : ""}
-              </p>
-            )}
-          </div>
-          <button
-            onClick={onRebuild}
-            className="flex flex-shrink-0 items-center gap-2 rounded-md border border-surface-border bg-surface px-3 py-2 text-xs text-ink-secondary transition-colors hover:border-accent hover:text-accent"
-          >
-            <RefreshCw className="h-3 w-3" />
-            Rebuild Index
-          </button>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          <StatChip label="Chapters" value={chapterCount} />
-          <StatChip label="Characters" value={summary.character_count} />
-          <StatChip label="Locations" value={summary.location_count} />
-          <StatChip label="Events" value={summary.event_count} />
-          <StatChip label="Facts" value={summary.fact_count} />
-          <StatChip label="POV(s)" value={summary.pov_breakdown.length} />
-        </div>
-      </div>
     </div>
   );
 }
@@ -613,26 +502,12 @@ function ChapterRow({
 
 // ── Main drawer ───────────────────────────────────────────────────
 export default function BookDrawer({ bookId, bookName, chapters }: Props) {
-  const { showToast } = useAppStore();
-  const [summary, setSummary] = useState<BookSummary | null>(null);
-  const [summaryLoading, setSummaryLoading] = useState(false);
   const [expandedChapter, setExpandedChapter] = useState<number | null>(null);
   const [missingChapters, setMissingChapters] = useState<Set<number>>(new Set());
-  const [rebuildOpen, setRebuildOpen] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [lightMode, setLightMode] = useState(() => useAppStore.getState().appSettings?.viewer_light_mode ?? true);
   const povColorMap = buildPovColorMap(chapters);
-
-  const handleRebuildConfirm = async () => {
-    setRebuildOpen(false);
-    try {
-      await triggerBookUpdate(bookName);
-      showToast(`Re-indexing "${bookName}" — this may take a minute.`);
-    } catch {
-      showToast(`Failed to start re-index for "${bookName}".`);
-    }
-  };
 
   const handleOpenViewer = useCallback((citation: Citation) => {
     setActiveCitation(citation);
@@ -654,24 +529,15 @@ export default function BookDrawer({ bookId, bookName, chapters }: Props) {
 
   useEffect(() => {
     if (!bookId) {
-      setSummary(null);
       setExpandedChapter(null);
       setViewerOpen(false);
       setActiveCitation(null);
       return;
     }
-    setSummary(null);
     setExpandedChapter(null);
     setViewerOpen(false);
     setActiveCitation(null);
     setMissingChapters(new Set());
-    setSummaryLoading(true);
-    Promise.all([
-      fetchBookSummary(bookId),
-      new Promise((r) => setTimeout(r, 1200)),
-    ])
-      .then(([result]) => setSummary(result as BookSummary))
-      .finally(() => setSummaryLoading(false));
     fetchMissingChapters(bookId)
       .then((nums) => setMissingChapters(new Set(nums)))
       .catch(() => {/* silent — warning icons just won't show */});
@@ -690,13 +556,6 @@ export default function BookDrawer({ bookId, bookName, chapters }: Props) {
     >
       {bookId && (
         <>
-          {/* Summary — always rendered */}
-          {summaryLoading ? (
-            <SummarySkeleton bookName={bookName} />
-          ) : summary ? (
-            <SummaryCard bookName={bookName} summary={summary} chapterCount={chapters.length} onRebuild={() => setRebuildOpen(true)} />
-          ) : null}
-
           {/* Chapter list + viewer overlay share the remaining space */}
           <div className="relative flex-1 overflow-hidden">
             {/* Chapter list — always mounted, never unmounts on viewer open/close */}
@@ -734,14 +593,6 @@ export default function BookDrawer({ bookId, bookName, chapters }: Props) {
             </div>
           </div>
 
-          <ConfirmModal
-            open={rebuildOpen}
-            title={`Re-index "${bookName}"?`}
-            message={`This will re-read every chapter in "${bookName}", extract fresh data, and update its entries in the search index. It typically takes 1–2 minutes to complete. Search results for this book may return incomplete or outdated results while the update is running — all other books will continue working normally.`}
-            confirmLabel="Re-index"
-            onConfirm={handleRebuildConfirm}
-            onCancel={() => setRebuildOpen(false)}
-          />
         </>
       )}
     </div>
