@@ -405,35 +405,7 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
             <p className="mt-1 text-[10px] text-ink-muted">This corrects the AI-extracted name across all books.</p>
           </div>
 
-          {/* Section 2: Gender */}
-          <div>
-            <SectionLabel>Gender</SectionLabel>
-            <div className="flex items-center gap-2">
-              {(["male", "female"] as const).map(g => {
-                const effectiveGender = pendingGender !== null ? pendingGender : (character.gender ?? "");
-                const active = effectiveGender === g;
-                return (
-                  <button
-                    key={g}
-                    onClick={() => setPendingGender(active ? "" : g)}
-                    className={`rounded-md border px-3 py-1.5 text-xs capitalize transition-colors ${
-                      active
-                        ? "border-accent bg-accent/10 text-accent"
-                        : "border-surface-border bg-surface text-ink-secondary hover:border-accent/50 hover:text-ink-primary"
-                    }`}
-                  >
-                    {g}
-                  </button>
-                );
-              })}
-              {pendingGender !== null && (
-                <span className="text-[10px] text-accent">(pending)</span>
-              )}
-            </div>
-            <p className="mt-1 text-[10px] text-ink-muted">Overrides the AI-inferred gender. Affects gendered relationship labels.</p>
-          </div>
-
-          {/* Section 3: Aliases */}
+          {/* Section 2: Aliases */}
           <div>
             <SectionLabel>Aliases</SectionLabel>
             {visibleAliases.length > 0 && (
@@ -462,11 +434,12 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
             </div>
           </div>
 
-          {/* Section 4: Relationships */}
+          {/* Section 3: Relationships */}
           <div>
             <SectionLabel>Relationships</SectionLabel>
             {visibleRels.length > 0 && (
-              <div className="mb-2 divide-y divide-surface-border rounded-lg border border-surface-border">
+              // max-h ≈ 4.5 rows — the cut-off row signals there's more to scroll
+              <div className="mb-2 max-h-[188px] divide-y divide-surface-border overflow-y-auto rounded-lg border border-surface-border">
                 {visibleRels.map(rel => {
                   const isPending = relAdditions.some(r => r.target === rel.target);
                   const isOverridden = rel.target in relOverrides;
@@ -535,7 +508,7 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
             </div>
           </div>
 
-          {/* Section 5: Danger Zone */}
+          {/* Section 4: Danger Zone */}
           <div className="rounded-lg border border-red-900/40 bg-red-950/10 p-4">
             <SectionLabel><span className="text-red-400">Danger Zone</span></SectionLabel>
 
