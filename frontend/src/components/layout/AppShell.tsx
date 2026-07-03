@@ -26,8 +26,14 @@ function timeOfDay(): string {
 
 function WriterAvatar() {
   const { appSettings, setActivePane } = useAppStore();
-  const name = appSettings?.writer_name ?? "Writer";
-  const photoUrl = appSettings?.writer_photo_url ?? null;
+
+  // settings not loaded yet: skeleton circle, no "W" initials flash
+  if (appSettings === null) {
+    return <span className="h-8 w-8 flex-shrink-0 animate-pulse rounded-full bg-surface-hover ring-1 ring-surface-border" />;
+  }
+
+  const name = appSettings.writer_name || "Writer";
+  const photoUrl = appSettings.writer_photo_url ?? null;
 
   const initials = name.trim()
     ? name.trim().split(" ").map((w: string) => w[0]).slice(0, 2).join("").toUpperCase()
