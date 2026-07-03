@@ -50,9 +50,10 @@ function CardStat({ label, value }: { label: string; value: number | null }) {
   );
 }
 
-function BookCard({ book, active, lastSynced, onClick, onRebuild }: {
+function BookCard({ book, active, condensed, lastSynced, onClick, onRebuild }: {
   book: BookResponse;
   active: boolean;
+  condensed: boolean;   // drawer open — column is half width, chips wrap to two rows
   lastSynced: string | null;
   onClick: () => void;
   onRebuild: () => void;
@@ -130,7 +131,7 @@ function BookCard({ book, active, lastSynced, onClick, onRebuild }: {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2">
+        <div className={clsx("grid gap-2 transition-all duration-300", condensed ? "grid-cols-3" : "grid-cols-6")}>
           <CardStat label="Chapters" value={book.chapter_count} />
           <CardStat label="Characters" value={summary?.character_count ?? null} />
           <CardStat label="Locations" value={summary?.location_count ?? null} />
@@ -224,6 +225,7 @@ export default function StatusPane() {
                     key={book.id}
                     book={book}
                     active={book.id === activeBookId}
+                    condensed={activeBookId !== null}
                     lastSynced={formatLastSynced(indexStatus?.book_last_indexed?.[book.name])}
                     onClick={() => handleBookClick(book.id)}
                     onRebuild={() => setRebuildBook(book.name)}
