@@ -73,33 +73,63 @@ function Err({ msg }: { msg: string }) {
 function StatusSelect({ value, onChange, highlighted }: { value: string; onChange: (v: string) => void; highlighted?: boolean }) {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
-  const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setFilter(""); }
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (btnRef.current?.contains(e.target as Node)) return;
+      if (popRef.current?.contains(e.target as Node)) return;
+      setOpen(false); setFilter("");
     };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
+    // the dropdown is position:fixed — close if anything scrolls under it
+    const onScroll = (e: Event) => {
+      if (popRef.current?.contains(e.target as Node)) return;
+      setOpen(false); setFilter("");
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("scroll", onScroll, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
+
+  const toggleOpen = () => {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const width = 176; // w-44
+      setPos({ top: r.bottom + 4, left: Math.max(8, r.right - width) });
+    }
+    setOpen(o => !o);
+    setFilter("");
+  };
 
   const filtered = RELATIONSHIP_STATUSES.filter(s => s.includes(filter.toLowerCase()));
 
   return (
-    <div ref={ref} className="relative flex-shrink-0">
+    <div className="relative flex-shrink-0">
       <button
+        ref={btnRef}
         type="button"
-        onClick={() => { setOpen(o => !o); setFilter(""); }}
+        onClick={toggleOpen}
         className={`rounded border px-2 py-1 text-xs transition-colors min-w-[90px] text-left ${
           highlighted
             ? "border-accent bg-accent-subtle text-accent"
             : "border-surface-border bg-surface text-ink-primary hover:border-accent"
         }`}
       >
-        {value}
+        {value || <span className="text-ink-muted/60">Set status…</span>}
       </button>
-      {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-44 rounded-lg border border-surface-border bg-surface-card shadow-lg overflow-hidden">
+      {open && pos && createPortal(
+        // portaled + fixed: escapes the relationships list's overflow clipping
+        <div
+          ref={popRef}
+          className="fixed z-[60] w-44 rounded-lg border border-surface-border bg-surface-card shadow-xl overflow-hidden"
+          style={{ top: pos.top, left: pos.left }}
+        >
           <div className="border-b border-surface-border p-1.5">
             <input
               autoFocus
@@ -128,7 +158,8 @@ function StatusSelect({ value, onChange, highlighted }: { value: string; onChang
             ))}
             {filtered.length === 0 && <p className="px-3 py-2 text-xs text-ink-muted">No match</p>}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
