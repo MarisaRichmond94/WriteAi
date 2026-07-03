@@ -473,7 +473,7 @@ function ChapterRow({
                     </p>
                     <div className="space-y-3">
                       {data.characters.map((c, i) => {
-                        const isPov = c.name === data.pov;
+                        // no POV badge: the chapter header already names the POV
                         const role = c.role.replace(/^POV character[;,]?\s*/i, "");
                         return (
                           <div key={i}>
@@ -482,11 +482,6 @@ function ChapterRow({
                               {c.aliases && c.aliases.length > 0 && (
                                 <span className="text-[10px] text-ink-muted">
                                   ({c.aliases.slice(0, 3).join(", ")})
-                                </span>
-                              )}
-                              {isPov && (
-                                <span className="rounded border border-rose-500/40 bg-rose-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-rose-400">
-                                  POV
                                 </span>
                               )}
                             </div>

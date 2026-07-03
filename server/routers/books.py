@@ -173,6 +173,23 @@ def chapter_extracted(book: int, chapter: int):
         (book, chapter)).fetchall()
     if not rows:
         raise HTTPException(404, "chapter not found")
+    # collapse raw extraction tags ("Jared", "Emma") onto canonical names so
+    # each character appears once under their full name
+    s.canon.ensure_built()
+    first_token: dict[str, list[str]] = {}
+    for e in s.canon.entities.values():
+        if e.kind == "character":
+            first_token.setdefault(e.name.split()[0], []).append(e.name)
+
+    def canonical(n: str) -> str:
+        resolved = s.canon.resolve(n)
+        if resolved:
+            return resolved
+        # quarantined-as-ambiguous bare names ("Jared"): safe to collapse
+        # when exactly one character starts with that token
+        matches = first_token.get(n)
+        return matches[0] if matches and len(matches) == 1 else n
+
     summary, characters, facts, locations = [], {}, [], set()
     for pov, date, meta_json in rows:
         if not meta_json:
@@ -180,11 +197,13 @@ def chapter_extracted(book: int, chapter: int):
         meta = json.loads(meta_json)
         summary.extend(meta.get("key_events", []))
         for name in meta.get("characters_present", []):
-            characters.setdefault(name, {"name": name, "aliases": None,
-                                         "role": "", "knowledge_gained": []})
+            cn = canonical(name)
+            characters.setdefault(cn, {"name": cn, "aliases": None,
+                                       "role": "", "knowledge_gained": []})
         for who, learned in meta.get("character_knowledge_updates", {}).items():
-            entry = characters.setdefault(who, {"name": who, "aliases": None,
-                                                "role": "", "knowledge_gained": []})
+            cn = canonical(who)
+            entry = characters.setdefault(cn, {"name": cn, "aliases": None,
+                                               "role": "", "knowledge_gained": []})
             entry["knowledge_gained"].extend(
                 {"insight": fact, "source_quote": None} for fact in learned)
         facts.extend({"statement": f, "characters": [], "category": "revealed",
