@@ -41,7 +41,7 @@ function formatLastSynced(iso: string | null | undefined): string | null {
 
 function CardStat({ label, value }: { label: string; value: number | null }) {
   return (
-    <div className="rounded-lg border border-surface-border bg-surface p-2.5 text-center">
+    <div className="flex h-full flex-col items-center justify-center rounded-lg border border-surface-border bg-surface p-2.5 text-center">
       {value === null
         ? <div className="mx-auto h-4 w-8 animate-pulse rounded bg-surface-border" />
         : <p className="text-sm font-semibold text-ink-primary">{value.toLocaleString()}</p>}
@@ -77,27 +77,26 @@ function BookCard({ book, active, condensed, lastSynced, onClick, onRebuild }: {
     <div
       onClick={onClick}
       className={clsx(
-        "flex cursor-pointer items-start gap-4 overflow-hidden rounded-lg border bg-surface-card p-5 transition-colors",
+        "flex cursor-pointer items-stretch gap-4 overflow-hidden rounded-lg border bg-surface-card p-5 transition-colors",
         active ? "border-accent/40" : "border-surface-border hover:border-accent/30"
       )}
     >
       {/* Cover */}
       {coverState !== "error" && (
-        <div className="relative flex-shrink-0 overflow-hidden rounded" style={{ height: 150, width: coverState === "loaded" ? "auto" : 100 }}>
+        <div className="relative flex-shrink-0 overflow-hidden rounded" style={{ width: coverState === "loaded" ? "auto" : 100 }}>
           {coverState === "loading" && <div className="absolute inset-0 animate-pulse rounded bg-surface-border" />}
           <img
             src={`/api/settings/book-cover/${slug}`}
             alt={book.name}
             onLoad={() => setCoverState("loaded")}
             onError={() => setCoverState("error")}
-            className={clsx("h-full w-auto rounded", coverState !== "loaded" && "invisible")}
-            style={{ height: 150 }}
+            className={clsx("h-full w-auto rounded object-cover", coverState !== "loaded" && "invisible")}
           />
         </div>
       )}
 
       {/* Title + stats */}
-      <div className="flex min-w-0 flex-1 flex-col gap-3">
+      <div className="flex h-[180px] min-w-0 flex-1 flex-col gap-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <h2 className={clsx("truncate text-lg font-bold", active ? "text-accent" : "text-ink-primary")}>
@@ -131,7 +130,7 @@ function BookCard({ book, active, condensed, lastSynced, onClick, onRebuild }: {
           </div>
         </div>
 
-        <div className={clsx("grid gap-2 transition-all duration-300", condensed ? "grid-cols-3" : "grid-cols-6")}>
+        <div className={clsx("grid min-h-0 flex-1 auto-rows-fr gap-2 transition-all duration-300", condensed ? "grid-cols-3" : "grid-cols-6")}>
           <CardStat label="Chapters" value={book.chapter_count} />
           <CardStat label="Characters" value={summary?.character_count ?? null} />
           <CardStat label="Locations" value={summary?.location_count ?? null} />
