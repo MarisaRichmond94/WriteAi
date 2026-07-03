@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { ArrowDown, ArrowLeft, ArrowUp, BookOpen, Calendar, ChevronDown, ChevronLeft, ChevronRight, Clock, Info, MapPin, Users, Zap } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, BookOpen, Calendar, ChevronDown, ChevronLeft, ChevronRight, Clock, Info, MapPin, Search, Users, X, Zap } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import type { Citation, TimelineEvent, EventSourceQuote } from "../../types";
@@ -1011,6 +1011,7 @@ export default function TimelinePane() {
     return v === "list" || v === "chart" ? v : "chart";
   });
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+  const [search, setSearch] = useState("");
   const [filterBook, setFilterBook] = useState("");
   const [filterPov, setFilterPov] = useState("");
   const [events, setEvents] = useState<TimelineEvent[]>([]);
@@ -1057,8 +1058,14 @@ export default function TimelinePane() {
     history.replaceState(null, "", `?${params}`);
   }, [view]);
 
+  const query = search.trim().toLowerCase();
+  const searchedEvents = view === "list" && query
+    ? events.filter((e) =>
+        [e.title, e.summary, e.location ?? "", e.book, e.type,
+         ...(e.participants ?? [])].join(" ").toLowerCase().includes(query))
+    : events;
   const visibleEvents = view === "list"
-    ? (sortOrder === "asc" ? events : [...events].reverse())
+    ? (sortOrder === "asc" ? searchedEvents : [...searchedEvents].reverse())
     : events;
 
   const selectedIndex = selectedEvent ? visibleEvents.findIndex((e) => e.id === selectedEvent.id) : -1;
@@ -1159,6 +1166,27 @@ export default function TimelinePane() {
               : <><ArrowDown className="h-3 w-3" />Newest First</>
             }
           </button>
+          {/* Search — list only */}
+          <div className={clsx(
+            "relative transition-all duration-200",
+            view === "list" ? "opacity-100" : "pointer-events-none opacity-0"
+          )}>
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-ink-muted" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search events…"
+              className="w-52 rounded border border-surface-border bg-surface py-1 pl-7 pr-6 text-[11px] text-ink-primary placeholder:text-ink-muted focus:border-accent/50 focus:outline-none"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-ink-muted hover:text-ink-primary"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Filters */}
@@ -1189,12 +1217,18 @@ export default function TimelinePane() {
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Chart / list */}
           {view === "list" ? (
+            visibleEvents.length === 0 && query ? (
+              <div className="flex flex-1 items-center justify-center text-xs text-ink-muted">
+                No events matched "{search}"
+              </div>
+            ) : (
             <ListView
-              events={sortOrder === "asc" ? events : [...events].reverse()}
+              events={visibleEvents}
               selectedId={selectedEvent?.id ?? null}
               onSelect={handleSelect}
               compressed={false}
             />
+            )
           ) : (
             <div className="flex-shrink-0">
               <ChartView
