@@ -3,7 +3,9 @@ import type { AppSettings } from "../types";
 
 interface BackendSettings {
   fields: { key: string; value: string }[];
-  profile: { writer_name: string; site_name: string; writer_photo_url?: string | null };
+  profile: { writer_name: string; site_name: string; writer_photo_url?: string | null;
+             book_order?: string[] };
+  discovered_books?: string[];
 }
 
 async function backendSettings(): Promise<BackendSettings> {
@@ -23,11 +25,11 @@ export async function fetchSettings(): Promise<AppSettings> {
     backup_retention_days: 30,
     sync_time: "02:30",
     auto_sync_enabled: true,
-    book_order: [],
+    book_order: data.profile.book_order ?? [],
     query_model: f("QUERY_MODEL"),
     extraction_model: f("EXTRACTION_MODEL"),
     odv_model: "",
-    discovered_books: [],
+    discovered_books: data.discovered_books ?? [],
     anthropic_api_key_preview: f("ANTHROPIC_API_KEY"),
     openai_api_key_preview: f("OPENAI_API_KEY"),
     writer_name: data.profile.writer_name || "Writer",
@@ -51,6 +53,7 @@ export async function saveSettings(
   const profile: Record<string, unknown> = {};
   if (updates.writer_name !== undefined) profile.writer_name = updates.writer_name;
   if (updates.site_name !== undefined) profile.site_name = updates.site_name;
+  if (updates.book_order !== undefined) profile.book_order = updates.book_order;
   if (updates.writer_photo_url !== undefined) profile.writer_photo_url = updates.writer_photo_url;
 
   const res = await fetch("/api/settings", {

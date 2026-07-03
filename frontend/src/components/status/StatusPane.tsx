@@ -275,7 +275,7 @@ export default function StatusPane() {
       <ConfirmModal
         open={confirmOpen}
         title="Rebuild the full index?"
-        message="This re-processes every chapter across all 5 books and rebuilds the entire search index from scratch. It will take several minutes to complete and search results may be unavailable during that time."
+        message="This re-processes every chapter across all of your books and rebuilds the entire search index from scratch. It will take several minutes to complete and search results may be unavailable during that time."
         confirmLabel="Rebuild"
         onConfirm={handleConfirm}
         onCancel={() => setConfirmOpen(false)}

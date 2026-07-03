@@ -87,7 +87,7 @@ export default function ChapterEditModal({ open, chapter, onSave, onCancel }: Ch
                 type="text"
                 value={pov}
                 onChange={(e) => setPov(e.target.value)}
-                placeholder="e.g. Jared Gatlin"
+                placeholder="POV character"
                 className="w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-xs text-ink-primary placeholder-ink-muted/50 focus:border-accent focus:outline-none"
               />
             </div>

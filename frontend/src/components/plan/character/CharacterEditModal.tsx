@@ -100,7 +100,7 @@ export default function CharacterEditModal({ open, character, onSave, onCancel }
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Jared Gatlin"
+                placeholder="Character name"
                 className="w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-xs text-ink-primary placeholder-ink-muted/50 focus:border-accent focus:outline-none"
               />
             </div>
@@ -214,7 +214,7 @@ export default function CharacterEditModal({ open, character, onSave, onCancel }
               type="text"
               value={booksInput}
               onChange={(e) => setBooksInput(e.target.value)}
-              placeholder="Nobody's Hero, Faded…"
+              placeholder="Book titles, comma-separated"
               className="w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-xs text-ink-primary placeholder-ink-muted/50 focus:border-accent focus:outline-none"
             />
           </div>
