@@ -666,10 +666,10 @@ function DetailPanel({
               return (
               <Section title="Arc" prominent grow={!hasArc} className="-mt-5">
                 {hasArc ? (
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {bookOrder.filter((b) => detail.arc[b]?.length).map((b) => (
                       <div key={b}>
-                        <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-primary mb-2">{b}</p>
+                        <p className="text-[10px] font-semibold uppercase tracking-widest text-ink-primary mb-1.5">{b}</p>
                         <ArcBookInsights
                           book={b}
                           entries={detail.arc[b]!}
@@ -779,12 +779,14 @@ function ScrollableList({ children }: { children: React.ReactNode }) {
           <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-surface-card to-transparent" />
         )}
       </div>
-      <button
-        onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
-        className={clsx("mt-1.5 w-full text-center text-[10px] text-ink-muted/60 hover:text-ink-muted transition-colors", atBottom ? "visible" : "invisible")}
-      >
-        scroll back to top
-      </button>
+      {atBottom && (
+        <button
+          onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
+          className="mt-1.5 w-full text-center text-[10px] text-ink-muted/60 hover:text-ink-muted transition-colors"
+        >
+          scroll back to top
+        </button>
+      )}
     </div>
   );
 }
@@ -854,12 +856,14 @@ function ArcBookInsights({ book, entries, onSourceClick }: {
           <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-surface-card to-transparent" />
         )}
       </div>
-      <button
-        onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
-        className={clsx("mt-1.5 w-full text-center text-[10px] text-ink-muted/60 hover:text-ink-muted transition-colors", atBottom ? "visible" : "invisible")}
-      >
-        scroll back to top
-      </button>
+      {atBottom && (
+        <button
+          onClick={() => scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" })}
+          className="mt-1.5 w-full text-center text-[10px] text-ink-muted/60 hover:text-ink-muted transition-colors"
+        >
+          scroll back to top
+        </button>
+      )}
     </div>
   );
 }
