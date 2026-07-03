@@ -125,11 +125,7 @@ export const useAppStore = create<AppState>((set) => ({
   clearBookFilter: () => set({ selectedBooks: new Set() }),
   clearFilters: () => set({ selectedBooks: new Set(), selectedPovs: new Set() }),
 
-  queryMode: (() => {
-    const m = new URLSearchParams(window.location.search).get("mode");
-    const valid = ["plot_hole", "timeline", "character", "alternate"];
-    return (valid.includes(m ?? "") ? m : "character") as QueryMode;
-  })(),
+  queryMode: "general" as QueryMode,
   setQueryMode: (mode) => set({ queryMode: mode }),
 
   messages: [],

@@ -1,4 +1,6 @@
-export type QueryMode = "plot_hole" | "timeline" | "character" | "alternate";
+// "general" lets the backend's query router auto-classify each question;
+// the forced modes remain only so old persisted sessions stay loadable.
+export type QueryMode = "general" | "plot_hole" | "timeline" | "character" | "alternate";
 
 export interface Citation {
   book: string;

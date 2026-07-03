@@ -2,21 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Check } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
-import type { QueryMode } from "../../types";
-
-// ─── Mode config ────────────────────────────────────────────────────────────
-
-interface ModeOption {
-  id: QueryMode;
-  label: string;
-}
-
-const MODES: ModeOption[] = [
-  { id: "alternate", label: "Alternate" },
-  { id: "character", label: "Character" },
-  { id: "plot_hole", label: "Plot Holes" },
-  { id: "timeline", label: "Timeline" },
-];
 
 // ─── Generic dropdown ────────────────────────────────────────────────────────
 
@@ -80,8 +65,6 @@ export default function FilterBar() {
     selectedPovs,
     setPovFilter,
     clearPovFilter,
-    queryMode,
-    setQueryMode,
     saveChatAndClear,
     setLiveChatSessionId,
     closeExploreViewer,
@@ -89,9 +72,9 @@ export default function FilterBar() {
 
   const clearChat = () => { saveChatAndClear(); setLiveChatSessionId(null); closeExploreViewer(); };
 
-  const [openDropdown, setOpenDropdown] = useState<"povs" | "books" | "mode" | null>(null);
+  const [openDropdown, setOpenDropdown] = useState<"povs" | "books" | null>(null);
 
-  const toggle = (name: "povs" | "books" | "mode") =>
+  const toggle = (name: "povs" | "books") =>
     setOpenDropdown((prev) => (prev === name ? null : name));
   const close = () => setOpenDropdown(null);
 
@@ -167,8 +150,6 @@ export default function FilterBar() {
       : selectedBooks.size === 1
       ? allBooks.find((b) => selectedBooks.has(b.id))?.name ?? "1 Book"
       : `${selectedBooks.size} Books`;
-
-  const modeLabel = MODES.find((m) => m.id === queryMode)?.label ?? "Character";
 
   return (
     <div className="flex items-center gap-2 px-6">
@@ -268,42 +249,6 @@ export default function FilterBar() {
         )}
       </Dropdown>
 
-      {/* Mode */}
-      <Dropdown
-        label={modeLabel}
-        open={openDropdown === "mode"}
-        onToggle={() => toggle("mode")}
-        onClose={close}
-      >
-        <div className="py-1">
-          {MODES.map((m) => {
-            const selected = queryMode === m.id;
-            return (
-              <button
-                key={m.id}
-                onClick={() => {
-                  clearChat();
-                  setQueryMode(m.id);
-                  close();
-                }}
-                className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-surface-hover"
-              >
-                <span
-                  className={clsx(
-                    "flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center rounded-full border",
-                    selected ? "border-accent bg-accent" : "border-surface-border"
-                  )}
-                >
-                  {selected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-                </span>
-                <span className={selected ? "text-ink-primary font-medium" : "text-ink-secondary"}>
-                  {m.label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      </Dropdown>
     </div>
   );
 }

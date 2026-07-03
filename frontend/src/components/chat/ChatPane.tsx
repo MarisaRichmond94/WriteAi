@@ -12,7 +12,7 @@ function bookIdFromName(name: string): string {
 }
 
 export default function ChatPane() {
-  const { exploreViewerCloseSignal, saveChatAndClear, setLiveChatSessionId, selectedBooks, selectedPovs, queryMode } = useAppStore();
+  const { exploreViewerCloseSignal, saveChatAndClear, setLiveChatSessionId, selectedBooks, selectedPovs } = useAppStore();
   const [activeCitation, setActiveCitation] = useState<Citation | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [lightMode, setLightMode] = useState(() => useAppStore.getState().appSettings?.viewer_light_mode ?? true);
@@ -52,12 +52,6 @@ export default function ChatPane() {
     else params.delete("povs");
     history.replaceState(null, "", `?${params}`);
   }, [selectedPovs]);
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    params.set("mode", queryMode);
-    history.replaceState(null, "", `?${params}`);
-  }, [queryMode]);
 
   const handleCitationClick = useCallback((citation: Citation) => {
     const key = (c: Citation) => `${c.book}__${c.chapter}__${c.chunk_index}`;
