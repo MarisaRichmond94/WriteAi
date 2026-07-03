@@ -47,9 +47,10 @@ export default function MessageBubble({ message, onCitationClick, activeCitation
   return (
     <div className="flex justify-start h-full">
       <div className="flex w-[90%] flex-col h-full gap-4">
-        {/* Response box — takes the sources' share of height while collapsed */}
-        <div className="relative min-h-0" style={{ flex: sourcesOpen ? "55 55 0%" : "1 1 0%" }}>
-          <div className="rounded-2xl rounded-tl-sm bg-surface-card px-4 py-3 border border-surface-border h-full overflow-y-auto">
+        {/* Response box — natural content height, shrinking (with scroll)
+            only when the answer outgrows the available space */}
+        <div className="relative min-h-0" style={{ flex: "0 1 auto" }}>
+          <div className="rounded-2xl rounded-tl-sm bg-surface-card px-4 py-3 border border-surface-border max-h-full overflow-y-auto">
             {message.isStreaming && !message.content ? (
               <StreamingIndicator />
             ) : (
@@ -67,8 +68,9 @@ export default function MessageBubble({ message, onCitationClick, activeCitation
           )}
         </div>
 
-        {/* Citations — collapsed to a header row by default */}
-        <div className="min-h-0 flex flex-col" style={sourcesOpen ? { flex: "35 35 0%" } : { flex: "0 0 auto" }}>
+        {/* Citations — collapsed to a header row by default; expanded, they
+            take the space left under the answer (never less than 140px) */}
+        <div className="flex flex-col" style={sourcesOpen ? { flex: "1 1 0%", minHeight: 140 } : { flex: "0 0 auto" }}>
           {hasCitations && (<>
             <div className="flex-shrink-0 flex items-center justify-between px-1 mb-1.5">
               <button
