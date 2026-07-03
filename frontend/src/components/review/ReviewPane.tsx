@@ -7,7 +7,8 @@ import { useAppStore } from "../../store/useAppStore";
 import type { ChapterSummary, Citation, PipelineCostEstimate, ReviewFocus, ReviewMessage, ReviewSession } from "../../types";
 import { streamReview, fetchChapterText, bookNameToId } from "../../api/review";
 import { chapterLabel } from "../../lib/format";
-import { runPipeline, fetchCostEstimate } from "../../api/pipeline";
+import { runPipeline, fetchCostEstimate, fetchIngestStatus, runEnrichment } from "../../api/pipeline";
+import { fetchBooks } from "../../api/books";
 import CitationCard from "../chat/CitationCard";
 import StreamingIndicator from "../chat/StreamingIndicator";
 import ChapterViewer from "../chat/ChapterViewer";
@@ -197,32 +198,26 @@ function ReviewConfirmModal({
 
 // ── Resync confirm modal ───────────────────────────────────────────────────────
 
-const EXTRACTION_MODELS = [
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { id: "claude-opus-4-6", label: "Opus 4.6" },
-];
-
 function ResyncConfirmModal({
   book,
   onConfirm,
   onCancel,
 }: {
   book: string;
-  onConfirm: (modelA: string) => void;
+  onConfirm: (runEnrich: boolean) => void;
   onCancel: () => void;
 }) {
-  const [modelA, setModelA] = useState("claude-haiku-4-5-20251001");
+  const [runEnrich, setRunEnrich] = useState(false);
   const [estimate, setEstimate] = useState<PipelineCostEstimate | null>(null);
   const [estimating, setEstimating] = useState(false);
 
   useEffect(() => {
     setEstimating(true);
-    fetchCostEstimate(["a", "b", "c"], { a: modelA })
+    fetchCostEstimate(book)
       .then(setEstimate)
       .catch(() => setEstimate(null))
       .finally(() => setEstimating(false));
-  }, [modelA]);
+  }, [book]);
 
   const total = estimate?.total_cost_usd_est ?? null;
   const formatCost = (n: number | null) => {
@@ -239,7 +234,7 @@ function ResyncConfirmModal({
         <div className="flex items-start justify-between border-b border-surface-border px-5 py-4">
           <div>
             <p className="text-sm font-semibold text-ink-primary">Resync "{book}"</p>
-            <p className="mt-0.5 text-[11px] text-ink-muted">Phases A → B → C scoped to this book</p>
+            <p className="mt-0.5 text-[11px] text-ink-muted">Incremental re-ingest of this book</p>
           </div>
           <button
             onClick={onCancel}
@@ -254,40 +249,35 @@ function ResyncConfirmModal({
 
           {/* What will happen */}
           <div className="rounded-lg border border-surface-border bg-surface px-4 py-3 space-y-2 text-[11px] text-ink-muted leading-relaxed">
-            <p><span className="font-semibold text-ink-secondary">Phase A — Chapter Extraction</span><br />Re-reads every chapter in this book and extracts characters, events, facts, and locations using the selected model.</p>
-            <p><span className="font-semibold text-ink-secondary">Phase B — Book Consolidation</span><br />Merges per-chapter extractions into a deduplicated knowledge set for this book. No LLM cost.</p>
-            <p><span className="font-semibold text-ink-secondary">Phase C — Series Synthesis</span><br />Rebuilds series-wide profiles, events, and facts. No LLM cost.</p>
+            <p><span className="font-semibold text-ink-secondary">Stage &amp; diff</span><br />Copies the latest manuscript from your Writing folder (read-only) and re-chunks it, comparing content hashes against the index. Unchanged chapters are skipped.</p>
+            <p><span className="font-semibold text-ink-secondary">Extract &amp; embed</span><br />Only new or changed chunks are sent to the extraction model for metadata, then re-embedded locally (free). Deleted chunks are removed.</p>
+            <p><span className="font-semibold text-ink-secondary">Rebuild</span><br />The canonical character view — including your merges, hides, and renames — rebuilds automatically when the run finishes. No LLM cost.</p>
           </div>
 
-          {/* Model selector */}
-          <div>
-            <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-widest text-ink-muted">
-              Phase A Model
-            </p>
-            <div className="flex gap-2">
-              {EXTRACTION_MODELS.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => setModelA(m.id)}
-                  className={clsx(
-                    "flex-1 rounded-lg border px-3 py-2 text-[11px] font-medium transition-colors",
-                    modelA === m.id
-                      ? "border-accent/60 bg-accent/10 text-accent"
-                      : "border-surface-border bg-surface text-ink-secondary hover:border-accent/40 hover:text-ink-primary"
-                  )}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
-            <p className="mt-1.5 text-[10px] text-ink-muted">
-              Haiku recommended — structured extraction works well on smaller models.
-            </p>
-          </div>
+          {/* Optional enrichment */}
+          <label className="flex items-start gap-2.5 rounded-lg border border-surface-border bg-surface px-4 py-3 cursor-pointer hover:border-accent/40 transition-colors">
+            <input
+              type="checkbox"
+              checked={runEnrich}
+              onChange={(e) => setRunEnrich(e.target.checked)}
+              className="mt-0.5 accent-[#7c6af7]"
+            />
+            <span className="text-[11px] text-ink-muted leading-relaxed">
+              <span className="font-semibold text-ink-secondary">Run enrichment afterward</span><br />
+              Updates Timeline events and character profiles from the changed chapters. Incremental — only re-processes what changed — with its own small LLM cost.
+            </span>
+          </label>
 
           {/* Cost estimate */}
           <div className="flex items-center justify-between rounded-lg border border-surface-border bg-surface px-4 py-3">
-            <p className="text-[11px] text-ink-muted">Estimated cost</p>
+            <div>
+              <p className="text-[11px] text-ink-muted">Estimated extraction cost</p>
+              <p className="mt-0.5 text-[10px] text-ink-muted/70">
+                {estimate?.changed_chunks != null
+                  ? `${estimate.changed_chunks} changed chunk${estimate.changed_chunks === 1 ? "" : "s"} · ${estimate.model ?? "model from Settings"}`
+                  : "model from Settings"}
+              </p>
+            </div>
             <div className="flex items-center gap-1.5">
               {estimating && <Loader2 className="h-3 w-3 animate-spin text-ink-muted" />}
               <p className={clsx("text-sm font-semibold", estimating ? "text-ink-muted" : "text-ink-primary")}>
@@ -306,7 +296,7 @@ function ResyncConfirmModal({
             Cancel
           </button>
           <button
-            onClick={() => onConfirm(modelA)}
+            onClick={() => onConfirm(runEnrich)}
             className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-4 py-1.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent/20"
           >
             <RefreshCw className="h-3 w-3" />
@@ -409,7 +399,7 @@ function ReviewBubble({
 // ── Main pane ─────────────────────────────────────────────────────────────────
 
 export default function ReviewPane() {
-  const { books, appSettings, reviewSessions, viewingReviewSessionId, upsertReview, setViewingReviewSessionId, clearReviewSignal } = useAppStore();
+  const { books, appSettings, reviewSessions, viewingReviewSessionId, upsertReview, setViewingReviewSessionId, clearReviewSignal, showToast, setBooks } = useAppStore();
 
   // Persisted filters
   const [filterBook, setFilterBook] = useState<string>(
@@ -677,17 +667,38 @@ export default function ReviewPane() {
     el.style.height = `${Math.min(el.scrollHeight, 160)}px`;
   };
 
-  const handleResyncConfirm = async (modelA: string) => {
+  const handleResyncConfirm = async (runEnrich: boolean) => {
     setResyncModalOpen(false);
     if (!filterBook) return;
     setResyncing(true);
     try {
-      await runPipeline({ phases: ["a", "b", "c"], force: false, book: filterBook, model_a: modelA });
-      setTimeout(() => {
-        if (selectedBookObj) setChapters(selectedBookObj.chapters);
-        setResyncing(false);
-      }, 2000);
+      await runPipeline({ book: filterBook });
+      showToast(`Resyncing "${filterBook}"…`);
+      // the ingest runs in a background process — poll until it exits
+      const started = Date.now();
+      while (Date.now() - started < 15 * 60_000) {
+        await new Promise((r) => setTimeout(r, 3000));
+        const st = await fetchIngestStatus();
+        if (st.running) continue;
+        if (st.finished && st.exit_code === 0) {
+          showToast("Resync complete — chapter index is up to date.");
+          fetchBooks().then(setBooks).catch(() => {});
+          if (runEnrich) {
+            try {
+              await runEnrichment();
+              showToast("Enrichment started — Timeline and profiles will update shortly.");
+            } catch {
+              showToast("Resync done, but enrichment failed to start.");
+            }
+          }
+        } else {
+          showToast("Resync failed — see logs/ingest_ui.log for details.");
+        }
+        break;
+      }
     } catch {
+      showToast("Failed to start resync.");
+    } finally {
       setResyncing(false);
     }
   };

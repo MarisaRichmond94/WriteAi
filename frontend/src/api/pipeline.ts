@@ -26,17 +26,15 @@ export async function fetchPipelineStatus(): Promise<{ running: boolean }> {
   return { running: Boolean(ingest.running) || enrich.state === "running" };
 }
 
-export async function fetchCostEstimate(
-  _phases?: unknown,
-  _models?: unknown,
-  bookName?: string,
-): Promise<PipelineCostEstimate> {
+export async function fetchCostEstimate(bookName?: string): Promise<PipelineCostEstimate> {
   const params = new URLSearchParams();
   const bookParam = await resolveBookParam(bookName);
   if (bookParam) params.set("book", bookParam);
   const res = await fetch(`/api/ingest/preview?${params}`);
   if (!res.ok) throw new Error(`Failed to fetch cost estimate: ${res.statusText}`);
-  const data = (await res.json()) as { changed_chunks: number; estimated_cost_usd: number };
+  const data = (await res.json()) as {
+    changed_chunks: number; estimated_cost_usd: number; model: string;
+  };
   return {
     phases: {
       extraction: {
@@ -46,12 +44,26 @@ export async function fetchCostEstimate(
       },
     },
     total_cost_usd_est: data.estimated_cost_usd,
+    changed_chunks: data.changed_chunks,
+    model: data.model,
   };
 }
 
-export async function runPipeline(
-  payload?: string | { phases?: string[]; force?: boolean; book?: string; model_a?: string },
-): Promise<void> {
+export async function fetchIngestStatus(): Promise<{
+  running: boolean; finished: boolean; exit_code: number | null;
+}> {
+  const res = await fetch("/api/ingest/status");
+  if (!res.ok) return { running: false, finished: false, exit_code: null };
+  const d = await res.json();
+  return { running: !!d.running, finished: !!d.finished, exit_code: d.exit_code ?? null };
+}
+
+export async function runEnrichment(): Promise<void> {
+  const res = await fetch("/api/enrich/run", { method: "POST" });
+  if (!res.ok) throw new Error(`Failed to start enrichment: ${res.statusText}`);
+}
+
+export async function runPipeline(payload?: string | { book?: string }): Promise<void> {
   const bookName = typeof payload === "string" ? payload : payload?.book;
   const params = new URLSearchParams();
   const bookParam = await resolveBookParam(bookName);

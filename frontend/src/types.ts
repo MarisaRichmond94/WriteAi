@@ -392,6 +392,8 @@ export interface PipelineCostEstimate {
     cost_usd_est: number;
   }>;
   total_cost_usd_est: number;
+  changed_chunks?: number;
+  model?: string;
 }
 
 export interface ExtractedChapter {
