@@ -138,11 +138,11 @@ function BookCard({ book, active, condensed, lastSynced, onClick, onRebuild }: {
         </div>
 
         <div className={clsx("grid min-h-0 flex-1 auto-rows-fr gap-2 transition-all duration-300", condensed ? "grid-cols-3" : "grid-cols-6")}>
-          <CardStat label="Chapters" value={book.chapter_count} />
-          <CardStat label="Characters" value={summary?.character_count ?? null} />
-          <CardStat label="Locations" value={summary?.location_count ?? null} />
-          <CardStat label="Events" value={summary?.event_count ?? null} />
-          <CardStat label="Facts" value={summary?.fact_count ?? null} />
+          <CardStat label="Chapter(s)" value={book.chapter_count} />
+          <CardStat label="Character(s)" value={summary?.character_count ?? null} />
+          <CardStat label="Location(s)" value={summary?.location_count ?? null} />
+          <CardStat label="Event(s)" value={summary?.event_count ?? null} />
+          <CardStat label="Fact(s)" value={summary?.fact_count ?? null} />
           <CardStat label="POV(s)" value={summary?.pov_breakdown.length ?? null} />
         </div>
       </div>
