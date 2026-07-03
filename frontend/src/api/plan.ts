@@ -107,6 +107,18 @@ export async function fetchWriterCharacters(): Promise<WriterCharacter[]> {
   }));
 }
 
+export async function importWriterCharacters(names: string[]): Promise<WriterCharacter[]> {
+  const data = await jsonFetch<{ imported: WriterCharacter[]; skipped: string[] }>(
+    "/api/plan/characters/import",
+    { method: "POST", body: JSON.stringify({ names }) },
+  );
+  return data.imported.map((c) => ({
+    ...c,
+    books: (c.books ?? []).map(String),
+    photo_url: c.photo_url ?? null,
+  }));
+}
+
 export async function replaceAllWriterCharacters(
   characters: WriterCharacter[],
 ): Promise<WriterCharacter[]> {

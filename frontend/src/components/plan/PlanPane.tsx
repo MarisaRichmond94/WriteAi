@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
-import { Info, Kanban, RefreshCw, Loader2, Plus, MessageSquare } from "lucide-react";
+import { Info, Kanban, RefreshCw, Loader2, Plus, Download, MessageSquare } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import { usePlanStore } from "../../store/usePlanStore";
-import { fetchOutline, fetchResyncPreview } from "../../api/plan";
+import { fetchOutline, fetchResyncPreview, importWriterCharacters } from "../../api/plan";
 import { fetchPipelineStatus } from "../../api/pipeline";
 import OutlineView from "./outline/OutlineView";
 import CharacterView from "./character/CharacterView";
 import ChapterSelectModal from "./outline/ChapterSelectModal";
+import ImportCharactersModal from "./character/ImportCharactersModal";
 
 export default function PlanPane() {
   const { books, showToast } = useAppStore();
@@ -21,9 +22,26 @@ export default function PlanPane() {
     syncing, setSyncing,
     setSelectedChapterIds,
     setReviewOpen,
+    writerCharacters, setWriterCharacters,
   } = usePlanStore();
 
   const [addCharacterTrigger, setAddCharacterTrigger] = useState(0);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  const handleImport = async (names: string[]) => {
+    setImporting(true);
+    try {
+      const imported = await importWriterCharacters(names);
+      setWriterCharacters([...writerCharacters, ...imported]);
+      setImportOpen(false);
+      showToast(`Imported ${imported.length} character${imported.length === 1 ? "" : "s"}.`);
+    } catch {
+      showToast("Import failed.");
+    } finally {
+      setImporting(false);
+    }
+  };
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [pipelineRunning, setPipelineRunning] = useState(false);
 
@@ -194,15 +212,34 @@ export default function PlanPane() {
         )}
 
         {planView === "character" && (
-          <button
-            onClick={() => setAddCharacterTrigger((n) => n + 1)}
-            className="flex flex-shrink-0 items-center gap-1.5 rounded-md border border-surface-border px-3 py-1.5 text-xs text-ink-secondary hover:border-accent hover:text-accent transition-colors"
-          >
-            <Plus className="h-3 w-3" />
-            New Character
-          </button>
+          <>
+            <button
+              onClick={() => setImportOpen(true)}
+              title="Import AI-extracted characters"
+              className="flex flex-shrink-0 items-center gap-1.5 rounded-md border border-surface-border px-3 py-1.5 text-xs text-ink-secondary hover:border-accent hover:text-accent transition-colors"
+            >
+              <Download className="h-3 w-3" />
+              Import
+            </button>
+            <button
+              onClick={() => setAddCharacterTrigger((n) => n + 1)}
+              className="flex flex-shrink-0 items-center gap-1.5 rounded-md border border-surface-border px-3 py-1.5 text-xs text-ink-secondary hover:border-accent hover:text-accent transition-colors"
+            >
+              <Plus className="h-3 w-3" />
+              New Character
+            </button>
+          </>
         )}
       </div>
+
+      {importOpen && (
+        <ImportCharactersModal
+          existingNames={new Set(writerCharacters.map((c) => c.name))}
+          importing={importing}
+          onImport={handleImport}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
 
       {planView === "outline" && <OutlineView bookId={selectedBook} bookName={books.find(b => b.id === selectedBook)?.name ?? ""} />}
       {planView === "character" && <CharacterView addTrigger={addCharacterTrigger} selectedBook={selectedBook} />}

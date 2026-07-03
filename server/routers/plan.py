@@ -308,6 +308,51 @@ def put_writer_characters(body: CharactersPut):
     return {"ok": True}
 
 
+class CharactersImport(BaseModel):
+    names: list[str]
+
+
+@router.post("/characters/import")
+def import_writer_characters(body: CharactersImport):
+    """Selectively import AI-extracted characters (name, aliases,
+    relationships with known natures, photo) as writer characters.
+    Names already present are skipped, never merged or overwritten."""
+    from .characters import _cmap, _photo_url, _profiles, _relationships
+
+    s = get_state()
+    s.canon.ensure_built()
+    cmap = _cmap()
+    titles = _book_titles()
+    chars = writer_store.writer_characters()
+    existing = {c.get("name") for c in chars}
+    imported, skipped = [], []
+    for name in body.names:
+        e = s.canon.entities.get(name)
+        if e is None or e.kind != "character" or name in existing:
+            skipped.append(name)
+            continue
+        books = sorted({s.canon.chunk_meta[cid][0] for cid in e.chunk_ids
+                        if cid in s.canon.chunk_meta})
+        rels = _relationships(s, s.canon, name, cmap)
+        entry = {
+            "id": f"wc-{uuid.uuid4().hex[:8]}", "name": name,
+            "category": ("main" if e.is_pov
+                         else "secondary" if len(e.chunk_ids) >= 50 else "tertiary"),
+            "role": None,
+            "aliases": ", ".join(e.aliases) or None,
+            "traits": [], "arc_notes": None, "goals": None,
+            "relationships": [{"target": r["target"], "nature": r["status"]}
+                              for r in rels if r["status"]],
+            "books": [titles.get(b, f"Book {b}") for b in books],
+            "photo_url": _photo_url(cmap, name),
+        }
+        chars.append(entry)
+        imported.append(entry)
+    if imported:
+        writer_store.save_writer_characters(chars)
+    return {"imported": imported, "skipped": skipped}
+
+
 @router.put("/characters/{char_id}")
 def put_writer_character(char_id: str, body: dict):
     """Upsert: updates in place, or appends when the id is new (the UI
