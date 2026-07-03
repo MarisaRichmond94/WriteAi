@@ -115,9 +115,13 @@ export default function AppShell() {
       <Sidebar />
       <main className={clsx("relative flex flex-1 flex-col overflow-hidden", lightMode && "light-body")}>
         <div className="absolute right-6 top-5 z-50 flex items-center gap-2">
-          <span className="text-xs text-ink-primary">
-            Good {timeOfDay()}, {appSettings?.writer_name ?? "Writer"}
-          </span>
+          {appSettings === null ? (
+            <span className="h-3.5 w-40 animate-pulse rounded bg-surface-hover" />
+          ) : (
+            <span className="text-xs text-ink-primary">
+              Good {timeOfDay()}, {appSettings.writer_name || "Writer"}
+            </span>
+          )}
           <button
             role="switch"
             aria-checked={lightMode}
