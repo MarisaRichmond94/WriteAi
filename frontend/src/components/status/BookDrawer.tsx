@@ -118,15 +118,6 @@ function ChapterSkeleton() {
         ))}
       </div>
 
-      {/* Locations */}
-      <div className="px-6 py-3">
-        <SkeletonLine className="mb-3 h-3 w-24" />
-        <div className="flex flex-wrap gap-1.5">
-          {[48, 64, 56, 72, 52].map((w, i) => (
-            <SkeletonLine key={i} className="h-5 rounded-full" style={{ width: w }} />
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
@@ -353,7 +344,6 @@ function ChapterRow({
   const charRef = useRef<HTMLDivElement>(null);
   const eventsRef = useRef<HTMLDivElement>(null);
   const factsRef = useRef<HTMLDivElement>(null);
-  const locRef = useRef<HTMLDivElement>(null);
 
   const openQuote = useCallback((quote: string) => {
     onOpenViewer({
@@ -434,7 +424,6 @@ function ChapterRow({
               data.characters.length > 0 ? charRef : null,
               data.events.length > 0 ? eventsRef : null,
               data.facts.length > 0 ? factsRef : null,
-              data.locations.length > 0 ? locRef : null,
             ].filter(Boolean) as React.RefObject<HTMLDivElement>[];
             const scrollTo = (ref: React.RefObject<HTMLDivElement>) =>
               ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -454,7 +443,7 @@ function ChapterRow({
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Summary
                     </p>
-                    <ul className="space-y-1">
+                    <ul className="max-h-72 space-y-1 overflow-y-auto pr-1">
                       {data.summary.map((bullet, i) => (
                         <li key={i} className="flex items-start gap-1.5">
                           <span className="mt-1.5 h-1 w-1 flex-shrink-0 rounded-full bg-ink-muted/50" />
@@ -471,7 +460,7 @@ function ChapterRow({
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Characters ({data.characters.length})
                     </p>
-                    <div className="space-y-3">
+                    <div className="max-h-72 space-y-3 overflow-y-auto pr-1">
                       {data.characters.map((c, i) => {
                         // no POV badge: the chapter header already names the POV
                         const role = c.role.replace(/^POV character[;,]?\s*/i, "");
@@ -510,7 +499,7 @@ function ChapterRow({
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Events ({data.events.length})
                     </p>
-                    <div className="space-y-2">
+                    <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
                       {data.events.map((e, i) => (
                         <div key={i} className="group flex items-start gap-1.5">
                           <div className="flex-1 min-w-0">
@@ -549,7 +538,7 @@ function ChapterRow({
                       </button>
                       <span className="text-[9px] font-semibold uppercase tracking-widest text-ink-muted">Detail</span>
                     </div>
-                    <div className="divide-y divide-surface-border/40">
+                    <div className="max-h-72 divide-y divide-surface-border/40 overflow-y-auto pr-1">
                       {sorted.map((f, i) => (
                         <div key={i} className="group flex items-center gap-3 py-2.5">
                           <span className={clsx("w-20 flex-shrink-0 rounded px-1.5 py-0.5 text-center text-[9px] font-medium", factCategoryColor(f.category))}>
@@ -565,24 +554,6 @@ function ChapterRow({
                   </NavSection>
                 )}
 
-                {/* Locations */}
-                {data.locations.length > 0 && (
-                  <NavSection sectionRef={locRef} onScrollUp={prev(locRef)} onScrollDown={next(locRef)}>
-                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
-                      Locations ({data.locations.length})
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {data.locations.map((loc, i) => (
-                        <span
-                          key={i}
-                          className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400"
-                        >
-                          {loc.name}
-                        </span>
-                      ))}
-                    </div>
-                  </NavSection>
-                )}
               </div>
             );
           })()}
