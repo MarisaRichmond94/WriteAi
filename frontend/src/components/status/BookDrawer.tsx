@@ -123,7 +123,7 @@ function ChapterSkeleton() {
 }
 
 // ── Capped scroll area — gradients hint at hidden content above/below ──────
-function CappedScroll({ children }: { children: React.ReactNode }) {
+function CappedScroll({ children, maxHeight = 100 }: { children: React.ReactNode; maxHeight?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [canUp, setCanUp] = useState(false);
   const [canDown, setCanDown] = useState(false);
@@ -143,7 +143,7 @@ function CappedScroll({ children }: { children: React.ReactNode }) {
   }, [check]);
   return (
     <div className="relative">
-      <div ref={ref} onScroll={check} className="max-h-[100px] overflow-y-auto pr-1">
+      <div ref={ref} onScroll={check} className="overflow-y-auto pr-1" style={{ maxHeight }}>
         {children}
       </div>
       {canUp && (
@@ -474,7 +474,7 @@ function ChapterRow({
                 {/* Summary */}
                 {data.summary.length > 0 && (
                   <NavSection sectionRef={summaryRef} onScrollUp={prev(summaryRef)} onScrollDown={next(summaryRef)}>
-                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
+                    <p className="sticky top-0 z-10 -mt-3 mb-2 bg-surface pt-3 pb-1 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Summary
                     </p>
                     <CappedScroll>
@@ -493,10 +493,10 @@ function ChapterRow({
                 {/* Characters */}
                 {data.characters.length > 0 && (
                   <NavSection sectionRef={charRef} onScrollUp={prev(charRef)} onScrollDown={next(charRef)}>
-                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
+                    <p className="sticky top-0 z-10 -mt-3 mb-2 bg-surface pt-3 pb-1 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Characters ({data.characters.length})
                     </p>
-                    <CappedScroll>
+                    <CappedScroll maxHeight={150}>
                     <div className="space-y-3">
                       {data.characters.map((c, i) => {
                         // no POV badge: the chapter header already names the POV
@@ -534,7 +534,7 @@ function ChapterRow({
                 {/* Events */}
                 {data.events.length > 0 && (
                   <NavSection sectionRef={eventsRef} onScrollUp={prev(eventsRef)} onScrollDown={next(eventsRef)}>
-                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
+                    <p className="sticky top-0 z-10 -mt-3 mb-2 bg-surface pt-3 pb-1 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Events ({data.events.length})
                     </p>
                     <CappedScroll>
@@ -563,7 +563,7 @@ function ChapterRow({
                 {/* Facts */}
                 {data.facts.length > 0 && (
                   <NavSection sectionRef={factsRef} onScrollUp={prev(factsRef)} onScrollDown={next(factsRef)}>
-                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-ink-primary">
+                    <p className="sticky top-0 z-10 -mt-3 mb-2 bg-surface pt-3 pb-1 text-xs font-bold uppercase tracking-widest text-ink-primary">
                       Facts ({data.facts.length})
                     </p>
                     <div className="mb-1 flex items-center gap-3 border-b border-surface-border pb-1.5">
@@ -578,7 +578,7 @@ function ChapterRow({
                       </button>
                       <span className="text-[9px] font-semibold uppercase tracking-widest text-ink-muted">Detail</span>
                     </div>
-                    <CappedScroll>
+                    <CappedScroll maxHeight={200}>
                     <div className="divide-y divide-surface-border/40">
                       {sorted.map((f, i) => (
                         <div key={i} className="group flex items-center gap-3 py-2.5">
