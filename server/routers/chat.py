@@ -115,6 +115,10 @@ def chat_stream(req: ChatRequest):
                "input_tokens": (u["input_tokens"] + u["cache_write_tokens"]
                                 + u["cache_read_tokens"]),
                "output_tokens": u["output_tokens"],
+               # cache breakdown so the UI (and anyone watching the SSE
+               # stream) can see whether the prompt cache is engaging
+               "cache_write_tokens": u["cache_write_tokens"],
+               "cache_read_tokens": u["cache_read_tokens"],
                "cost_usd": answerer.actual_cost_usd}
 
     return stream_response(generate())
