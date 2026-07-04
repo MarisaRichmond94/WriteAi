@@ -90,6 +90,37 @@ def note_citations(notes: list[str]) -> set[tuple[int, int]]:
     return cites
 
 
+# ENABLE_DIRECT_QUOTES metric. Typographic variants that must not count as a
+# quoting failure: the model tends to emit straight quotes/apostrophes and
+# three dots where the manuscripts use smart quotes and the ellipsis char.
+_TYPOGRAPHIC_NORMALIZATIONS = (("“", '"'), ("”", '"'),
+                               ("‘", "'"), ("’", "'"),
+                               ("…", "..."))
+
+
+def _normalize_quote_text(text: str) -> str:
+    """Case-sensitive normalization for verbatim matching: smart quotes /
+    apostrophes / ellipses to their ASCII forms, whitespace collapsed."""
+    for smart, plain in _TYPOGRAPHIC_NORMALIZATIONS:
+        text = text.replace(smart, plain)
+    return " ".join(text.split())
+
+
+def quote_metrics(answer: str, excerpts: list[dict],
+                  min_words: int = 4) -> tuple[int, float | None]:
+    """(n_quotes, quote_precision): the double-quoted spans of >= min_words
+    words in the answer, and the fraction that appear verbatim (whitespace-
+    normalized, case-sensitive) in the union of retrieved excerpt texts.
+    quote_precision is None when the answer contains no qualifying quotes."""
+    spans = [s for s in re.findall(r'"([^"]+)"', _normalize_quote_text(answer))
+             if len(s.split()) >= min_words]
+    if not spans:
+        return 0, None
+    corpus = _normalize_quote_text("\n".join(e["text"] for e in excerpts))
+    matched = sum(1 for s in spans if s in corpus)
+    return len(spans), round(matched / len(spans), 4)
+
+
 def est_prompt_tokens(question: str, excerpts: list[dict], notes: list[str]) -> int:
     words = len(question.split())
     words += sum(len(e["text"].split()) for e in excerpts)
@@ -148,8 +179,9 @@ def aggregate(rows: list[dict]) -> dict:
     agg = {"n": len(rows)}
     for metric in ALL_METRICS:
         agg[metric] = _mean([r.get(metric) for r in rows])
-    if any("answer_mention_hit" in r for r in rows):
-        agg["answer_mention_hit"] = _mean([r.get("answer_mention_hit") for r in rows])
+    for metric in ("answer_mention_hit", "quote_precision", "n_quotes"):
+        if any(metric in r for r in rows):
+            agg[metric] = _mean([r.get(metric) for r in rows])
     return agg
 
 
@@ -273,6 +305,8 @@ def main() -> int:
             row["answer_mention_hit"] = (
                 sum(1 for m in must if m.lower() in answer_text.lower()) / len(must)
                 if must else None)
+            row["n_quotes"], row["quote_precision"] = \
+                quote_metrics(answer_text, excerpts)
 
         per_item.append(row)
         print(f"[{n}/{len(items)}] {item['id']} "
