@@ -30,6 +30,11 @@ class Answerer:
         # per-request override (e.g. the review pane's model dropdown, which
         # drops to a cheaper model for interim iterations)
         self.model = model or cfg.query_model
+        # ENABLE_PROMPT_CACHE_V2: also mark the last prior chat turn as a
+        # cache breakpoint so multi-turn sessions reuse the prefix. Flag off
+        # -> request payloads are byte-identical to the legacy shape.
+        self.enable_prompt_cache_v2 = getattr(cfg, "enable_prompt_cache_v2",
+                                              False)
         self.usage = {"input_tokens": 0, "output_tokens": 0,
                       "cache_write_tokens": 0, "cache_read_tokens": 0}
 
@@ -86,6 +91,8 @@ class Answerer:
         if max_tokens is None:
             max_tokens = 12000 if plan.qtype in ("continuity", "general") else 6000
         messages = list(history or [])
+        if self.enable_prompt_cache_v2 and messages:
+            messages = self._mark_history_breakpoint(messages)
         messages.append({"role": "user", "content": "\n".join(parts)})
         system = ((system_base or SYSTEM_PROMPT)
                   + (f"\n\n{system_extra}" if system_extra else ""))
@@ -97,6 +104,31 @@ class Answerer:
                 "system": [{"type": "text", "text": system,
                             "cache_control": {"type": "ephemeral"}}],
                 "messages": messages}
+
+    @staticmethod
+    def _mark_history_breakpoint(messages: list[dict]) -> list[dict]:
+        """ENABLE_PROMPT_CACHE_V2 only: mark the last content block of the
+        last history message with cache_control, so on turn N+1 the whole
+        prefix (system + all prior turns) is a cache read instead of a full-
+        price re-process. String content is converted to the block form —
+        semantically identical on the wire, required to carry the marker.
+        Two breakpoints total (system + here), well under the API's max 4.
+        Copies, never mutates, the caller's message dicts."""
+        messages = list(messages)
+        last = dict(messages[-1])
+        content = last.get("content")
+        if isinstance(content, str):
+            blocks = [{"type": "text", "text": content}]
+        elif isinstance(content, list) and content:
+            blocks = [dict(b) if isinstance(b, dict) else b for b in content]
+            if not isinstance(blocks[-1], dict):
+                return messages  # unexpected shape — leave untouched
+        else:
+            return messages
+        blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
+        last["content"] = blocks
+        messages[-1] = last
+        return messages
 
     def answer(self, plan: QueryPlan, excerpts: list[dict], notes: list[str]) -> str:
         response = self.client.messages.create(
