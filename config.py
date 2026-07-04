@@ -68,6 +68,7 @@ class Config:
     top_k_results: int
     confirm_before_ingest: bool
     enable_hybrid_search: bool
+    enable_alias_resolution: bool
     log_level: str
     cost_log_enabled: bool = True
 
@@ -140,6 +141,7 @@ def load_config(env_file: Path | None = None) -> Config:
         top_k_results=_get_int("TOP_K_RESULTS", 15),
         confirm_before_ingest=_get_bool("CONFIRM_BEFORE_INGEST", True),
         enable_hybrid_search=_get_bool("ENABLE_HYBRID_SEARCH", False),
+        enable_alias_resolution=_get_bool("ENABLE_ALIAS_RESOLUTION", False),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         cost_log_enabled=_get_bool("COST_LOG_ENABLED", True),
     )

@@ -20,9 +20,20 @@ from __future__ import annotations
 import json
 import logging
 
+from .query_prep import expand_characters
 from .query_router import QueryPlan, Scope
 
 log = logging.getLogger(__name__)
+
+
+def _like_clause(column: str, aliases: list[str]) -> tuple[str, list[str]]:
+    """`column LIKE ?` for one alias, `(… OR … )` over several — parameterized
+    only, never interpolating names into SQL. The single-alias form is exactly
+    the pre-alias-resolution SQL, so the flag-off path is unchanged."""
+    likes = [f"%{a}%" for a in aliases]
+    if len(aliases) == 1:
+        return f"{column} LIKE ?", likes
+    return "(" + " OR ".join(f"{column} LIKE ?" for _ in aliases) + ")", likes
 
 
 def _scope_sql(scope: Scope) -> tuple[str, list]:
@@ -99,6 +110,14 @@ class Retriever:
     def db(self):
         return self.store.db
 
+    def _alias_map(self, names: list[str]) -> dict[str, list[str]]:
+        """name -> grounded alias list; identity mapping unless
+        ENABLE_ALIAS_RESOLUTION is on. Only the SQL LIKE filters consume
+        this — the semantic query text is never rewritten."""
+        if self.cfg.enable_alias_resolution and names:
+            return expand_characters(self.db, names)
+        return {n: [n] for n in names}
+
     # ── entry point ─────────────────────────────────────────────────────────
 
     def retrieve(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
@@ -150,14 +169,16 @@ class Retriever:
 
     def _temporal(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
         where, params = _scope_sql(plan.scope)
+        aliases = self._alias_map(plan.characters)
         notes = []
         for name in plan.characters or [""]:
+            clause, likes = _like_clause("k.character", aliases.get(name, [name]))
             rows = self.db.execute(
                 f"""SELECT c.book_number, c.chapter_number, k.character, k.learns
                     FROM character_knowledge k JOIN chunks c ON c.chunk_id = k.chunk_id
-                    WHERE k.character LIKE ? AND {where}
+                    WHERE {clause} AND {where}
                     ORDER BY c.book_number, c.chapter_number, c.chunk_index""",
-                [f"%{name}%", *params]).fetchall()
+                [*likes, *params]).fetchall()
             notes.extend(
                 f"[Book {b}, Ch {ch}] {who} learns: {fact}"
                 for b, ch, who, fact in rows)
@@ -170,10 +191,14 @@ class Retriever:
         where, params = _scope_sql(plan.scope)
         notes = []
         if plan.characters:
-            like_join = " AND ".join(
-                f"c.chunk_id IN (SELECT chunk_id FROM characters WHERE name LIKE ?)"
-                for _ in plan.characters)
-            likes = [f"%{n}%" for n in plan.characters]
+            aliases = self._alias_map(plan.characters)
+            clauses, likes = [], []
+            for n in plan.characters:
+                clause, ls = _like_clause("name", aliases.get(n, [n]))
+                clauses.append(
+                    f"c.chunk_id IN (SELECT chunk_id FROM characters WHERE {clause})")
+                likes.extend(ls)
+            like_join = " AND ".join(clauses)
             rows = self.db.execute(
                 f"""SELECT c.chunk_id, c.book_number, c.chapter_number, c.metadata_json
                     FROM chunks c WHERE {like_join} AND {where}
@@ -205,15 +230,17 @@ class Retriever:
 
     def _lookup(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
         where, params = _scope_sql(plan.scope)
+        aliases = self._alias_map(plan.characters)
         notes = []
         for name in plan.characters:
+            clause, likes = _like_clause("t.name", aliases.get(name, [name]))
             for table, label in (("locations", "location"), ("characters", "character")):
                 rows = self.db.execute(
                     f"""SELECT DISTINCT c.book_number, c.book_title, c.chapter_number, t.name
                         FROM {table} t JOIN chunks c ON c.chunk_id = t.chunk_id
-                        WHERE t.name LIKE ? AND {where}
+                        WHERE {clause} AND {where}
                         ORDER BY c.book_number, c.chapter_number""",
-                    [f"%{name}%", *params]).fetchall()
+                    [*likes, *params]).fetchall()
                 notes.extend(
                     f"[Book {b} \"{title}\", Ch {ch}] {label} match: {n}"
                     for b, title, ch, n in rows)
@@ -228,14 +255,22 @@ class Retriever:
         """Chronological structured notes for a character (or a pair when
         require_all is given): key events, knowledge gained, emotional beats."""
         names = require_all or [name]
-        like_join = " AND ".join(
-            "c.chunk_id IN (SELECT chunk_id FROM characters WHERE name LIKE ?)"
-            for _ in names)
+        alias_map = self._alias_map(names)
+        clauses, likes = [], []
+        for n in names:
+            clause, ls = _like_clause("name", alias_map.get(n, [n]))
+            clauses.append(
+                f"c.chunk_id IN (SELECT chunk_id FROM characters WHERE {clause})")
+            likes.extend(ls)
+        like_join = " AND ".join(clauses)
+        # every alias participates in the LEARNS attribution check below
+        # (flag off: alias_map is the identity, so this is exactly `names`)
+        match_names = [a for n in names for a in alias_map.get(n, [n])]
         rows = self.db.execute(
             f"""SELECT c.book_number, c.chapter_number, c.metadata_json
                 FROM chunks c WHERE {like_join}
                 ORDER BY c.book_number, c.chapter_number, c.chunk_index""",
-            [f"%{n}%" for n in names]).fetchall()
+            likes).fetchall()
 
         notes = []
         for b, ch, meta_json in rows:
@@ -245,7 +280,7 @@ class Retriever:
             cite = f"[Book {b}, Ch {ch}]"
             notes.extend(f"{cite} EVENT: {e}" for e in meta.get("key_events", []))
             for who, facts in meta.get("character_knowledge_updates", {}).items():
-                if any(n.split()[0].lower() in who.lower() for n in names):
+                if any(n.split()[0].lower() in who.lower() for n in match_names):
                     notes.extend(f"{cite} {who} LEARNS: {f}" for f in facts)
             notes.extend(f"{cite} EMOTION: {e}" for e in meta.get("emotional_beats", []))
         if len(notes) > max_notes:
