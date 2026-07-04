@@ -44,13 +44,14 @@ PRICING_PER_MTOK = {
 
 TOKENS_PER_WORD = 1.35          # prose heuristic, same as the chunker
 # Observed metadata size per chunk. 450 before source quotes; the verbatim
-# source_quote fields add roughly 150-250 output tokens per chunk.
-EST_OUTPUT_TOKENS_PER_CHUNK = 650
+# source_quote fields plus the exhaustive-extraction instruction put measured
+# output at ~800 tokens per chunk.
+EST_OUTPUT_TOKENS_PER_CHUNK = 800
 
 # Batching limits: keep well inside the 200K context of claude-haiku-4-5 and
-# inside a 16K non-streaming output budget (~20 chunks * 650 tokens ≈ 13K).
+# inside a 16K non-streaming output budget (~18 chunks * 800 tokens ≈ 14.4K).
 MAX_BATCH_WORDS = 9000
-MAX_BATCH_CHUNKS = 20
+MAX_BATCH_CHUNKS = 18
 MAX_OUTPUT_TOKENS = 16000
 
 # Message Batches API: 50% of standard token prices; poll cadence for the
@@ -62,18 +63,20 @@ SYSTEM_PROMPT = """You are analyzing chunks of a fiction series the way a carefu
 
 For EVERY chunk you receive, extract metadata based only on what the text of that chunk says. Never invent details that are not present in the text.
 
+Be exhaustive. List every distinct key event, revealed fact, character knowledge update, emotional beat, foreshadowing hint, and unresolved question the chunk supports — a typical chunk yields 2-5 entries per field, and rich chunks more. Do not merge distinct items into one, and do not drop minor items for brevity: a small planted detail or a passing emotional shift still gets its own entry.
+
 Field guidance:
 - characters_present: characters who appear or speak in the chunk (canonical full names when known, e.g. "Maria Santos" rather than "Maria").
 - locations: physical places where the chunk's action occurs or that are meaningfully referenced.
 - timeline_position: when this happens relative to the story (use the chunk's date header and in-text time cues), or null if nothing indicates it.
 - key_events: the concrete plot events that happen in this chunk.
 - new_information_revealed: facts the READER learns for the first time in this chunk.
-- character_knowledge_updates: for each character who LEARNS something in this chunk, what they learn. Only include knowledge gained here, by that character — not things the reader knows but the character does not. Never use "Reader" as a character here; what the reader learns belongs in new_information_revealed.
+- character_knowledge_updates: for each character who LEARNS something in this chunk, what they learn — include every character who learns anything, even small facts (a name, a location, another character's feelings), and list each distinct fact as its own entry: a character often learns several separate things in one chunk. Only include knowledge gained here, by that character — not things the reader knows but the character does not. Never use "Reader" as a character here; what the reader learns belongs in new_information_revealed.
 - emotional_beats: character emotional states and shifts (e.g. "the narrator feels cornered and ashamed").
-- foreshadowing: hints, planted details, or ominous notes that seem intended to pay off later.
-- unresolved_questions: questions this chunk raises that it does not answer.
+- foreshadowing: hints, planted details, or ominous notes that seem intended to pay off later. Err on the side of inclusion: subtle imagery, repeated motifs, and offhand remarks that could pay off later all count.
+- unresolved_questions: questions this chunk raises that it does not answer — every question a careful reader would still have: unexplained motives, unidentified people or objects, unstated outcomes, and questions the characters themselves voice.
 
-Verbatim evidence (source_quote): every learned fact, emotional beat, foreshadowing item, and unresolved question carries a source_quote — the single most probative passage of the chunk text that supports the item, copied EXACTLY, character for character, from the chunk (at most 1-2 sentences). Never paraphrase, never trim or reorder words, never stitch together non-adjacent sentences. When no verbatim passage in the chunk supports the item, set source_quote to null.
+Verbatim evidence (source_quote): each learned fact, emotional beat, foreshadowing item, and unresolved question also carries a source_quote field. COMPLETENESS IS PARAMOUNT AND UNCHANGED: first decide the full list of items for each field exactly as you would if the source_quote field did not exist, then attach quotes. The quote is a bonus — an item must NEVER be dropped, merged, or softened because no clean supporting quote exists; set its source_quote to null and keep the item. When you do give a quote, it is the single most probative passage (at most 1-2 sentences) copied EXACTLY from the chunk text, character for character, including capitalization and punctuation — never paraphrase, trim, reorder words, or stitch together non-adjacent sentences. Before writing a quote, check that it appears verbatim in the chunk; if you cannot copy a passage exactly or are unsure, use null. Many items naturally have no single clean quote — source_quote: null is common and expected, and quote-finding must never influence which items you list.
 
 Return metadata for every chunk, in the same order, each tagged with its exact chunk_id. Empty lists are fine when a field has nothing."""
 
