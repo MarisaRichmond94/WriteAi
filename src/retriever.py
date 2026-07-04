@@ -237,7 +237,141 @@ class Retriever:
                 notes.extend(f"[Book {b}, Ch {ch}] {beat}" for beat in beats)
             if len(notes) > 400:
                 notes = notes[:400]
+            if self.cfg.enable_sentiment_v2:
+                return self._sentiment_v2_excerpts(plan, where, params, aliases), notes
         return self._semantic(plan), notes
+
+    def _sentiment_v2_excerpts(self, plan: QueryPlan, where: str, params: list,
+                               aliases: dict[str, list[str]]) -> list[dict]:
+        """SQL-first excerpt pool for sentiment questions (ENABLE_SENTIMENT_V2).
+
+        Eval finding: the chunks that answer "how does X feel about Y" sit at
+        semantic rank 48-300+, so no reranker over a semantic pool can surface
+        them — but they are trivially findable structurally: X and Y co-occur
+        in the `characters` side table and/or an extracted emotional beat
+        names them both.
+
+        Candidate pool (chronological within each tier, most specific first):
+          1. all named characters co-occur AND the beats tie them together
+          2. beats tie only (extraction sometimes misses a character tag)
+          3. co-occurrence only
+        capped at rerank_candidates by round-robin across books, so a
+        series-wide question keeps candidates from every book instead of only
+        the earliest chapters; then unioned with the semantic hits.
+
+        Ranking: with ENABLE_RERANKER on, every emotional beat becomes its own
+        cross-encoder scoring doc (chunks without beats score on their text)
+        and the full ordering is deduped by chunk_id — a chunk ranks as its
+        best beat. Beats are the distilled emotional content; scoring whole
+        prose passages buries the signal (eval: hit@k 0.5 vs 1.0 on the
+        sentiment set). With the reranker flag off we keep concerns separate
+        and do NOT load the cross-encoder here either: SQL candidates come
+        first in chronological order, then the semantic hits, cut to top_k.
+        """
+        top_k = self.cfg.top_k_results
+        cols = """c.chunk_id, c.book_number, c.book_title, c.chapter_number,
+                  c.pov_character, c.date_line, c.text, c.metadata_json"""
+        clauses, likes = [], []
+        for n in plan.characters:
+            clause, ls = _like_clause("name", aliases.get(n, [n]))
+            clauses.append(
+                f"c.chunk_id IN (SELECT chunk_id FROM characters WHERE {clause})")
+            likes.extend(ls)
+        order = "ORDER BY c.book_number, c.chapter_number, c.chunk_index"
+        # every chunk where ANY named character appears (superset of tier 3)
+        rows = self.db.execute(
+            f"""SELECT {cols} FROM chunks c
+                WHERE ({' OR '.join(clauses)}) AND {where} {order}""",
+            [*likes, *params]).fetchall()
+        all_ids = {r[0] for r in self.db.execute(
+            f"""SELECT c.chunk_id FROM chunks c
+                WHERE {' AND '.join(clauses)} AND {where}""",
+            [*likes, *params]).fetchall()}
+
+        def beats_of(meta_json: str | None) -> list[str]:
+            return json.loads(meta_json).get("emotional_beats", []) if meta_json else []
+
+        # a chunk's beats "tie" the characters when they mention at least two
+        # of the named characters (or the single one, on one-name questions)
+        need = min(2, len(plan.characters))
+
+        def ties(meta_json: str | None) -> bool:
+            text = " ".join(beats_of(meta_json)).lower()
+            matched = sum(1 for n in plan.characters
+                          if any(a.lower() in text for a in aliases.get(n, [n])))
+            return matched >= need
+
+        beats_by_id = {r[0]: beats_of(r[7]) for r in rows}
+        tie_ids = {r[0] for r in rows if ties(r[7])}
+        pool, seen = [], set()
+        for keep in (lambda cid: cid in all_ids and cid in tie_ids,
+                     lambda cid: cid in tie_ids,
+                     lambda cid: cid in all_ids):
+            for r in rows:
+                if r[0] not in seen and keep(r[0]):
+                    seen.add(r[0])
+                    cid, bn, bt, ch, pov, dl, text, _ = r
+                    pool.append({"chunk_id": cid,
+                                 "header": _header({"book_number": bn,
+                                                    "book_title": bt,
+                                                    "chapter_number": ch,
+                                                    "pov_character": pov,
+                                                    "date_line": dl}),
+                                 "text": text,
+                                 "book_number": bn, "book_title": bt,
+                                 "chapter_number": ch, "pov_character": pov,
+                                 "distance": None})
+            if len(pool) >= self.cfg.rerank_candidates:
+                break
+        if len(pool) > self.cfg.rerank_candidates:
+            by_book: dict[int, list[dict]] = {}
+            for e in pool:
+                by_book.setdefault(e["book_number"], []).append(e)
+            queues = [by_book[b] for b in sorted(by_book)]
+            pool = []
+            while len(pool) < self.cfg.rerank_candidates:
+                for q in queues:
+                    if q and len(pool) < self.cfg.rerank_candidates:
+                        pool.append(q.pop(0))
+
+        semantic = self._semantic(plan)
+        pool_ids = {e["chunk_id"] for e in pool}
+        union = pool + [e for e in semantic if e["chunk_id"] not in pool_ids]
+
+        if not self.cfg.enable_reranker:
+            # deliberate fallback (see docstring): structural hits first,
+            # oldest to newest, then whatever semantic search added
+            pool.sort(key=lambda e: (e["book_number"], e["chapter_number"],
+                                     e["chunk_id"]))
+            return (pool + [e for e in semantic
+                            if e["chunk_id"] not in pool_ids])[:top_k]
+
+        docs = []
+        for e in union:
+            cid = e["chunk_id"]
+            if cid not in beats_by_id:  # semantic hit outside the SQL rows
+                row = self.db.execute(
+                    "SELECT metadata_json FROM chunks WHERE chunk_id = ?",
+                    (cid,)).fetchone()
+                beats_by_id[cid] = beats_of(row[0]) if row else []
+            beats = beats_by_id[cid]
+            if beats:
+                docs.extend({**e, "text": b} for b in beats)
+            else:
+                docs.append(e)
+        t0 = time.perf_counter()
+        ranked = self.reranker.rerank(plan.question, docs, len(docs))
+        log.debug("sentiment_v2 rerank: %d beat docs over %d chunks in %.1f ms",
+                  len(docs), len(union), (time.perf_counter() - t0) * 1000)
+        by_id = {e["chunk_id"]: e for e in union}
+        out, out_seen = [], set()
+        for d in ranked:
+            if d["chunk_id"] not in out_seen:
+                out_seen.add(d["chunk_id"])
+                out.append(by_id[d["chunk_id"]])
+                if len(out) >= top_k:
+                    break
+        return out
 
     def _continuity(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
         if self.cfg.enable_note_ranking and self.cfg.continuity_notes_cap > 0:
