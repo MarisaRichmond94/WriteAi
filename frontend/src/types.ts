@@ -23,6 +23,21 @@ export interface Message {
   isStreaming?: boolean;
 }
 
+// One paragraph of the ingest's rich-text sidecar: formatting-preserving
+// runs (italic/bold/underline/color) plus optional paragraph alignment.
+export interface RichRun {
+  text: string;
+  i?: boolean;
+  b?: boolean;
+  u?: boolean;
+  color?: string;
+}
+
+export interface RichParagraph {
+  align?: "center" | "right" | "justify";
+  runs: RichRun[];
+}
+
 export interface ChapterSummary {
   chapter: number;
   chapter_heading: string;

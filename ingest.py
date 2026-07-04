@@ -111,6 +111,14 @@ def main() -> int:
     if args.dry_run:
         print("\n--dry-run: stopping before any API calls or database writes.")
         return 0
+
+    # Rich-text sidecar for the UI's chapter viewers (italics, alignment,
+    # colors). Content-hash cached and no API cost; runs even on no-change
+    # syncs so books indexed before this feature gain their sidecar files.
+    from src.richtext import sync_rich_text
+    for num in sorted(diffs):
+        sync_rich_text(cfg, diffs[num][0])
+
     if not changed and not deleted:
         print("\nNothing to do.")
         clear_staging(cfg)

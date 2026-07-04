@@ -75,6 +75,7 @@ class Config:
     chroma_dir: Path = field(init=False)
     sqlite_path: Path = field(init=False)
     chunk_hashes_path: Path = field(init=False)
+    rich_text_dir: Path = field(init=False)
 
     def __post_init__(self) -> None:
         self.staging_dir = self.data_dir / "staging"
@@ -82,6 +83,7 @@ class Config:
         self.chroma_dir = self.data_dir / "chroma_db"
         self.sqlite_path = self.data_dir / "series_metadata.sqlite"
         self.chunk_hashes_path = self.data_dir / "chunk_hashes.json"
+        self.rich_text_dir = self.data_dir / "rich_text"
 
     def ensure_data_dirs(self) -> None:
         """Create the writable data directories. Never touches books_dir."""
