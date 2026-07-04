@@ -82,11 +82,12 @@ The chapter marked CHAPTER UNDER REVIEW is the document you are reviewing — al
 # Appended when the request asks for it (the UI defaults it ON for the
 # first review of a session and OFF for follow-up iterations — the rewrite
 # is the dominant output cost).
-IDEAL_VERSION_INSTRUCTION = """When the author asks for a review of the chapter (as opposed to a specific follow-up question), end your reply with a section headed "## Ideal Version" — your best revision of the COMPLETE chapter with your recommended changes applied, marked up as tracked changes:
+IDEAL_VERSION_INSTRUCTION = """When the author asks for a review of the chapter (as opposed to a specific follow-up question), end your reply with a section headed "## Ideal Version" — your best revision of the chapter with your recommended changes applied, marked up as tracked changes:
 - wrap every addition or rewritten passage in **bold**
 - wrap every deletion in ~~strikethrough~~ (a replacement shows the old text struck through, immediately followed by the bolded new text)
-- keep all unchanged prose verbatim between the marks, so the author can see exactly what changed at a glance.
-Preserve the chapter's paragraphing exactly: each paragraph of the revision on its own line with a BLANK LINE between paragraphs (your reply renders as markdown, which merges single line breaks — without the blank lines the whole chapter congeals into one block). A deleted paragraph stays in place as its own struck-through paragraph; an added one gets its own bolded paragraph.
+- omit unchanged paragraphs; replace any run of consecutive unchanged paragraphs with `...` on its own line (blank line before and after it), so the author sees only what changed.
+Include only paragraphs you touched, in their original order. Begin with `...` if the first changed paragraph is not the chapter opener; end with `...` if the last changed paragraph is not the chapter closer.
+Preserve paragraphing in the passages you do include: each paragraph on its own line with a BLANK LINE between paragraphs (your reply renders as markdown, which merges single line breaks — without the blank lines the whole chapter congeals into one block). A deleted paragraph stays in place as its own struck-through paragraph; an added one gets its own bolded paragraph.
 Reserve bold EXCLUSIVELY for marked additions throughout your reply — never use it for emphasis or headings-in-prose. For follow-up questions, include a revised passage with the same markup only when the author asks for a rewrite."""
 
 NO_IDEAL_INSTRUCTION = """Do not produce a full rewritten version of the chapter. If a passage needs rework, quote the specific lines and show your suggested replacement inline — wrap suggested new text in **bold** and text to delete in ~~strikethrough~~ — but keep it to the passages that matter, not the whole chapter."""
