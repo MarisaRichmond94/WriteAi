@@ -69,6 +69,7 @@ class Config:
     confirm_before_ingest: bool
     enable_hybrid_search: bool
     log_level: str
+    cost_log_enabled: bool = True
 
     # Derived data locations (all under data_dir; created on demand)
     staging_dir: Path = field(init=False)
@@ -140,6 +141,7 @@ def load_config(env_file: Path | None = None) -> Config:
         confirm_before_ingest=_get_bool("CONFIRM_BEFORE_INGEST", True),
         enable_hybrid_search=_get_bool("ENABLE_HYBRID_SEARCH", False),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+        cost_log_enabled=_get_bool("COST_LOG_ENABLED", True),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)
 

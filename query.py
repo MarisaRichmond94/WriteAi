@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 
 from config import load_config
 
@@ -71,6 +72,7 @@ def main() -> int:
         # a few anchoring excerpts via semantic search on the names
         plan = QueryPlan(question=" and ".join(names[:needed]), qtype="general")
         excerpts, _ = retriever.retrieve(plan)
+        t0 = time.monotonic()
         print(answerer.export(args.export, names, notes, excerpts[:6]))
     else:
         if not args.question:
@@ -82,11 +84,17 @@ def main() -> int:
             print(f"[plan] type={plan.qtype} scope={plan.scope.describe()} "
                   f"characters={plan.characters}\n")
         excerpts, notes = retriever.retrieve(plan)
+        t0 = time.monotonic()
         print(answerer.answer(plan, excerpts, notes))
 
     print(f"\n---\n[{answerer.model}: {answerer.usage['input_tokens']:,} in / "
           f"{answerer.usage['output_tokens']:,} out tokens, "
           f"${answerer.actual_cost_usd}]")
+    from src.costlog import log_cost
+    log_cost(cfg, surface="cli-query", model=answerer.model, qtype=plan.qtype,
+             usage=answerer.usage, cost_usd=answerer.actual_cost_usd,
+             latency_ms=int((time.monotonic() - t0) * 1000),
+             extra={"export": args.export} if args.export else None)
     return 0
 
 

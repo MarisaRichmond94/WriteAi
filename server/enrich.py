@@ -20,8 +20,10 @@ import logging
 import re
 import sqlite3
 import threading
+import time
 from collections import defaultdict
 
+from src.costlog import log_cost
 from src.extractor import PRICING_PER_MTOK
 
 log = logging.getLogger(__name__)
@@ -505,6 +507,8 @@ class EnrichmentRunner:
 
     def _run(self, db_path, cfg, canon_factory) -> None:
         import anthropic
+        run_usage = {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}
+        t0 = time.monotonic()
         try:
             db = sqlite3.connect(db_path)  # thread-local connection
             canon = canon_factory(db)
@@ -536,6 +540,9 @@ class EnrichmentRunner:
                 self.status["cost_usd"] = round(
                     self.status["cost_usd"]
                     + (r.usage.input_tokens * in_p + r.usage.output_tokens * out_p) / 1e6, 4)
+                run_usage["input_tokens"] += r.usage.input_tokens
+                run_usage["output_tokens"] += r.usage.output_tokens
+                run_usage["api_calls"] += 1
                 if r.stop_reason in ("refusal", "max_tokens"):
                     raise RuntimeError(f"enrichment call ended with {r.stop_reason}")
                 return json.loads(next(b.text for b in r.content if b.type == "text"))
@@ -685,6 +692,13 @@ class EnrichmentRunner:
                 notify.add("error", "Enrichment failed", str(e))
             except Exception:
                 pass
+        finally:
+            if run_usage["api_calls"]:  # one aggregate line per run with spend
+                log_cost(cfg, surface="enrich", model=cfg.extraction_model,
+                         usage=run_usage, cost_usd=self.status["cost_usd"],
+                         latency_ms=int((time.monotonic() - t0) * 1000),
+                         extra={"api_calls": run_usage["api_calls"],
+                                "state": self.status["state"]})
 
     @staticmethod
     def _store_events(db, chapter: dict, events: list[dict]) -> None:

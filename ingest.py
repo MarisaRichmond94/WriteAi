@@ -184,6 +184,12 @@ def main() -> int:
           f"({u['input_tokens']:,} in / {u['output_tokens']:,} out tokens)")
     print(f"  actual cost: ${extractor.actual_cost_usd}")
     print(f"  elapsed: {elapsed/60:.1f} min")
+    from src.costlog import log_cost
+    log_cost(cfg, surface="ingest", model=extractor.model, usage=u,
+             cost_usd=extractor.actual_cost_usd,
+             latency_ms=int(elapsed * 1000),
+             extra={"api_calls": u["api_calls"], "chunks": len(changed),
+                    "failed_chunks": total_failed})
     failures = (f" {total_failed} chunk(s) failed and will retry next run."
                 if total_failed else "")
     _notify(f"{args.label} complete",

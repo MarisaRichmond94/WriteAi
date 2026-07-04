@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from src.costlog import log_cost, usage_diff
 from src.query_router import QueryPlan, Scope
 
 from ..deps import get_state
@@ -245,6 +247,7 @@ def review_stream(req: ReviewRequest):
         # the Ideal Version section rewrites the whole chapter with markup —
         # far past the default 12K output budget
         ideal = IDEAL_VERSION_INSTRUCTION if req.include_ideal else NO_IDEAL_INSTRUCTION
+        u0, c0, t0 = dict(answerer.usage), answerer.actual_cost_usd, time.monotonic()
         for delta in answerer.answer_stream(review_plan, excerpts, notes,
                                             history=history,
                                             system_extra=FOCUS_PROMPTS[req.focus],
@@ -252,6 +255,11 @@ def review_stream(req: ReviewRequest):
                                             notes_header=STORY_NOTES_HEADER,
                                             max_tokens=32000 if req.include_ideal else 12000):
             yield {"type": "chunk", "content": delta}
+        log_cost(s.cfg, surface="review", model=answerer.model, qtype="general",
+                 usage=usage_diff(answerer.usage, u0),
+                 cost_usd=round(answerer.actual_cost_usd - c0, 4),
+                 latency_ms=int((time.monotonic() - t0) * 1000),
+                 extra={"focus": req.focus, "include_ideal": req.include_ideal})
         yield citations_payload(excerpts)
         yield {"type": "usage", "model": answerer.model,
                "cost_usd": answerer.actual_cost_usd}
