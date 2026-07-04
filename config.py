@@ -79,6 +79,7 @@ class Config:
     enable_note_ranking: bool = False
     continuity_notes_cap: int = 0
     enable_sentiment_v2: bool = False
+    enable_direct_quotes: bool = False
 
     # Derived data locations (all under data_dir; created on demand)
     staging_dir: Path = field(init=False)
@@ -163,6 +164,7 @@ def load_config(env_file: Path | None = None) -> Config:
         enable_note_ranking=_get_bool("ENABLE_NOTE_RANKING", False),
         continuity_notes_cap=_get_int("CONTINUITY_NOTES_CAP", 0),
         enable_sentiment_v2=_get_bool("ENABLE_SENTIMENT_V2", False),
+        enable_direct_quotes=_get_bool("ENABLE_DIRECT_QUOTES", False),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)
 
