@@ -65,10 +65,10 @@ class AppState:
                 self._retriever = Retriever(self.cfg, self.store, self.embedder)
             return self._retriever
 
-    def new_answerer(self):
+    def new_answerer(self, model: str | None = None):
         """Fresh Answerer per request so usage/cost is per-request."""
         from src.answerer import Answerer
-        return Answerer(self.cfg)
+        return Answerer(self.cfg, model=model)
 
 
 state: AppState | None = None

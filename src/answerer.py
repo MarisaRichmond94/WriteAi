@@ -22,12 +22,14 @@ CONTINUITY_INSTRUCTION = """For each foreshadowing element or open question in t
 
 
 class Answerer:
-    def __init__(self, cfg):
+    def __init__(self, cfg, model: str | None = None):
         import anthropic
 
         self.client = anthropic.Anthropic(api_key=cfg.anthropic_api_key or None,
                                           max_retries=3)
-        self.model = cfg.query_model
+        # per-request override (e.g. the review pane's model dropdown, which
+        # drops to a cheaper model for interim iterations)
+        self.model = model or cfg.query_model
         self.usage = {"input_tokens": 0, "output_tokens": 0,
                       "cache_write_tokens": 0, "cache_read_tokens": 0}
 
@@ -53,7 +55,8 @@ class Answerer:
                       history: list[dict] | None = None,
                       system_extra: str = "",
                       system_base: str | None = None,
-                      notes_header: str | None = None) -> dict:
+                      notes_header: str | None = None,
+                      max_tokens: int | None = None) -> dict:
         """Assemble the messages.create kwargs. Shared by the blocking
         answer() path and the server's SSE streaming path."""
         parts: list[str] = []
@@ -78,8 +81,10 @@ class Answerer:
         parts.append(f"QUESTION: {plan.question}")
 
         # Continuity reports and exports run long; 12K keeps them un-truncated
-        # while staying inside non-streaming HTTP-timeout territory.
-        max_tokens = 12000 if plan.qtype in ("continuity", "general") else 6000
+        # while staying inside non-streaming HTTP-timeout territory. Callers
+        # with longer outputs (the review's full-chapter revision) override.
+        if max_tokens is None:
+            max_tokens = 12000 if plan.qtype in ("continuity", "general") else 6000
         messages = list(history or [])
         messages.append({"role": "user", "content": "\n".join(parts)})
         system = ((system_base or SYSTEM_PROMPT)
@@ -106,10 +111,11 @@ class Answerer:
                       notes: list[str], history: list[dict] | None = None,
                       system_extra: str = "",
                       system_base: str | None = None,
-                      notes_header: str | None = None):
+                      notes_header: str | None = None,
+                      max_tokens: int | None = None):
         """Generator of text deltas; records usage when the stream ends."""
         request = self.build_request(plan, excerpts, notes, history, system_extra,
-                                     system_base, notes_header)
+                                     system_base, notes_header, max_tokens)
         with self.client.messages.stream(**request) as stream:
             yield from stream.text_stream
             final = stream.get_final_message()

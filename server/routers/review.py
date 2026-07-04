@@ -79,6 +79,18 @@ REVIEW_SYSTEM = """You are giving the author feedback on a chapter of her own ma
 
 The chapter marked CHAPTER UNDER REVIEW is the document you are reviewing — all of your feedback must be about that chapter. The STORY SO FAR notes and manuscript excerpts are background from EARLIER in the series, provided so you can read the chapter the way someone who knows the series would. Do not review, summarize, or give feedback on the background material itself. Cite (Book N, Chapter M) when a point rests on earlier material. If the background is insufficient to judge something, say so rather than guessing. Never invent series details that are not present in the provided material."""
 
+# Appended when the request asks for it (the UI defaults it ON for the
+# first review of a session and OFF for follow-up iterations — the rewrite
+# is the dominant output cost).
+IDEAL_VERSION_INSTRUCTION = """When the author asks for a review of the chapter (as opposed to a specific follow-up question), end your reply with a section headed "## Ideal Version" — your best revision of the COMPLETE chapter with your recommended changes applied, marked up as tracked changes:
+- wrap every addition or rewritten passage in **bold**
+- wrap every deletion in ~~strikethrough~~ (a replacement shows the old text struck through, immediately followed by the bolded new text)
+- keep all unchanged prose verbatim between the marks, so the author can see exactly what changed at a glance.
+Preserve the chapter's paragraphing exactly: each paragraph of the revision on its own line with a BLANK LINE between paragraphs (your reply renders as markdown, which merges single line breaks — without the blank lines the whole chapter congeals into one block). A deleted paragraph stays in place as its own struck-through paragraph; an added one gets its own bolded paragraph.
+Reserve bold EXCLUSIVELY for marked additions throughout your reply — never use it for emphasis or headings-in-prose. For follow-up questions, include a revised passage with the same markup only when the author asks for a rewrite."""
+
+NO_IDEAL_INSTRUCTION = """Do not produce a full rewritten version of the chapter. If a passage needs rework, quote the specific lines and show your suggested replacement inline — wrap suggested new text in **bold** and text to delete in ~~strikethrough~~ — but keep it to the passages that matter, not the whole chapter."""
+
 STORY_NOTES_HEADER = ("== STORY SO FAR (events from earlier in the series, "
                       "for continuity checking — not under review) ==")
 
@@ -91,10 +103,12 @@ _DIGEST_MAX = 120
 class ReviewRequest(BaseModel):
     book: int | str
     chapter: int | None = None        # synced chapter…
-    chapter_text: str | None = None   # …or a pasted draft
+    chapter_text: str | None = None   # …or a pasted/draft text (wins over the index)
     focus: str = "Casual Reader"
     message: str = ""
     conversation_history: list[dict] = []
+    include_ideal: bool = True        # append the tracked-changes rewrite
+    model: str | None = None          # per-request model (None = settings default)
 
 
 def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
@@ -223,15 +237,19 @@ def review_stream(req: ReviewRequest):
                       f"\n\n{text}\n\n{question}"),
             qtype="general")
 
-        answerer = s.new_answerer()
+        answerer = s.new_answerer(model=req.model)
         history = [{"role": m["role"], "content": m["content"]}
                    for m in req.conversation_history[-6:]
                    if m.get("role") in ("user", "assistant") and m.get("content")]
+        # the Ideal Version section rewrites the whole chapter with markup —
+        # far past the default 12K output budget
+        ideal = IDEAL_VERSION_INSTRUCTION if req.include_ideal else NO_IDEAL_INSTRUCTION
         for delta in answerer.answer_stream(review_plan, excerpts, notes,
                                             history=history,
                                             system_extra=FOCUS_PROMPTS[req.focus],
-                                            system_base=REVIEW_SYSTEM,
-                                            notes_header=STORY_NOTES_HEADER):
+                                            system_base=f"{REVIEW_SYSTEM}\n\n{ideal}",
+                                            notes_header=STORY_NOTES_HEADER,
+                                            max_tokens=32000 if req.include_ideal else 12000):
             yield {"type": "chunk", "content": delta}
         yield citations_payload(excerpts)
         yield {"type": "usage", "model": answerer.model,
