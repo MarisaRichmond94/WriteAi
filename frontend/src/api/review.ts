@@ -11,6 +11,8 @@ export interface ReviewRequest {
   message: string;
   conversation_history: { role: "user" | "assistant"; content: string }[];
   model?: string;
+  // append the tracked-changes full-chapter rewrite (the dominant output cost)
+  include_ideal?: boolean;
 }
 
 export type ReviewSSEEvent =

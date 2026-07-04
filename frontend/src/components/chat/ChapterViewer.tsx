@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { BookOpen, ChevronLeft, Moon, Sun } from "lucide-react";
 import { clsx } from "clsx";
-import type { Citation } from "../../types";
-import { fetchChapterText } from "../../api/books";
+import type { Citation, RichParagraph, RichRun } from "../../types";
+import { fetchChapterContent, type ChapterContent } from "../../api/books";
+import SyncAnimation from "../ui/SyncAnimation";
 
 const POV_PALETTE = [
   { bg: "bg-rose-500/25",    text: "text-rose-300",    ring: "ring-rose-500/40"    },
@@ -26,6 +27,14 @@ interface Props {
   onToggleLightMode: () => void;
   onClose?: () => void;
   onBack?: () => void;
+  // True while a resync of this book runs: the text is blurred behind an
+  // animated overlay so stale content isn't mistaken for the latest draft.
+  syncing?: boolean;
+  // Bump to refetch the chapter (e.g. after a resync completes).
+  refreshToken?: number;
+  // Show this content instead of fetching from the index — draft mode's
+  // fresh-from-the-manuscript text.
+  contentOverride?: ChapterContent | null;
 }
 
 // Strip s to lowercase alphanumeric only and return a map from stripped index →
@@ -46,22 +55,27 @@ function buildStrippedMap(s: string): { stripped: string; map: number[] } {
   return { stripped, map };
 }
 
-export default function ChapterViewer({ citation, bookId, lightMode, onToggleLightMode, onClose, onBack }: Props) {
-  const [text, setText] = useState<string | null>(null);
+export default function ChapterViewer({ citation, bookId, lightMode, onToggleLightMode, onClose, onBack, syncing, refreshToken, contentOverride }: Props) {
+  const [content, setContent] = useState<ChapterContent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const highlightRef = useRef<HTMLElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevChapterKeyRef = useRef<string | null>(null);
+  const text = content?.text ?? null;
 
   useEffect(() => {
-    setText(null);
     setError(null);
+    if (contentOverride) {
+      setContent(contentOverride);
+      return;
+    }
+    setContent(null);
     const controller = new AbortController();
-    fetchChapterText(bookId, citation.chapter, citation.snippet)
-      .then((t) => { if (!controller.signal.aborted) setText(t); })
+    fetchChapterContent(bookId, citation.chapter)
+      .then((c) => { if (!controller.signal.aborted) setContent(c); })
       .catch((e: Error) => { if (!controller.signal.aborted) setError(e.message); });
     return () => controller.abort();
-  }, [bookId, citation.chapter]);
+  }, [bookId, citation.chapter, refreshToken, contentOverride]);
 
   const scrollBehaviorRef = useRef<ScrollBehavior>("instant");
 
@@ -102,6 +116,101 @@ export default function ChapterViewer({ citation, bookId, lightMode, onToggleLig
       if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [text, scrollToMark]);
+
+  // Rich paragraphs (from the ingest's formatting sidecar): manuscript-style
+  // first-line indents, preserved italics/bold/underline/color and paragraph
+  // alignment, and the same snippet highlight as the plain path — located on
+  // stripped text across run boundaries, then marked run-piece by run-piece.
+  const renderRich = (paras: RichParagraph[]) => {
+    const baseClass = clsx(
+      "text-sm leading-relaxed whitespace-pre-wrap",
+      lightMode ? "text-gray-700" : "text-ink-secondary"
+    );
+    const runStyle = (run: RichRun): React.CSSProperties => ({
+      fontStyle: run.i ? "italic" : undefined,
+      fontWeight: run.b ? 600 : undefined,
+      textDecoration: run.u ? "underline" : undefined,
+      color: run.color,
+    });
+
+    // Locate the snippet in flat character coordinates over all run text.
+    let mark: { start: number; end: number } | null = null;
+    if (citation.snippet) {
+      let strippedAll = "";
+      const flatOf: number[] = []; // stripped index -> flat char index
+      let flat = 0;
+      for (const para of paras) {
+        for (const run of para.runs) {
+          for (let k = 0; k < run.text.length; k++) {
+            const c = run.text[k].toLowerCase();
+            if (/[a-z0-9]/.test(c)) {
+              strippedAll += c;
+              flatOf.push(flat + k);
+            }
+          }
+          flat += run.text.length;
+        }
+      }
+      const { stripped: snippetStripped } = buildStrippedMap(citation.snippet);
+      if (snippetStripped) {
+        const idx = strippedAll.indexOf(snippetStripped);
+        if (idx !== -1) {
+          mark = { start: flatOf[idx], end: flatOf[idx + snippetStripped.length - 1] + 1 };
+        }
+      }
+    }
+
+    const markClass = clsx(
+      "rounded-sm px-0.5",
+      lightMode ? "bg-yellow-200 text-gray-900" : "bg-yellow-300/25 text-ink-primary"
+    );
+
+    let cursor = 0;
+    let markAttached = false;
+    return paras.map((para, pi) => {
+      const spans: React.ReactNode[] = [];
+      para.runs.forEach((run, ri) => {
+        const rStart = cursor;
+        const rEnd = cursor + run.text.length;
+        cursor = rEnd;
+        const style = runStyle(run);
+        if (!mark || mark.end <= rStart || mark.start >= rEnd) {
+          spans.push(<span key={ri} style={style}>{run.text}</span>);
+          return;
+        }
+        const a = Math.max(mark.start, rStart) - rStart;
+        const b = Math.min(mark.end, rEnd) - rStart;
+        if (a > 0) spans.push(<span key={`${ri}-pre`} style={style}>{run.text.slice(0, a)}</span>);
+        spans.push(
+          <mark
+            key={`${ri}-mark`}
+            ref={!markAttached ? (highlightRef as React.RefObject<HTMLElement>) : undefined}
+            style={style}
+            className={markClass}
+          >
+            {run.text.slice(a, b)}
+          </mark>
+        );
+        markAttached = true;
+        if (b < run.text.length) spans.push(<span key={`${ri}-post`} style={style}>{run.text.slice(b)}</span>);
+      });
+      return (
+        <p
+          key={pi}
+          className={clsx(
+            baseClass,
+            "mb-4 last:mb-0",
+            para.align === "center" && "text-center",
+            para.align === "right" && "text-right",
+            para.align === "justify" && "text-justify"
+          )}
+          style={para.align ? undefined : { textIndent: "1.5em" }}
+        >
+          {spans}
+        </p>
+      );
+    });
+  };
 
   const renderText = () => {
     if (!text) return null;
@@ -194,13 +303,36 @@ export default function ChapterViewer({ citation, bookId, lightMode, onToggleLig
       </div>
 
       {/* Content */}
-      <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto px-6 py-5 select-text cursor-default">
-        {error ? (
-          <p className="text-sm text-red-400">{error}</p>
-        ) : text === null ? (
-          <p className={clsx("text-sm animate-pulse", lightMode ? "text-gray-400" : "text-ink-muted")}>Loading chapter...</p>
-        ) : (
-          renderText()
+      <div className="relative flex-1 min-h-0 flex flex-col">
+        <div
+          ref={scrollContainerRef}
+          className={clsx(
+            "flex-1 min-h-0 overflow-y-auto px-6 py-5 select-text cursor-default",
+            syncing && "blur-sm pointer-events-none select-none"
+          )}
+        >
+          {error ? (
+            <p className="text-sm text-red-400">{error}</p>
+          ) : content === null ? (
+            <p className={clsx("text-sm animate-pulse", lightMode ? "text-gray-400" : "text-ink-muted")}>Loading chapter...</p>
+          ) : content.rich?.length ? (
+            renderRich(content.rich)
+          ) : (
+            renderText()
+          )}
+        </div>
+        {syncing && (
+          <div
+            className={clsx(
+              "absolute inset-0 z-10 flex flex-col items-center justify-center",
+              lightMode ? "bg-white/60" : "bg-surface-card/60"
+            )}
+          >
+            <SyncAnimation dark={!lightMode} />
+            <p className={clsx("text-xs font-medium animate-pulse -mt-2", lightMode ? "text-gray-700" : "text-ink-primary")}>
+              Syncing latest text…
+            </p>
+          </div>
         )}
       </div>
     </div>

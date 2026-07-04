@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException
 
 from config import REPO_ROOT
 
-from .. import writer_store
+from .. import audit, writer_store
 from ..deps import get_state
 
 log = logging.getLogger(__name__)
@@ -76,7 +76,9 @@ def _has_events(s) -> bool:
 
 @router.get("/books/{book}/chapters/{chapter}/text")
 def chapter_text(book: int, chapter: int):
-    """Reconstruct a full chapter from its ordered chunks."""
+    """Reconstruct a full chapter from its ordered chunks. When the ingest's
+    rich-text sidecar exists (formatting-preserving paragraphs), attach it —
+    viewers prefer it and fall back to the plain text."""
     s = get_state()
     rows = s.db.execute(
         """SELECT text, pov_character, date_line FROM chunks
@@ -84,9 +86,67 @@ def chapter_text(book: int, chapter: int):
            ORDER BY chunk_index""", (book, chapter)).fetchall()
     if not rows:
         raise HTTPException(404, "chapter not found")
+    rich = None
+    rich_path = s.cfg.rich_text_dir / f"book_{book}" / f"chapter_{chapter}.json"
+    if rich_path.exists():
+        try:
+            rich = json.loads(rich_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            rich = None
     return {"book": book, "chapter": chapter,
             "pov": rows[0][1], "date": rows[0][2],
-            "text": "\n\n".join(r[0] for r in rows)}
+            "text": "\n\n".join(r[0] for r in rows),
+            "rich": rich}
+
+
+@router.get("/books/{book}/chapters/{chapter}/draft")
+def chapter_draft(book: int, chapter: int):
+    """Chapter text straight from the CURRENT manuscript file — staged copy,
+    content-hash cached, zero LLM cost. Review-a-draft mode reads this
+    instead of the index so the writer can iterate on a chapter without
+    paying to re-ingest between rounds; the rich-formatting sidecar is
+    extracted the same way. `in_sync` reports whether the index already
+    matches this text (drives the "Draft — not indexed" badge)."""
+    from src.chunker import split_into_segments
+    from src.discovery import discover_books
+    from src.parser import extract_text
+    from src.richtext import extract_rich_paragraphs, split_rich_chapters
+
+    s = get_state()
+    b = next((x for x in discover_books(s.cfg) if x.number == book), None)
+    if b is None:
+        raise HTTPException(404, "book not found on disk")
+    text, method = extract_text(b.manuscript, s.cfg)
+    if text is None:
+        raise HTTPException(502, "text extraction failed — see the server log")
+    seg = next((x for x in split_into_segments(text)
+                if x.kind != "part" and (x.chapter_number or 0) == chapter), None)
+    if seg is None or not seg.paragraphs:
+        raise HTTPException(404, "chapter not found in the manuscript file")
+    draft_text = "\n\n".join(seg.paragraphs)
+
+    rich = None
+    try:
+        paragraphs = extract_rich_paragraphs(b.manuscript, s.cfg)
+        if paragraphs:
+            rich = split_rich_chapters(paragraphs).get(chapter)
+    except Exception:  # formatting is polish — never fail the draft read
+        log.warning("rich extraction failed for draft b%s ch%s", book, chapter,
+                    exc_info=True)
+
+    rows = s.db.execute(
+        """SELECT text FROM chunks WHERE book_number = ? AND chapter_number = ?
+           ORDER BY chunk_index""", (book, chapter)).fetchall()
+
+    def norm(t: str) -> str:
+        return "\n".join(l for l in (ln.strip() for ln in t.split("\n")) if l)
+
+    in_sync = bool(rows) and norm("\n\n".join(r[0] for r in rows)) == norm(draft_text)
+    audit.log_event("draft_read", f"draft served for book {book} ch {chapter}",
+                    method=method, in_sync=in_sync)
+    return {"book": book, "chapter": chapter, "pov": seg.pov,
+            "date": seg.date_line, "text": draft_text, "rich": rich,
+            "in_sync": in_sync}
 
 
 def _book_summary_dict(s, book: int) -> dict:
@@ -470,6 +530,8 @@ def ingest_preview(book: int | None = None):
 def ingest_run(book: int | None = None):
     with _ingest_lock:
         if _ingest["proc"] is not None and _ingest["proc"].poll() is None:
+            audit.log_event("ingest_refused", "an ingestion run is already in progress",
+                            book=book, started_at=_ingest["started_at"])
             raise HTTPException(409, "an ingestion run is already in progress")
         log_path = REPO_ROOT / "logs" / "ingest_ui.log"
         log_path.parent.mkdir(exist_ok=True)
@@ -490,10 +552,15 @@ def ingest_run(book: int | None = None):
             if book is not None else None)
         scope = title or "all books"
 
+        audit.log_event("ingest_started", f"re-ingest of {scope} started",
+                        book=book, log=str(log_path))
+
         def _watch(proc=proc, scope=scope, title=title):
             # success and no-op runs self-report from ingest.py with a full
             # summary; the watcher only covers crashes that never got there
             code = proc.wait()
+            audit.log_event("ingest_exited", f"re-ingest of {scope} exited",
+                            exit_code=code)
             if code != 0:
                 from .. import notify
                 notify.add("error", "Sync failed",

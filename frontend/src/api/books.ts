@@ -1,5 +1,5 @@
 // Adapter: reference book/index API surface over this app's backend.
-import type { BookResponse, IndexStatus, BookSummary, SeriesSummary, ExtractedChapter } from "../types";
+import type { BookResponse, IndexStatus, BookSummary, SeriesSummary, ExtractedChapter, RichParagraph } from "../types";
 
 interface OurBooks {
   books: {
@@ -109,11 +109,50 @@ export async function fetchMissingChapters(_bookId: string): Promise<number[]> {
 }
 
 export async function fetchChapterText(bookId: string, chapterNum: number, _mockSnippet?: string): Promise<string> {
+  const content = await fetchChapterContent(bookId, chapterNum);
+  return content.text;
+}
+
+export interface ChapterContent {
+  text: string;
+  // formatting-preserving paragraphs from the ingest's rich-text sidecar;
+  // null for books ingested before the sidecar existed (plain fallback)
+  rich: RichParagraph[] | null;
+}
+
+export async function fetchChapterContent(bookId: string, chapterNum: number): Promise<ChapterContent> {
   const n = await bookNumber(bookId);
   const res = await fetch(`/api/books/${n}/chapters/${chapterNum}/text`);
   if (!res.ok) throw new Error(`Failed to fetch chapter text: ${res.statusText}`);
   const data = await res.json();
-  return data.text as string;
+  return { text: data.text as string, rich: (data.rich as RichParagraph[] | null) ?? null };
+}
+
+export interface ChapterDraft extends ChapterContent {
+  pov: string | null;
+  date: string | null;
+  // true when the index already matches the manuscript file's text
+  in_sync: boolean;
+}
+
+// Chapter text read straight from the CURRENT manuscript file (no ingest,
+// no LLM cost) — the review pane's draft mode. Slow-ish on the first call
+// after a fresh export (a Pages round-trip), then content-hash cached.
+export async function fetchChapterDraft(bookId: string, chapterNum: number): Promise<ChapterDraft> {
+  const n = await bookNumber(bookId);
+  const res = await fetch(`/api/books/${n}/chapters/${chapterNum}/draft`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Failed to read the draft (${res.status}): ${detail || res.statusText}`);
+  }
+  const data = await res.json();
+  return {
+    text: data.text as string,
+    rich: (data.rich as RichParagraph[] | null) ?? null,
+    pov: data.pov ?? null,
+    date: data.date ?? null,
+    in_sync: Boolean(data.in_sync),
+  };
 }
 
 export async function fetchSeriesSummary(): Promise<SeriesSummary> {

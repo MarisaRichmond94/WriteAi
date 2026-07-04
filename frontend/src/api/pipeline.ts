@@ -60,7 +60,17 @@ export async function fetchIngestStatus(): Promise<{
 
 export async function runEnrichment(): Promise<void> {
   const res = await fetch("/api/enrich/run", { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to start enrichment: ${res.statusText}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Failed to start enrichment (${res.status}): ${detail || res.statusText}`);
+  }
+}
+
+export async function fetchEnrichStatus(): Promise<{ running: boolean }> {
+  const res = await fetch("/api/enrich/status");
+  if (!res.ok) return { running: false };
+  const d = await res.json();
+  return { running: d.state === "running" };
 }
 
 export async function runPipeline(payload?: string | { book?: string }): Promise<void> {
@@ -69,5 +79,8 @@ export async function runPipeline(payload?: string | { book?: string }): Promise
   const bookParam = await resolveBookParam(bookName);
   if (bookParam) params.set("book", bookParam);
   const res = await fetch(`/api/ingest/run?${params}`, { method: "POST" });
-  if (!res.ok) throw new Error(`Failed to start ingestion: ${res.statusText}`);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Failed to start ingestion (${res.status}): ${detail || res.statusText}`);
+  }
 }
