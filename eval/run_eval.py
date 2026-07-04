@@ -248,13 +248,21 @@ def main() -> int:
         row = score_item(item, plan, excerpts, notes)
 
         if answerer is not None:
+            import time
+
+            from src.costlog import log_cost
             usage_before = dict(answerer.usage)
             cost_before = answerer.actual_cost_usd
+            t0 = time.monotonic()
             answer_text = answerer.answer(plan, excerpts, notes)
             row["answer"] = answer_text
             row["usage"] = {k: answerer.usage[k] - usage_before[k]
                             for k in answerer.usage}
             row["actual_cost_usd"] = round(answerer.actual_cost_usd - cost_before, 4)
+            log_cost(cfg, surface="eval", model=answerer.model, qtype=plan.qtype,
+                     usage=row["usage"], cost_usd=row["actual_cost_usd"],
+                     latency_ms=int((time.monotonic() - t0) * 1000),
+                     extra={"item_id": item["id"], "label": args.label})
             must = item.get("answer_must_mention") or []
             row["answer_mention_hit"] = (
                 sum(1 for m in must if m.lower() in answer_text.lower()) / len(must)

@@ -68,6 +68,7 @@ class Config:
     top_k_results: int
     confirm_before_ingest: bool
     log_level: str
+    cost_log_enabled: bool = True
 
     # Derived data locations (all under data_dir; created on demand)
     staging_dir: Path = field(init=False)
@@ -138,6 +139,7 @@ def load_config(env_file: Path | None = None) -> Config:
         top_k_results=_get_int("TOP_K_RESULTS", 15),
         confirm_before_ingest=_get_bool("CONFIRM_BEFORE_INGEST", True),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+        cost_log_enabled=_get_bool("COST_LOG_ENABLED", True),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)
 
