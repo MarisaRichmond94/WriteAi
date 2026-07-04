@@ -18,6 +18,8 @@ import logging
 import re
 import sqlite3
 
+from .notes import pair_quotes
+
 log = logging.getLogger(__name__)
 
 _SCHEMA = """
@@ -58,22 +60,25 @@ CREATE INDEX IF NOT EXISTS idx_locations_name ON locations(name);
 CREATE INDEX IF NOT EXISTS idx_locations_chunk ON locations(chunk_id);
 
 CREATE TABLE IF NOT EXISTS character_knowledge (
-    chunk_id  TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
-    character TEXT NOT NULL,
-    learns    TEXT NOT NULL
+    chunk_id     TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+    character    TEXT NOT NULL,
+    learns       TEXT NOT NULL,
+    source_quote TEXT           -- verbatim manuscript sentence(s), if any
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_character ON character_knowledge(character);
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunk ON character_knowledge(chunk_id);
 
 CREATE TABLE IF NOT EXISTS foreshadowing (
-    chunk_id TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
-    detail   TEXT NOT NULL
+    chunk_id     TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+    detail       TEXT NOT NULL,
+    source_quote TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_foreshadowing_chunk ON foreshadowing(chunk_id);
 
 CREATE TABLE IF NOT EXISTS unresolved_questions (
-    chunk_id TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
-    question TEXT NOT NULL
+    chunk_id     TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+    question     TEXT NOT NULL,
+    source_quote TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_questions_chunk ON unresolved_questions(chunk_id);
 
@@ -81,6 +86,19 @@ CREATE INDEX IF NOT EXISTS idx_questions_chunk ON unresolved_questions(chunk_id)
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
     USING fts5(text, content='chunks', content_rowid='rowid');
 """
+
+
+def migrate_schema(db: sqlite3.Connection) -> None:
+    """Idempotent post-DDL migrations for stores created before a column
+    existed (CREATE TABLE IF NOT EXISTS never alters an existing table).
+    Guarded by pragma_table_info so re-running is a no-op; nullable columns
+    only, so old rows stay readable and old queries keep working."""
+    for table in ("foreshadowing", "unresolved_questions", "character_knowledge"):
+        cols = {row[1] for row in
+                db.execute(f"SELECT * FROM pragma_table_info('{table}')")}
+        if "source_quote" not in cols:
+            log.info("migrating %s: adding source_quote column", table)
+            db.execute(f"ALTER TABLE {table} ADD COLUMN source_quote TEXT")
 
 
 def slugify(name: str) -> str:
@@ -117,6 +135,7 @@ class SeriesStore:
         self._cfg_path = cfg.sqlite_path
         self._local = threading.local()
         self.db.executescript(_SCHEMA)
+        migrate_schema(self.db)
         self._backfill_fts()
         self.db.commit()
 
@@ -303,6 +322,21 @@ class SeriesStore:
                                   include=["documents", "metadatas"])
         return list(zip(result["documents"][0], result["metadatas"][0]))
 
+    def get_embeddings(self, chunk_ids: list[str]) -> dict[str, list]:
+        """Stored chunk vectors, by id. Used by `ingest.py --re-extract` to
+        re-run metadata extraction WITHOUT re-embedding unchanged chunk text.
+        Ids missing from the collection are simply absent from the result."""
+        out: dict[str, list] = {}
+        for i in range(0, len(chunk_ids), 100):
+            res = self.collection.get(ids=chunk_ids[i:i + 100],
+                                      include=["embeddings"])
+            embeddings = res.get("embeddings")
+            if embeddings is None:
+                continue
+            for cid, emb in zip(res["ids"], embeddings):
+                out[cid] = emb
+        return out
+
     def chunks_with_character(self, name: str) -> list[sqlite3.Row]:
         self.db.row_factory = sqlite3.Row
         return self.db.execute(
@@ -384,15 +418,24 @@ class SeriesStore:
             cur.executemany(
                 "INSERT INTO locations (chunk_id, name) VALUES (?, ?)",
                 [(chunk.chunk_id, n) for n in meta.get("locations", [])])
+            # quote lists ride alongside the value lists in the metadata,
+            # index-aligned (pair_quotes pads with None for pre-quote metadata)
+            knowledge_quotes = meta.get("character_knowledge_quotes") or {}
             cur.executemany(
-                "INSERT INTO character_knowledge (chunk_id, character, learns) VALUES (?, ?, ?)",
-                [(chunk.chunk_id, ch, fact)
+                "INSERT INTO character_knowledge (chunk_id, character, learns, source_quote)"
+                " VALUES (?, ?, ?, ?)",
+                [(chunk.chunk_id, ch, fact, quote)
                  for ch, facts in meta.get("character_knowledge_updates", {}).items()
-                 for fact in facts])
+                 for fact, quote in pair_quotes(facts, knowledge_quotes.get(ch))])
             cur.executemany(
-                "INSERT INTO foreshadowing (chunk_id, detail) VALUES (?, ?)",
-                [(chunk.chunk_id, d) for d in meta.get("foreshadowing", [])])
+                "INSERT INTO foreshadowing (chunk_id, detail, source_quote) VALUES (?, ?, ?)",
+                [(chunk.chunk_id, d, quote)
+                 for d, quote in pair_quotes(meta.get("foreshadowing", []),
+                                             meta.get("foreshadowing_quotes"))])
             cur.executemany(
-                "INSERT INTO unresolved_questions (chunk_id, question) VALUES (?, ?)",
-                [(chunk.chunk_id, q) for q in meta.get("unresolved_questions", [])])
+                "INSERT INTO unresolved_questions (chunk_id, question, source_quote)"
+                " VALUES (?, ?, ?)",
+                [(chunk.chunk_id, q, quote)
+                 for q, quote in pair_quotes(meta.get("unresolved_questions", []),
+                                             meta.get("unresolved_question_quotes"))])
         self.db.commit()

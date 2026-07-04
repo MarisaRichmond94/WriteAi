@@ -79,6 +79,50 @@ def ingest_chunks(cfg, chunks: list[Chunk], extractor: MetadataExtractor,
     }
 
 
+def reextract_chunks(cfg, chunks: list[Chunk], extractor: MetadataExtractor,
+                     embedder, store) -> dict:
+    """Metadata-only re-extraction (ingest.py --re-extract): re-runs the LLM
+    extraction for `chunks` whose TEXT is unchanged, so parsing/chunking are
+    reused from the caller and embeddings are fetched back from ChromaDB
+    instead of being recomputed (identical text -> identical vectors). Only
+    the side tables, chunk metadata, and continuity-note vectors update.
+
+    Chunks whose extraction failed are NOT upserted — their existing (good)
+    metadata stays in place; the caller drops them from the hash index so the
+    next run retries them through the full path."""
+    if not chunks:
+        return {"chunks": 0}
+
+    metadata_list = extractor.extract(chunks)
+    embeddings = store.get_embeddings([c.chunk_id for c in chunks])
+    missing = [c for c in chunks if c.chunk_id not in embeddings]
+    if missing:  # e.g. a chunk that never made it into the store; embed fresh
+        log.info("re-extract: embedding %d chunk(s) missing from ChromaDB",
+                 len(missing))
+        fresh = embedder.embed_documents([c.embedding_text for c in missing])
+        embeddings.update({c.chunk_id: e for c, e in zip(missing, fresh)})
+
+    records = [
+        {"chunk": c, "metadata": m, "embedding": embeddings[c.chunk_id],
+         "text_hash": chunk_text_hash(c)}
+        for c, m in zip(chunks, metadata_list) if m is not None
+    ]
+    store.upsert_chunks(records)
+    if cfg.enable_note_ranking:
+        sync_continuity_notes(records, embedder, store)
+
+    failed_ids = [c.chunk_id for c, m in zip(chunks, metadata_list) if m is None]
+    return {
+        "chunks": len(chunks),
+        "metadata_failed": len(failed_ids),
+        "failed_chunk_ids": failed_ids,
+        "api_calls": extractor.usage["api_calls"],
+        "input_tokens": extractor.usage["input_tokens"],
+        "output_tokens": extractor.usage["output_tokens"],
+        "actual_cost_usd": extractor.actual_cost_usd,
+    }
+
+
 def sync_continuity_notes(records: list[dict], embedder, store) -> None:
     """Mirror changed chunks' foreshadowing/unresolved rows into the
     continuity-notes vector collection (only called when ENABLE_NOTE_RANKING

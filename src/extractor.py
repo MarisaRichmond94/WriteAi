@@ -43,10 +43,12 @@ PRICING_PER_MTOK = {
 }
 
 TOKENS_PER_WORD = 1.35          # prose heuristic, same as the chunker
-EST_OUTPUT_TOKENS_PER_CHUNK = 450  # observed metadata size per chunk
+# Observed metadata size per chunk. 450 before source quotes; the verbatim
+# source_quote fields add roughly 150-250 output tokens per chunk.
+EST_OUTPUT_TOKENS_PER_CHUNK = 650
 
 # Batching limits: keep well inside the 200K context of claude-haiku-4-5 and
-# inside a 16K non-streaming output budget (~30 chunks * 450 tokens).
+# inside a 16K non-streaming output budget (~20 chunks * 650 tokens ≈ 13K).
 MAX_BATCH_WORDS = 9000
 MAX_BATCH_CHUNKS = 20
 MAX_OUTPUT_TOKENS = 16000
@@ -71,11 +73,30 @@ Field guidance:
 - foreshadowing: hints, planted details, or ominous notes that seem intended to pay off later.
 - unresolved_questions: questions this chunk raises that it does not answer.
 
+Verbatim evidence (source_quote): every learned fact, emotional beat, foreshadowing item, and unresolved question carries a source_quote — the single most probative passage of the chunk text that supports the item, copied EXACTLY, character for character, from the chunk (at most 1-2 sentences). Never paraphrase, never trim or reorder words, never stitch together non-adjacent sentences. When no verbatim passage in the chunk supports the item, set source_quote to null.
+
 Return metadata for every chunk, in the same order, each tagged with its exact chunk_id. Empty lists are fine when a field has nothing."""
 
 # Structured-output schema. Note character_knowledge_updates is an array of
 # {character, learns} pairs (not a dict) because structured outputs require
 # additionalProperties: false — we convert to a dict after parsing.
+#
+# Quote-bearing items ({detail/question/beat/fact, source_quote}) replaced
+# plain strings when source-quote support landed; _split_items still accepts
+# the old string form so cached/batch results from before the change parse.
+def _quoted_item_schema(key: str) -> dict:
+    """One evidence-backed item: the summary text plus a verbatim quote."""
+    return {
+        "type": "object",
+        "properties": {
+            key: {"type": "string"},
+            "source_quote": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+        },
+        "required": [key, "source_quote"],
+        "additionalProperties": False,
+    }
+
+
 _CHUNK_ITEM_SCHEMA = {
     "type": "object",
     "properties": {
@@ -91,15 +112,16 @@ _CHUNK_ITEM_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "character": {"type": "string"},
-                    "learns": {"type": "array", "items": {"type": "string"}},
+                    "learns": {"type": "array", "items": _quoted_item_schema("fact")},
                 },
                 "required": ["character", "learns"],
                 "additionalProperties": False,
             },
         },
-        "emotional_beats": {"type": "array", "items": {"type": "string"}},
-        "foreshadowing": {"type": "array", "items": {"type": "string"}},
-        "unresolved_questions": {"type": "array", "items": {"type": "string"}},
+        "emotional_beats": {"type": "array", "items": _quoted_item_schema("beat")},
+        "foreshadowing": {"type": "array", "items": _quoted_item_schema("detail")},
+        "unresolved_questions": {"type": "array",
+                                 "items": _quoted_item_schema("question")},
     },
     "required": [
         "chunk_id", "characters_present", "locations", "timeline_position",
@@ -115,6 +137,38 @@ OUTPUT_SCHEMA = {
     "required": ["chunks"],
     "additionalProperties": False,
 }
+
+# Light normalization for verbatim-quote verification: models straighten curly
+# quotes/apostrophes and collapse whitespace when copying; the words themselves
+# must still match exactly.
+_QUOTE_CHAR_MAP = str.maketrans({
+    "‘": "'", "’": "'",     # curly single quotes / apostrophes
+    "“": '"', "”": '"',     # curly double quotes
+    "…": "...",                  # ellipsis character
+})
+
+
+def _normalize_quote(s: str) -> str:
+    return re.sub(r"\s+", " ", s.translate(_QUOTE_CHAR_MAP)).strip()
+
+
+def _split_items(raw, key: str) -> tuple[list[str], list[str | None]]:
+    """Split a model item list into (texts, source_quotes), accepting BOTH the
+    old plain-string form and the new {key, source_quote} object form (old
+    cached/batch results and partial failures must keep parsing)."""
+    texts: list[str] = []
+    quotes: list[str | None] = []
+    for it in raw or []:
+        if isinstance(it, dict):
+            text = str(it.get(key) or "").strip()
+            q = it.get("source_quote")
+            quote = q.strip() if isinstance(q, str) and q.strip() else None
+        else:
+            text, quote = str(it).strip(), None
+        if text:
+            texts.append(text)
+            quotes.append(quote)
+    return texts, quotes
 
 
 def estimate_extraction_cost(chunks: list[Chunk], model: str) -> dict:
@@ -194,6 +248,9 @@ class MetadataExtractor:
             "batch_input_tokens": 0, "batch_output_tokens": 0,
             "api_calls": 0,
         }
+        # source_quote verification tallies (kept = verbatim in the chunk
+        # text after light normalization; rejected = fabricated -> nulled).
+        self.quote_stats = {"kept": 0, "rejected": 0}
 
     @property
     def actual_cost_usd(self) -> float:
@@ -209,6 +266,7 @@ class MetadataExtractor:
     def extract(self, chunks: list[Chunk]) -> list[dict | None]:
         """Extract metadata for all chunks. Returns one dict per chunk, in
         order; a chunk whose extraction failed gets None (log-and-continue)."""
+        stats_before = dict(self.quote_stats)
         batches = _batches(chunks)
         results: list[dict | None] = []
         if self.use_batches and batches:
@@ -225,6 +283,12 @@ class MetadataExtractor:
             log.info("retrying %d missed chunk(s) individually", len(missing))
             for i in missing:
                 results[i] = self._extract_batch([chunks[i]], depth=3)[0]
+
+        kept = self.quote_stats["kept"] - stats_before["kept"]
+        rejected = self.quote_stats["rejected"] - stats_before["rejected"]
+        if kept or rejected:
+            log.info("source quotes: %d kept / %d rejected (not verbatim in "
+                     "chunk text; nulled)", kept, rejected)
         return results
 
     # ── internals ───────────────────────────────────────────────────────────
@@ -355,14 +419,42 @@ class MetadataExtractor:
         return (self._extract_batch(batch[:mid], depth + 1)
                 + self._extract_batch(batch[mid:], depth + 1))
 
-    @staticmethod
-    def _merge(chunk: Chunk, item: dict) -> dict:
-        """Combine known structural fields with the model's narrative fields."""
-        knowledge = {
-            entry["character"]: entry["learns"]
-            for entry in item.get("character_knowledge_updates", [])
-            if entry.get("learns")
-        }
+    def _verify_quotes(self, quotes: list[str | None],
+                       normalized_chunk_text: str) -> list[str | None]:
+        """Keep a source_quote only when it is a true substring of the chunk
+        text (after light normalization on both sides); fabricated quotes are
+        nulled and counted — a bad quote NEVER fails the chunk."""
+        out: list[str | None] = []
+        for q in quotes:
+            if q is None:
+                out.append(None)
+            elif _normalize_quote(q) in normalized_chunk_text:
+                out.append(q)
+                self.quote_stats["kept"] += 1
+            else:
+                out.append(None)
+                self.quote_stats["rejected"] += 1
+        return out
+
+    def _merge(self, chunk: Chunk, item: dict) -> dict:
+        """Combine known structural fields with the model's narrative fields.
+
+        List fields keep their historical list-of-strings shape (every
+        metadata_json reader depends on it); the verified verbatim quotes ride
+        alongside in parallel `*_quotes` lists, index-aligned with the values.
+        """
+        norm_text = _normalize_quote(chunk.text)
+        foreshadowing, fs_quotes = _split_items(item.get("foreshadowing"), "detail")
+        questions, q_quotes = _split_items(item.get("unresolved_questions"), "question")
+        beats, beat_quotes = _split_items(item.get("emotional_beats"), "beat")
+        knowledge: dict[str, list[str]] = {}
+        knowledge_quotes: dict[str, list[str | None]] = {}
+        for entry in item.get("character_knowledge_updates", []):
+            facts, fact_quotes = _split_items(entry.get("learns"), "fact")
+            if facts:
+                knowledge[entry["character"]] = facts
+                knowledge_quotes[entry["character"]] = self._verify_quotes(
+                    fact_quotes, norm_text)
         return {
             # structural (from the chunker — exact, free)
             "chunk_id": chunk.chunk_id,
@@ -383,7 +475,14 @@ class MetadataExtractor:
             "key_events": item.get("key_events", []),
             "new_information_revealed": item.get("new_information_revealed", []),
             "character_knowledge_updates": knowledge,
-            "emotional_beats": item.get("emotional_beats", []),
-            "foreshadowing": item.get("foreshadowing", []),
-            "unresolved_questions": item.get("unresolved_questions", []),
+            "emotional_beats": beats,
+            "foreshadowing": foreshadowing,
+            "unresolved_questions": questions,
+            # verified verbatim quotes, index-aligned with the lists above
+            # (None where the model gave no quote or the quote failed the
+            # verbatim check)
+            "character_knowledge_quotes": knowledge_quotes,
+            "emotional_beat_quotes": self._verify_quotes(beat_quotes, norm_text),
+            "foreshadowing_quotes": self._verify_quotes(fs_quotes, norm_text),
+            "unresolved_question_quotes": self._verify_quotes(q_quotes, norm_text),
         }
