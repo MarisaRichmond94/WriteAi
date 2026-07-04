@@ -3,6 +3,7 @@ import { BookOpen, ChevronLeft, Moon, Sun, X } from "lucide-react";
 import { clsx } from "clsx";
 import type { Citation, RichParagraph, RichRun } from "../../types";
 import { fetchChapterContent, type ChapterContent } from "../../api/books";
+import { buildStrippedMap } from "../../lib/quoteHighlight";
 import SyncAnimation from "../ui/SyncAnimation";
 
 const POV_PALETTE = [
@@ -37,23 +38,9 @@ interface Props {
   contentOverride?: ChapterContent | null;
 }
 
-// Strip s to lowercase alphanumeric only and return a map from stripped index →
-// original index. This lets us locate a snippet in chapter text regardless of
-// typography differences (em dash vs --, ellipsis vs ..., curly vs straight
-// quotes, extra spaces, etc.) and then map back to the original text boundaries
-// for an exact highlight.
-function buildStrippedMap(s: string): { stripped: string; map: number[] } {
-  let stripped = "";
-  const map: number[] = [];
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i].toLowerCase();
-    if (/[a-z0-9]/.test(c)) {
-      stripped += c;
-      map.push(i);
-    }
-  }
-  return { stripped, map };
-}
+// Snippet location uses lib/quoteHighlight's buildStrippedMap: match on
+// lowercase alphanumeric only (typography-proof), then map back to original
+// text boundaries for an exact highlight.
 
 export default function ChapterViewer({ citation, bookId, lightMode, onToggleLightMode, onClose, onBack, syncing, refreshToken, contentOverride }: Props) {
   const [content, setContent] = useState<ChapterContent | null>(null);
