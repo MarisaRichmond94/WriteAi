@@ -64,6 +64,8 @@ def ingest_chunks(cfg, chunks: list[Chunk], extractor: MetadataExtractor,
         for c, m, e in zip(chunks, metadata_list, embeddings)
     ]
     store.upsert_chunks(records)
+    if cfg.enable_note_ranking:
+        sync_continuity_notes(records, embedder, store)
 
     failed_ids = [c.chunk_id for c, m in zip(chunks, metadata_list) if m is None]
     return {
@@ -75,6 +77,27 @@ def ingest_chunks(cfg, chunks: list[Chunk], extractor: MetadataExtractor,
         "output_tokens": extractor.usage["output_tokens"],
         "actual_cost_usd": extractor.actual_cost_usd,
     }
+
+
+def sync_continuity_notes(records: list[dict], embedder, store) -> None:
+    """Mirror changed chunks' foreshadowing/unresolved rows into the
+    continuity-notes vector collection (only called when ENABLE_NOTE_RANKING
+    is on). Delete-then-upsert per chunk so an edited chunk can't leave
+    stale note vectors behind; local embeddings, so this costs nothing.
+    Cheap by construction: it only ever sees the changed chunks."""
+    from .notes import note_docs_for_chunk
+
+    docs = []
+    for r in records:
+        docs.extend(note_docs_for_chunk(r["chunk"], r["metadata"] or {}))
+    store.delete_notes_for_chunks([r["chunk"].chunk_id for r in records])
+    if docs:
+        embeddings = embedder.embed_documents([d["text"] for d in docs])
+        for d, e in zip(docs, embeddings):
+            d["embedding"] = e
+        store.upsert_notes(docs)
+    log.info("synced %d continuity note vector(s) for %d chunk(s)",
+             len(docs), len(records))
 
 
 def load_hash_index(cfg) -> dict[str, str]:

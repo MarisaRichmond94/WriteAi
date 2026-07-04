@@ -73,6 +73,8 @@ class Config:
     log_level: str
     cost_log_enabled: bool = True
     enable_prompt_cache_v2: bool = False
+    enable_note_ranking: bool = False
+    continuity_notes_cap: int = 0
 
     # Derived data locations (all under data_dir; created on demand)
     staging_dir: Path = field(init=False)
@@ -148,6 +150,8 @@ def load_config(env_file: Path | None = None) -> Config:
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         cost_log_enabled=_get_bool("COST_LOG_ENABLED", True),
         enable_prompt_cache_v2=_get_bool("ENABLE_PROMPT_CACHE_V2", False),
+        enable_note_ranking=_get_bool("ENABLE_NOTE_RANKING", False),
+        continuity_notes_cap=_get_int("CONTINUITY_NOTES_CAP", 0),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)
 

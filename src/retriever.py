@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import logging
 
+from .notes import NOTE_TABLES, render_note
 from .query_prep import expand_characters
 from .query_router import QueryPlan, Scope
 
@@ -214,19 +215,49 @@ class Retriever:
         return self._semantic(plan), notes
 
     def _continuity(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
+        if self.cfg.enable_note_ranking and self.cfg.continuity_notes_cap > 0:
+            notes = self._ranked_continuity_notes(plan)
+            if notes is not None:
+                return self._semantic(plan, top_k=5), notes
         where, params = _scope_sql(plan.scope)
         notes = []
-        for table, column, label in (("foreshadowing", "detail", "FORESHADOWING"),
-                                     ("unresolved_questions", "question", "QUESTION")):
+        for table, column, kind in NOTE_TABLES:
             rows = self.db.execute(
                 f"""SELECT c.book_number, c.chapter_number, t.{column}
                     FROM {table} t JOIN chunks c ON c.chunk_id = t.chunk_id
                     WHERE {where}
                     ORDER BY c.book_number, c.chapter_number, c.chunk_index""",
                 params).fetchall()
-            notes.extend(f"[Book {b}, Ch {ch}] {label}: {v}" for b, ch, v in rows)
+            notes.extend(render_note(kind, b, ch, v) for b, ch, v in rows)
         # continuity leans on the aggregate; a few excerpts anchor the voice
         return self._semantic(plan, top_k=5), notes
+
+    def _ranked_continuity_notes(self, plan: QueryPlan) -> list[str] | None:
+        """Top continuity_notes_cap notes by semantic similarity to the
+        question, re-sorted into chronological order (same line format as the
+        unranked path — the notes collection stores the rendered lines).
+        Returns None when the collection is empty so the caller falls back
+        to the exact legacy behavior."""
+        if self.store.notes_count() == 0:
+            log.warning("ENABLE_NOTE_RANKING is on but the notes collection is "
+                        "empty — run scripts/backfill_note_embeddings.py; "
+                        "falling back to unranked continuity notes")
+            return None
+        cap = self.cfg.continuity_notes_cap
+        embedding = self.embedder.embed_query(plan.question)
+        # over-fetch so the post-hoc chapter filter can't starve the cap
+        hits = self.store.note_search(embedding, cap * 2,
+                                      where=_scope_chroma(plan.scope))
+        kept = []
+        for text, meta in hits:
+            if not _within_scope(meta, plan.scope):
+                continue
+            kept.append((meta.get("book_number", 0),
+                         meta.get("chapter_number", 0), text))
+            if len(kept) >= cap:
+                break
+        kept.sort()  # (book, chapter, text): chronological, deterministic ties
+        return [text for _, _, text in kept]
 
     def _lookup(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
         where, params = _scope_sql(plan.scope)

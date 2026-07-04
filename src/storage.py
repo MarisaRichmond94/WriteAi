@@ -95,10 +95,12 @@ class SeriesStore:
 
         cfg.ensure_data_dirs()
         self._chroma = chromadb.PersistentClient(path=str(cfg.chroma_dir))
+        self._collection_name = slugify(cfg.series_name)
         self.collection = self._chroma.get_or_create_collection(
-            name=slugify(cfg.series_name),
+            name=self._collection_name,
             metadata={"hnsw:space": "cosine"},
         )
+        self._notes_collection = None  # companion notes index; created lazily
         # Exhaustive-depth vector search: at this corpus scale (~1.4k chunks)
         # an ef_search beyond the collection size makes HNSW queries exact AND
         # deterministic across processes (chroma 1.x's approximate path flips
@@ -247,6 +249,59 @@ class SeriesStore:
         tokens = [t.replace('"', "") for t in query_text.split()]
         tokens = [t for t in tokens if any(c.isalnum() for c in t)]
         return " OR ".join(f'"{t}"' for t in tokens)
+
+    # ── continuity-notes vector index ───────────────────────────────────────
+    # A second Chroma collection holding one embedded document per
+    # foreshadowing/unresolved-question row, rendered exactly as the
+    # retriever's note lines (see src/notes.py). Only touched when
+    # ENABLE_NOTE_RANKING is on (query path) or the backfill script runs —
+    # created lazily so flag-off runs never write to the shared data dir.
+
+    @property
+    def notes(self):
+        if self._notes_collection is None:
+            self._notes_collection = self._chroma.get_or_create_collection(
+                name=f"{self._collection_name[:57]}-notes",
+                metadata={"hnsw:space": "cosine"},
+            )
+            # Same exhaustive-search determinism trick as the chunk collection
+            # above, sized for the larger note corpus (~7k rows today).
+            # Revisit if the note count outgrows ~10k.
+            hnsw_cfg = (self._notes_collection.configuration_json or {}).get("hnsw") or {}
+            if hnsw_cfg.get("ef_search", 0) < 10000:
+                self._notes_collection.modify(
+                    configuration={"hnsw": {"ef_search": 10000}})
+        return self._notes_collection
+
+    def notes_count(self) -> int:
+        return self.notes.count()
+
+    def upsert_notes(self, note_docs: list[dict]) -> None:
+        """note_docs: [{id, text, embedding, metadata}] where metadata is
+        {kind, book_number, chapter_number, chunk_id}. Ids are deterministic
+        (src/notes.py), so re-upserting the same rows is idempotent."""
+        # collapse duplicate ids within the batch (Chroma rejects them)
+        note_docs = list({d["id"]: d for d in note_docs}.values())
+        for i in range(0, len(note_docs), 100):
+            batch = note_docs[i:i + 100]
+            self.notes.upsert(ids=[d["id"] for d in batch],
+                              embeddings=[d["embedding"] for d in batch],
+                              documents=[d["text"] for d in batch],
+                              metadatas=[d["metadata"] for d in batch])
+
+    def delete_notes_for_chunks(self, chunk_ids: list[str]) -> None:
+        """Drop every note vector belonging to these chunks (called before
+        re-upserting a changed chunk's notes, and when chunks are deleted)."""
+        if chunk_ids:
+            self.notes.delete(where={"chunk_id": {"$in": chunk_ids}})
+
+    def note_search(self, query_embedding: list[float], n: int,
+                    where: dict | None = None) -> list[tuple[str, dict]]:
+        """Top-n notes by cosine similarity: [(note line text, metadata)]."""
+        result = self.notes.query(query_embeddings=[query_embedding],
+                                  n_results=n, where=where,
+                                  include=["documents", "metadatas"])
+        return list(zip(result["documents"][0], result["metadatas"][0]))
 
     def chunks_with_character(self, name: str) -> list[sqlite3.Row]:
         self.db.row_factory = sqlite3.Row
