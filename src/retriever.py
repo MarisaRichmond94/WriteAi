@@ -61,6 +61,23 @@ def _within_scope(meta: dict, scope: Scope) -> bool:
     return True
 
 
+def _rrf_fuse(semantic_hits: list[dict], keyword_hits: list[dict],
+              k: int = 60) -> list[dict]:
+    """Reciprocal Rank Fusion: score(chunk) = Σ 1/(k + rank) over both ranked
+    lists (rank starts at 1). When a chunk appears in both, the semantic hit
+    dict wins so its `distance` survives. Ties break on chunk_id (determinism).
+    """
+    scores: dict[str, float] = {}
+    best: dict[str, dict] = {}
+    for hit_list in (semantic_hits, keyword_hits):
+        for rank, hit in enumerate(hit_list, 1):
+            cid = hit["chunk_id"]
+            scores[cid] = scores.get(cid, 0.0) + 1.0 / (k + rank)
+            if cid not in best:  # semantic list first -> its dict wins
+                best[cid] = hit
+    return [best[cid] for cid in sorted(scores, key=lambda c: (-scores[c], c))]
+
+
 def _header(meta: dict) -> str:
     ch = meta.get("chapter_number")
     parts = [f"Book {meta.get('book_number')} \"{meta.get('book_title')}\"",
@@ -102,6 +119,14 @@ class Retriever:
         # over-fetch slightly so a post-hoc chapter filter can't starve us
         hits = self.store.semantic_search(embedding, top_k * 2,
                                           where=_scope_chroma(plan.scope))
+        # Keyword fusion only pays off on entity-bearing queries (eval: lookup
+        # and temporal_knowledge improve; continuity/general regress because
+        # BM25's literal matches dilute the semantic list on abstract wording).
+        if (self.cfg.enable_hybrid_search
+                and plan.qtype in ("lookup", "temporal_knowledge")):
+            keyword_hits = self.store.keyword_search(plan.question, top_k * 2,
+                                                     plan.scope)
+            hits = _rrf_fuse(hits, keyword_hits)
         excerpts = []
         for h in hits:
             if not _within_scope(h["metadata"], plan.scope):

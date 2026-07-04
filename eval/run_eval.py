@@ -222,6 +222,12 @@ def main() -> int:
     from config import load_config
     cfg = load_config()
 
+    # Pin query embedding to CPU for reproducibility: on MPS (Apple GPU) the
+    # embedder is nondeterministic under this workload (flips 1-3 items per
+    # 40-item run at near-tie ranks), which makes zero-delta gating flaky.
+    # Embedding 40 queries on CPU is cheap; production paths are unaffected.
+    os.environ.setdefault("EMBEDDING_DEVICE", "cpu")
+
     # Heavy imports after config so log level is set (mirrors query.py wiring).
     from src.embedder import Embedder
     from src.query_router import classify

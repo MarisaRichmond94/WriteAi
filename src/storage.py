@@ -76,6 +76,10 @@ CREATE TABLE IF NOT EXISTS unresolved_questions (
     question TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_questions_chunk ON unresolved_questions(chunk_id);
+
+-- BM25 keyword index over chunk text (external content: rows shadow `chunks`).
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
+    USING fts5(text, content='chunks', content_rowid='rowid');
 """
 
 
@@ -95,6 +99,15 @@ class SeriesStore:
             name=slugify(cfg.series_name),
             metadata={"hnsw:space": "cosine"},
         )
+        # Exhaustive-depth vector search: at this corpus scale (~1.4k chunks)
+        # an ef_search beyond the collection size makes HNSW queries exact AND
+        # deterministic across processes (chroma 1.x's approximate path flips
+        # near-tie ranks per process, which breaks eval gating) at sub-ms cost.
+        # Idempotent: modify() only runs when the stored value is lower.
+        # Revisit if the corpus outgrows ~10k chunks.
+        hnsw_cfg = (self.collection.configuration_json or {}).get("hnsw") or {}
+        if hnsw_cfg.get("ef_search", 0) < 2000:
+            self.collection.modify(configuration={"hnsw": {"ef_search": 2000}})
         # One SQLite connection per thread: the web server calls this from a
         # threadpool, and sharing a single connection across threads
         # interleaves cursors. SQLite coordinates between connections.
@@ -102,7 +115,21 @@ class SeriesStore:
         self._cfg_path = cfg.sqlite_path
         self._local = threading.local()
         self.db.executescript(_SCHEMA)
+        self._backfill_fts()
         self.db.commit()
+
+    def _backfill_fts(self) -> None:
+        """One-time idempotent index build for stores created before chunks_fts
+        existed. New/updated rows are kept in sync by the write paths.
+
+        NB: on an external-content FTS5 table, `COUNT(*) FROM chunks_fts` reads
+        through to the content table, so the real index size must come from the
+        chunks_fts_docsize shadow table (one row per indexed document)."""
+        n_fts = self.db.execute("SELECT COUNT(*) FROM chunks_fts_docsize").fetchone()[0]
+        n_chunks = self.db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        if n_fts == 0 and n_chunks > 0:
+            log.info("building chunks_fts index for %d existing chunks", n_chunks)
+            self.db.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
 
     @property
     def db(self) -> sqlite3.Connection:
@@ -129,6 +156,12 @@ class SeriesStore:
         if not chunk_ids:
             return
         self.collection.delete(ids=chunk_ids)
+        # External-content FTS rows must be removed via the special 'delete'
+        # insert form, with the old rowid+text, BEFORE the source row goes.
+        self.db.executemany(
+            """INSERT INTO chunks_fts(chunks_fts, rowid, text)
+               SELECT 'delete', rowid, text FROM chunks WHERE chunk_id = ?""",
+            [(cid,) for cid in chunk_ids])
         self.db.executemany("DELETE FROM chunks WHERE chunk_id = ?",
                             [(cid,) for cid in chunk_ids])
         self.db.commit()
@@ -165,6 +198,55 @@ class SeriesStore:
             hits.append({"chunk_id": cid, "text": doc, "metadata": meta,
                          "distance": dist})
         return hits
+
+    def keyword_search(self, query_text: str, n: int, scope=None) -> list[dict]:
+        """BM25 keyword search over chunk text via FTS5.
+
+        Returns hits in the same shape as semantic_search ({chunk_id, text,
+        metadata, distance}); distance is None (it is a vector-space notion),
+        the BM25 score is exposed under 'bm25'. `scope` is an optional object
+        with book_min/book_max attributes (see query_router.Scope) — the same
+        book-level bound _scope_chroma applies to the vector path; finer
+        chapter bounds are the caller's post-hoc filter, as for Chroma.
+        """
+        match = self._fts_match_query(query_text)
+        if not match:
+            return []
+        clauses, params = ["chunks_fts MATCH ?"], [match]
+        if scope is not None:
+            if getattr(scope, "book_min", None) is not None:
+                clauses.append("c.book_number >= ?")
+                params.append(scope.book_min)
+            if getattr(scope, "book_max", None) is not None:
+                clauses.append("c.book_number <= ?")
+                params.append(scope.book_max)
+        try:
+            rows = self.db.execute(
+                f"""SELECT c.chunk_id, c.text, c.book_number, c.book_title,
+                           c.chapter_number, c.pov_character, c.date_line,
+                           bm25(chunks_fts) AS score
+                    FROM chunks_fts JOIN chunks c ON c.rowid = chunks_fts.rowid
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY bm25(chunks_fts), c.chunk_id
+                    LIMIT ?""",
+                [*params, n]).fetchall()
+        except sqlite3.OperationalError as e:  # pathological query text
+            log.warning("keyword_search failed for %r: %s", query_text, e)
+            return []
+        return [{"chunk_id": cid, "text": text,
+                 "metadata": {"book_number": bn, "book_title": bt,
+                              "chapter_number": ch, "pov_character": pov,
+                              "date_line": dl},
+                 "distance": None, "bm25": score}
+                for cid, text, bn, bt, ch, pov, dl, score in rows]
+
+    @staticmethod
+    def _fts_match_query(query_text: str) -> str:
+        """Recall-oriented MATCH expression: each token individually quoted
+        (disabling FTS5 operator syntax), joined with OR."""
+        tokens = [t.replace('"', "") for t in query_text.split()]
+        tokens = [t for t in tokens if any(c.isalnum() for c in t)]
+        return " OR ".join(f'"{t}"' for t in tokens)
 
     def chunks_with_character(self, name: str) -> list[sqlite3.Row]:
         self.db.row_factory = sqlite3.Row
@@ -218,7 +300,13 @@ class SeriesStore:
         cur = self.db.cursor()
         for r in records:
             chunk, meta = r["chunk"], r["metadata"] or {}
-            # delete-then-insert keeps the side tables consistent (CASCADE)
+            # delete-then-insert keeps the side tables consistent (CASCADE);
+            # the FTS shadow row must be dropped first (external-content
+            # 'delete' form needs the old rowid+text) and re-added after.
+            cur.execute(
+                """INSERT INTO chunks_fts(chunks_fts, rowid, text)
+                   SELECT 'delete', rowid, text FROM chunks WHERE chunk_id = ?""",
+                (chunk.chunk_id,))
             cur.execute("DELETE FROM chunks WHERE chunk_id = ?", (chunk.chunk_id,))
             cur.execute(
                 """INSERT INTO chunks (chunk_id, book_number, book_title,
@@ -233,6 +321,8 @@ class SeriesStore:
                  meta.get("timeline_position"), chunk.text, r["text_hash"],
                  json.dumps(meta, ensure_ascii=False) if meta else None),
             )
+            cur.execute("INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)",
+                        (cur.lastrowid, chunk.text))
             cur.executemany(
                 "INSERT INTO characters (chunk_id, name) VALUES (?, ?)",
                 [(chunk.chunk_id, n) for n in meta.get("characters_present", [])])

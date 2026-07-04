@@ -67,6 +67,7 @@ class Config:
     max_chunk_tokens: int
     top_k_results: int
     confirm_before_ingest: bool
+    enable_hybrid_search: bool
     log_level: str
 
     # Derived data locations (all under data_dir; created on demand)
@@ -137,6 +138,7 @@ def load_config(env_file: Path | None = None) -> Config:
         max_chunk_tokens=_get_int("MAX_CHUNK_TOKENS", 800),
         top_k_results=_get_int("TOP_K_RESULTS", 15),
         confirm_before_ingest=_get_bool("CONFIRM_BEFORE_INGEST", True),
+        enable_hybrid_search=_get_bool("ENABLE_HYBRID_SEARCH", False),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)

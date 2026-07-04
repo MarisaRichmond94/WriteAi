@@ -33,9 +33,14 @@ class Embedder:
             # `or`, not a .get() default: Settings writes EMBEDDING_MODEL= (empty)
             # to mean "use the default" — treat blank the same as unset
             self.model_name = os.environ.get("EMBEDDING_MODEL") or DEFAULT_LOCAL_MODEL
-            log.info("loading local embedding model %s …", self.model_name)
+            # (optional) pin the torch device, e.g. EMBEDDING_DEVICE=cpu for
+            # bit-reproducible query embeddings; unset -> library auto-select
+            device = os.environ.get("EMBEDDING_DEVICE") or None
+            log.info("loading local embedding model %s (device=%s) …",
+                     self.model_name, device or "auto")
             # trust_remote_code is required by the nomic models (custom pooling)
-            self.model = SentenceTransformer(self.model_name, trust_remote_code=True)
+            self.model = SentenceTransformer(self.model_name, trust_remote_code=True,
+                                             device=device)
             self._is_nomic = "nomic" in self.model_name.lower()
         elif self.provider == "openai":
             from openai import OpenAI
