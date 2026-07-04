@@ -407,6 +407,10 @@ export default function ReviewPane() {
   const modelDropdownRef = useRef<HTMLDivElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
+  // Follow the stream only while the reader is at the bottom — scrolling up
+  // mid-stream stops the auto-scroll; returning to the bottom resumes it.
+  const stickToBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const messagesRef = useRef<ReviewMessage[]>(messages);
@@ -499,7 +503,8 @@ export default function ReviewPane() {
       if (chapterNum !== null) setSelectedChapter(chapterNum);
       const focus = params.get("focus") as ReviewFocus | null;
       if (focus && FOCUS_OPTIONS.some((f) => f.value === focus)) setFilterFocus(focus);
-      if (params.get("preview") === "1") setPreviewOpen(true);
+      // preview is deliberately NOT auto-opened — it's a modal now, opened
+      // from the eye button on demand (the param is still stripped below)
       if (params.get("draft") === "1" && chapterNum !== null) {
         loadDraft(String(match.id), chapterNum);
       }
@@ -602,10 +607,18 @@ export default function ReviewPane() {
     upsertReview(session);
   }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom (only while the reader hasn't scrolled away)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (stickToBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
+
+  const handleMessagesScroll = () => {
+    const el = messagesScrollRef.current;
+    if (!el) return;
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
 
   // Close model dropdown on outside click
   useEffect(() => {
@@ -651,6 +664,7 @@ export default function ReviewPane() {
     messagesRef.current = newMessages;
     setInputValue("");
     setIsStreaming(true);
+    stickToBottomRef.current = true; // a fresh send always jumps to the reply
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     // Immediately create/update the history entry so it appears in the sidebar right away
@@ -853,7 +867,7 @@ export default function ReviewPane() {
 
   const selectedModel = MODELS.find((m) => m.id === model)?.label ?? model;
 
-  const sideOpen = activeCitation !== null || previewOpen;
+  const sideOpen = activeCitation !== null;
   const canPreview = selectedChapter !== null && selectedChapter !== "new" && !!chapterText && !chapterFetching;
 
   return (
@@ -1089,8 +1103,9 @@ export default function ReviewPane() {
             </div>
           )}
 
-          {/* Message list */}
-          <div className="flex-1 overflow-y-auto px-6 py-4">
+          {/* Message list — 16px margins keep a fixed gap to the filter row
+              above and the input footer below even mid-scroll. */}
+          <div ref={messagesScrollRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto px-6 my-4">
             {messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
                 <ClipboardCheck className="h-8 w-8 text-ink-muted/40" strokeWidth={1} />
@@ -1230,12 +1245,19 @@ export default function ReviewPane() {
           )}
         </div>
 
-        {/* Chapter preview panel */}
-        <div className={clsx(
-          "flex flex-col overflow-hidden border-l border-surface-border rounded-tl-lg transition-all duration-300 ease-in-out",
-          previewOpen ? "w-[40%]" : "w-0 border-l-0"
-        )}>
-          {previewOpen && selectedChapter !== null && selectedChapter !== "new" && filterBook && (
+      </div>{/* end main content row */}
+
+      {/* Chapter preview — a modal (click outside or ✕ to close) so the
+          filter row and chat keep the full pane width. */}
+      {previewOpen && selectedChapter !== null && selectedChapter !== "new" && filterBook && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+          onClick={() => setPreviewOpen(false)}
+        >
+          <div
+            className="h-[85vh] w-[min(860px,92vw)] overflow-hidden rounded-xl shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
             <ChapterViewer
               citation={{
                 book: filterBook,
@@ -1255,10 +1277,9 @@ export default function ReviewPane() {
               refreshToken={syncVersion}
               contentOverride={draft ? { text: draft.text, rich: draft.rich } : undefined}
             />
-          )}
+          </div>
         </div>
-
-      </div>{/* end main content row */}
+      )}
 
     </div>
   );

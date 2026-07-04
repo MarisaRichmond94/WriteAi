@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { BookOpen, ChevronLeft, Moon, Sun } from "lucide-react";
+import { BookOpen, ChevronLeft, Moon, Sun, X } from "lucide-react";
 import { clsx } from "clsx";
 import type { Citation, RichParagraph, RichRun } from "../../types";
 import { fetchChapterContent, type ChapterContent } from "../../api/books";
@@ -299,6 +299,15 @@ export default function ChapterViewer({ citation, bookId, lightMode, onToggleLig
           >
             {lightMode ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
           </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              title="Close"
+              className="rounded-md p-1.5 text-ink-muted hover:bg-surface-hover hover:text-ink-primary transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 

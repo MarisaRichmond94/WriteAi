@@ -34,7 +34,7 @@ The chapter editor's Review button saves the book's canon manuscript, then
 opens:
 
 ```
-<WRITEAI_URL>/?pane=review&book=<title>&chapter=<n>&focus=<persona>&preview=1&draft=1
+<WRITEAI_URL>/?pane=review&book=<title>&chapter=<n>&focus=<persona>&draft=1
 ```
 
 - `book` — book title; WriteAI matches it punctuation-insensitively.
@@ -43,7 +43,6 @@ opens:
   when the chapter isn't addressable.
 - `focus` — reviewer persona; must be one of WriteAI's focus options
   (Loom sends `Literary Agent`).
-- `preview=1` — opens the chapter preview panel.
 - `draft=1` — WriteAI reads the chapter's text (and rich formatting)
   straight from the freshly exported manuscript file — no ingest, no LLM
   cost — and badges the session as an unindexed draft. The writer iterates
