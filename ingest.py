@@ -7,6 +7,8 @@ Usage:
                                   #   no database writes
     python ingest.py --full       # ignore stored hashes, re-ingest everything
     python ingest.py --book 2     # limit the run to one book
+    python ingest.py --batches    # extract via the Message Batches API
+                                  #   (50% token pricing, up to 1h latency)
 
 Source files under BOOKS_DIR are READ ONLY — all conversion happens on
 staged copies under DATA_DIR, which are removed at the end of the run.
@@ -55,12 +57,17 @@ def main() -> int:
     ap.add_argument("--full", action="store_true",
                     help="ignore stored hashes and re-ingest everything")
     ap.add_argument("--book", type=int, default=None, help="only this book number")
+    ap.add_argument("--batches", action="store_true",
+                    help="extract via the Anthropic Message Batches API "
+                         "(50%% token pricing; results may take up to an hour)")
     ap.add_argument("--label", default="Sync",
                     help='notification label, e.g. --label "Nightly sync"')
     args = ap.parse_args()
 
     started = time.time()
     cfg = load_config()
+    if args.batches:  # CLI flag overrides EXTRACTION_USE_BATCHES on
+        cfg.extraction_use_batches = True
 
     # ── discovery + source-file gate ───────────────────────────────────────
     books = discover_books(cfg)
@@ -107,6 +114,11 @@ def main() -> int:
           f"${est['estimated_cost_usd']} "
           f"({est['estimated_input_tokens']:,} in / "
           f"{est['estimated_output_tokens']:,} out tokens on {est['model']})")
+
+    if cfg.extraction_use_batches:
+        print("\nBatch mode is ON: extraction goes through the Anthropic "
+              "Message Batches API at 50% token pricing.\n"
+              "Results may take up to an hour to come back (typically much less).")
 
     if args.dry_run:
         print("\n--dry-run: stopping before any API calls or database writes.")
@@ -182,6 +194,10 @@ def main() -> int:
     print(f"  unchanged: {unchanged}")
     print(f"  api calls: {u['api_calls']}  "
           f"({u['input_tokens']:,} in / {u['output_tokens']:,} out tokens)")
+    if u.get("batch_input_tokens") or u.get("batch_output_tokens"):
+        print(f"  via batches api (billed at 50%): "
+              f"{u['batch_input_tokens']:,} in / "
+              f"{u['batch_output_tokens']:,} out tokens")
     print(f"  actual cost: ${extractor.actual_cost_usd}")
     print(f"  elapsed: {elapsed/60:.1f} min")
     failures = (f" {total_failed} chunk(s) failed and will retry next run."

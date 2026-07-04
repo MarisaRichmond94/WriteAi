@@ -15,12 +15,20 @@ Design decisions:
   * Failures never crash the pipeline: an oversized or failed batch is split
     in half and retried; chunks that still fail come back with metadata=None
     and a logged warning. The SDK itself retries 429/5xx with backoff.
+  * Optional batches mode (EXTRACTION_USE_BATCHES / ingest.py --batches):
+    every packed batch is submitted as one request in a single Anthropic
+    Message Batch, which bills tokens at 50% of standard prices. Results can
+    take up to an hour (usually much less). Requests that come back errored/
+    expired/canceled fall back to the normal synchronous path (billed at
+    standard prices).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
+import time
 
 from .chunker import Chunk
 
@@ -42,6 +50,11 @@ EST_OUTPUT_TOKENS_PER_CHUNK = 450  # observed metadata size per chunk
 MAX_BATCH_WORDS = 9000
 MAX_BATCH_CHUNKS = 20
 MAX_OUTPUT_TOKENS = 16000
+
+# Message Batches API: 50% of standard token prices; poll cadence for the
+# batch status while we wait for processing to end.
+BATCH_PRICE_MULTIPLIER = 0.5
+BATCH_POLL_SECONDS = 30
 
 SYSTEM_PROMPT = """You are analyzing chunks of a fiction series the way a careful reader would.
 
@@ -153,6 +166,12 @@ def _batches(chunks: list[Chunk]) -> list[list[Chunk]]:
     return batches
 
 
+def _batch_custom_id(batch: list[Chunk]) -> str:
+    """Stable Batches-API custom_id for a packed batch: the first chunk's id,
+    sanitized (custom_ids only allow [a-zA-Z0-9_-], chunk_ids contain dots)."""
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", batch[0].chunk_id)
+
+
 class MetadataExtractor:
     """Extracts per-chunk narrative metadata via EXTRACTION_MODEL."""
 
@@ -166,23 +185,37 @@ class MetadataExtractor:
             api_key=cfg.anthropic_api_key or None, max_retries=4
         )
         self.model = cfg.extraction_model
+        self.use_batches = getattr(cfg, "extraction_use_batches", False)
         # Actual usage accumulated across the run, for the run summary.
-        self.usage = {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}
+        # batch_* buckets are tokens billed through the Message Batches API
+        # (50% pricing); the plain buckets are standard synchronous calls.
+        self.usage = {
+            "input_tokens": 0, "output_tokens": 0,
+            "batch_input_tokens": 0, "batch_output_tokens": 0,
+            "api_calls": 0,
+        }
 
     @property
     def actual_cost_usd(self) -> float:
         in_price, out_price = PRICING_PER_MTOK.get(self.model, (1.00, 5.00))
-        return round(
-            (self.usage["input_tokens"] * in_price
-             + self.usage["output_tokens"] * out_price) / 1_000_000, 4
+        sync_cost = (self.usage["input_tokens"] * in_price
+                     + self.usage["output_tokens"] * out_price)
+        batch_cost = BATCH_PRICE_MULTIPLIER * (
+            self.usage["batch_input_tokens"] * in_price
+            + self.usage["batch_output_tokens"] * out_price
         )
+        return round((sync_cost + batch_cost) / 1_000_000, 4)
 
     def extract(self, chunks: list[Chunk]) -> list[dict | None]:
         """Extract metadata for all chunks. Returns one dict per chunk, in
         order; a chunk whose extraction failed gets None (log-and-continue)."""
+        batches = _batches(chunks)
         results: list[dict | None] = []
-        for batch in _batches(chunks):
-            results.extend(self._extract_batch(batch))
+        if self.use_batches and batches:
+            results.extend(self._extract_batched(batches))
+        else:
+            for batch in batches:
+                results.extend(self._extract_batch(batch))
 
         # Second pass: in large batches the model occasionally skips a chunk
         # entirely. Retry any misses one at a time — a single-chunk request
@@ -196,7 +229,10 @@ class MetadataExtractor:
 
     # ── internals ───────────────────────────────────────────────────────────
 
-    def _extract_batch(self, batch: list[Chunk], depth: int = 0) -> list[dict | None]:
+    def _request_params(self, batch: list[Chunk]) -> dict:
+        """Messages-API params for one packed batch. Shared by the synchronous
+        path (messages.create(**params)) and the Batches path (the per-request
+        `params` of batches.create), so the two can never drift apart."""
         prompt_parts = [
             f"Extract metadata for the following {len(batch)} chunk(s).\n"
         ]
@@ -205,15 +241,19 @@ class MetadataExtractor:
                 f"=== CHUNK {c.chunk_id} ===\n{_chunk_header(c)}\n\n{c.text}\n"
             )
         user_prompt = "\n".join(prompt_parts)
+        return {
+            "model": self.model,
+            "max_tokens": MAX_OUTPUT_TOKENS,
+            "system": SYSTEM_PROMPT,
+            "output_config": {"format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
+            "messages": [{"role": "user", "content": user_prompt}],
+        }
 
+    def _extract_batch(self, batch: list[Chunk], depth: int = 0) -> list[dict | None]:
+        """Synchronous extraction for one packed batch (also the fallback and
+        retry path when batches mode hits an errored/expired request)."""
         try:
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=MAX_OUTPUT_TOKENS,
-                system=SYSTEM_PROMPT,
-                output_config={"format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
-                messages=[{"role": "user", "content": user_prompt}],
-            )
+            response = self.client.messages.create(**self._request_params(batch))
         except self._anthropic.APIError as e:
             log.warning("extraction call failed (%s): %s", type(e).__name__, e)
             return self._split_and_retry(batch, depth)
@@ -222,6 +262,64 @@ class MetadataExtractor:
         self.usage["output_tokens"] += response.usage.output_tokens
         self.usage["api_calls"] += 1
 
+        return self._parse_response(batch, response, depth)
+
+    def _extract_batched(self, batches: list[list[Chunk]]) -> list[dict | None]:
+        """Submit all packed batches as one Message Batch (50% token pricing),
+        poll until it ends, then parse results. Results arrive in arbitrary
+        order and are matched by custom_id, never by position. Requests that
+        errored/expired/were canceled fall back to the synchronous path."""
+        requests = [
+            {"custom_id": _batch_custom_id(batch), "params": self._request_params(batch)}
+            for batch in batches
+        ]
+        try:
+            message_batch = self.client.messages.batches.create(requests=requests)
+        except self._anthropic.APIError as e:
+            log.warning("message batch submission failed (%s): %s — "
+                        "falling back to synchronous extraction", type(e).__name__, e)
+            results: list[dict | None] = []
+            for batch in batches:
+                results.extend(self._extract_batch(batch))
+            return results
+
+        log.info("submitted message batch %s (%d request(s), %d chunk(s)); "
+                 "results may take up to an hour, typically much less",
+                 message_batch.id, len(requests), sum(len(b) for b in batches))
+
+        while message_batch.processing_status != "ended":
+            time.sleep(BATCH_POLL_SECONDS)
+            message_batch = self.client.messages.batches.retrieve(message_batch.id)
+            rc = message_batch.request_counts
+            log.info("batch %s: %d processing / %d succeeded / %d errored / "
+                     "%d canceled / %d expired", message_batch.id, rc.processing,
+                     rc.succeeded, rc.errored, rc.canceled, rc.expired)
+
+        by_custom_id = {r.custom_id: r for r in
+                        self.client.messages.batches.results(message_batch.id)}
+
+        results = []
+        for batch in batches:
+            cid = _batch_custom_id(batch)
+            result = by_custom_id.get(cid)
+            if result is not None and result.result.type == "succeeded":
+                msg = result.result.message
+                # Batch-billed buckets: 50% pricing in actual_cost_usd.
+                self.usage["batch_input_tokens"] += msg.usage.input_tokens
+                self.usage["batch_output_tokens"] += msg.usage.output_tokens
+                self.usage["api_calls"] += 1
+                results.extend(self._parse_response(batch, msg, depth=0))
+            else:
+                status = result.result.type if result is not None else "missing"
+                log.warning("batch request %s came back %s; retrying its %d "
+                            "chunk(s) synchronously", cid, status, len(batch))
+                results.extend(self._extract_batch(batch))
+        return results
+
+    def _parse_response(self, batch: list[Chunk], response,
+                        depth: int) -> list[dict | None]:
+        """Turn one Messages-API response (sync or from a batch result) into
+        per-chunk metadata dicts; failures split-and-retry synchronously."""
         if response.stop_reason == "refusal":
             log.warning("extraction refused for batch starting %s", batch[0].chunk_id)
             return [None] * len(batch)
