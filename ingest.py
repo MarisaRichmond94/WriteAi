@@ -9,6 +9,10 @@ Usage:
     python ingest.py --book 2     # limit the run to one book
     python ingest.py --batches    # extract via the Message Batches API
                                   #   (50% token pricing, up to 1h latency)
+    python ingest.py --re-extract # re-run LLM metadata extraction for every
+                                  #   in-scope chunk; chunk text, embeddings
+                                  #   and the hash index are reused (composes
+                                  #   with --batches)
 
 Source files under BOOKS_DIR are READ ONLY — all conversion happens on
 staged copies under DATA_DIR, which are removed at the end of the run.
@@ -38,7 +42,7 @@ from src.discovery import discover_books
 from src.extractor import estimate_extraction_cost
 from src.ingestion import (BookDiff, chunk_text_hash, clear_staging,
                            diff_chunks, ingest_chunks, load_and_chunk_book,
-                           load_hash_index, save_hash_index)
+                           load_hash_index, reextract_chunks, save_hash_index)
 
 log = logging.getLogger("ingest")
 
@@ -56,6 +60,10 @@ def main() -> int:
                     help="show what would be processed; no API calls or DB writes")
     ap.add_argument("--full", action="store_true",
                     help="ignore stored hashes and re-ingest everything")
+    ap.add_argument("--re-extract", dest="re_extract", action="store_true",
+                    help="re-run LLM metadata extraction for every in-scope "
+                         "chunk WITHOUT re-parsing/re-chunking/re-embedding "
+                         "chunk text (embeddings are reused from ChromaDB)")
     ap.add_argument("--book", type=int, default=None, help="only this book number")
     ap.add_argument("--batches", action="store_true",
                     help="extract via the Anthropic Message Batches API "
@@ -63,6 +71,10 @@ def main() -> int:
     ap.add_argument("--label", default="Sync",
                     help='notification label, e.g. --label "Nightly sync"')
     args = ap.parse_args()
+    if args.full and args.re_extract:
+        ap.error("--full and --re-extract are mutually exclusive "
+                 "(--full re-embeds everything; --re-extract deliberately "
+                 "reuses embeddings)")
 
     started = time.time()
     cfg = load_config()
@@ -96,6 +108,17 @@ def main() -> int:
         if chunks is None:
             continue  # logged; skip bad file, never crash
         diffs[b.number] = (b, chunks, diff_chunks(chunks, index, b.number))
+
+    if args.re_extract:
+        # Metadata-only rerun: every current chunk goes through extraction
+        # again, but chunk text/embeddings/hash index are reused. Deleted
+        # chunks are still detected and removed as usual.
+        print("\n--re-extract: re-running metadata extraction for every "
+              "in-scope chunk (chunk text, embeddings and chunk_hashes.json "
+              "are reused; no re-parsing, re-chunking, or re-embedding).")
+        for num in diffs:
+            _, chunks, d = diffs[num]
+            d.new, d.updated, d.unchanged = [], list(chunks), []
 
     changed = [c for _, _, d in diffs.values() for c in d.changed]
     deleted = [cid for _, _, d in diffs.values() for cid in d.deleted_ids]
@@ -164,7 +187,8 @@ def main() -> int:
         print(f"\n== book {num}: {b.title} "
               f"({len(d.changed)} chunk(s) to process) ==")
         book_reports.append(f"{b.title} ({len(d.changed)} chunk(s))")
-        summary = ingest_chunks(cfg, d.changed, extractor, embedder, store)
+        ingest_fn = reextract_chunks if args.re_extract else ingest_chunks
+        summary = ingest_fn(cfg, d.changed, extractor, embedder, store)
         if d.deleted_ids:
             store.delete_chunks(d.deleted_ids)
             if cfg.enable_note_ranking:

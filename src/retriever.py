@@ -21,7 +21,7 @@ import json
 import logging
 import time
 
-from .notes import NOTE_TABLES, render_note
+from .notes import NOTE_TABLES, pair_quotes, render_note, with_quote
 from .query_prep import expand_characters
 from .query_router import QueryPlan, Scope
 
@@ -200,14 +200,15 @@ class Retriever:
         for name in plan.characters or [""]:
             clause, likes = _like_clause("k.character", aliases.get(name, [name]))
             rows = self.db.execute(
-                f"""SELECT c.book_number, c.chapter_number, k.character, k.learns
+                f"""SELECT c.book_number, c.chapter_number, k.character, k.learns,
+                           k.source_quote
                     FROM character_knowledge k JOIN chunks c ON c.chunk_id = k.chunk_id
                     WHERE {clause} AND {where}
                     ORDER BY c.book_number, c.chapter_number, c.chunk_index""",
                 [*likes, *params]).fetchall()
             notes.extend(
-                f"[Book {b}, Ch {ch}] {who} learns: {fact}"
-                for b, ch, who, fact in rows)
+                f"[Book {b}, Ch {ch}] {who} learns: {with_quote(fact, quote)}"
+                for b, ch, who, fact, quote in rows)
         if len(notes) > 400:  # keep the prompt sane on very broad questions
             log.info("truncating knowledge notes: %d -> 400", len(notes))
             notes = notes[:400]
@@ -233,8 +234,12 @@ class Retriever:
             for cid, b, ch, meta_json in rows:
                 if not meta_json:
                     continue
-                beats = json.loads(meta_json).get("emotional_beats", [])
-                notes.extend(f"[Book {b}, Ch {ch}] {beat}" for beat in beats)
+                meta = json.loads(meta_json)
+                notes.extend(
+                    f"[Book {b}, Ch {ch}] {with_quote(beat, quote)}"
+                    for beat, quote in pair_quotes(
+                        meta.get("emotional_beats", []),
+                        meta.get("emotional_beat_quotes")))
             if len(notes) > 400:
                 notes = notes[:400]
             if self.cfg.enable_sentiment_v2:
@@ -267,6 +272,12 @@ class Retriever:
         sentiment set). With the reranker flag off we keep concerns separate
         and do NOT load the cross-encoder here either: SQL candidates come
         first in chronological order, then the semantic hits, cut to top_k.
+
+        Beat scoring docs stay the beat SUMMARY only, even now that beats can
+        carry a verbatim source_quote — appending the quote might improve the
+        cross-encoder signal, but that is an eval-gated follow-up, not a side
+        effect of the quote-extraction work (this keeps sentiment v2 behavior
+        bit-identical whether quotes are present or absent).
         """
         top_k = self.cfg.top_k_results
         cols = """c.chunk_id, c.book_number, c.book_title, c.chapter_number,
@@ -382,12 +393,13 @@ class Retriever:
         notes = []
         for table, column, kind in NOTE_TABLES:
             rows = self.db.execute(
-                f"""SELECT c.book_number, c.chapter_number, t.{column}
+                f"""SELECT c.book_number, c.chapter_number, t.{column},
+                           t.source_quote
                     FROM {table} t JOIN chunks c ON c.chunk_id = t.chunk_id
                     WHERE {where}
                     ORDER BY c.book_number, c.chapter_number, c.chunk_index""",
                 params).fetchall()
-            notes.extend(render_note(kind, b, ch, v) for b, ch, v in rows)
+            notes.extend(render_note(kind, b, ch, v, q) for b, ch, v, q in rows)
         # continuity leans on the aggregate; a few excerpts anchor the voice
         return self._semantic(plan, top_k=5), notes
 
