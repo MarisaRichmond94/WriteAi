@@ -167,6 +167,8 @@ def main() -> int:
         summary = ingest_chunks(cfg, d.changed, extractor, embedder, store)
         if d.deleted_ids:
             store.delete_chunks(d.deleted_ids)
+            if cfg.enable_note_ranking:
+                store.delete_notes_for_chunks(d.deleted_ids)
             print(f"  removed {len(d.deleted_ids)} stale chunk(s)")
 
         failed = set(summary.get("failed_chunk_ids", []))
