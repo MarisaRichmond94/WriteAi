@@ -972,9 +972,6 @@ export default function ReviewPane() {
             {chapterFetching && (
               <span className="text-[10px] text-ink-muted animate-pulse">Loading chapter…</span>
             )}
-            {draftLoading && (
-              <span className="text-[10px] text-ink-muted animate-pulse">Reading draft…</span>
-            )}
 
 
             {/* Chapter preview toggle */}
@@ -999,8 +996,15 @@ export default function ReviewPane() {
               </button>
             )}
 
-            {/* Settings · Resync · Review · Re-Index */}
-            {filterBook && (
+            {/* Settings · Resync · Review · Re-Index (or loading skeletons) */}
+            {filterBook && draftLoading && (
+              <div className="ml-auto flex items-center gap-2">
+                <div className="h-[26px] w-[26px] animate-pulse rounded border border-surface-border bg-surface-border/40" />
+                <div className="h-[26px] w-16 animate-pulse rounded border border-surface-border bg-surface-border/40" />
+                <div className="h-[26px] w-[72px] animate-pulse rounded border border-surface-border bg-surface-border/40" />
+              </div>
+            )}
+            {filterBook && !draftLoading && (
               <div className="ml-auto flex items-center gap-2">
 
                 {/* Settings cog — Ideal Version and other per-session options */}
