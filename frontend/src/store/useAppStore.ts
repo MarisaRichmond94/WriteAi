@@ -70,6 +70,11 @@ interface AppState {
   exploreViewerCloseSignal: number;
   closeExploreViewer: () => void;
 
+  // Notification bell refresh — bumped after client-created notifications
+  // so the bell reloads immediately instead of waiting for its poll
+  bellRefreshSignal: number;
+  refreshBell: () => void;
+
   // Toast
   toastMessage: string | null;
   showToast: (msg: string) => void;
@@ -251,6 +256,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   exploreViewerCloseSignal: 0,
   closeExploreViewer: () => set((state) => ({ exploreViewerCloseSignal: state.exploreViewerCloseSignal + 1 })),
+
+  bellRefreshSignal: 0,
+  refreshBell: () => set((state) => ({ bellRefreshSignal: state.bellRefreshSignal + 1 })),
 
   toastMessage: null,
   showToast: (msg) => set({ toastMessage: msg }),

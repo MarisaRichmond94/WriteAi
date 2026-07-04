@@ -43,7 +43,7 @@ export default function NotificationBell() {
   const [prevUnread, setPrevUnread] = useState(0);
   const [pulse, setPulse] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const { setActivePane } = useAppStore();
+  const { setActivePane, bellRefreshSignal } = useAppStore();
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
@@ -61,6 +61,11 @@ export default function NotificationBell() {
     const id = setInterval(load, POLL_INTERVAL_MS);
     return () => clearInterval(id);
   }, []);
+
+  // Immediate reload when the UI just created a notification
+  useEffect(() => {
+    if (bellRefreshSignal) load();
+  }, [bellRefreshSignal]);
 
   // Pulse when new unread arrive
   useEffect(() => {

@@ -656,6 +656,13 @@ class EnrichmentRunner:
             self._reconcile_directions(db)
             self.status["state"] = "done"
             try:
+                from . import audit
+                audit.log_event("enrich_finished", "enrichment run finished",
+                                total=self.status["total"],
+                                cost_usd=self.status["cost_usd"])
+            except Exception:
+                pass
+            try:
                 from . import notify
                 notify.add("extraction_complete", "Enrichment complete",
                            f"{self.status['total']} tasks processed "
@@ -667,6 +674,12 @@ class EnrichmentRunner:
         except Exception as e:
             log.exception("enrichment run failed")
             self.status.update(state="error", error=str(e))
+            try:
+                from . import audit
+                audit.log_event("enrich_failed", "enrichment run failed",
+                                error=str(e))
+            except Exception:
+                pass
             try:
                 from . import notify
                 notify.add("error", "Enrichment failed", str(e))

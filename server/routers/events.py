@@ -9,7 +9,7 @@ import sqlite3
 
 from fastapi import APIRouter, HTTPException
 
-from .. import enrich
+from .. import audit, enrich
 from ..canonical import Canonicalizer
 from ..deps import get_state
 
@@ -175,10 +175,14 @@ def enrich_preview():
 def enrich_run():
     s = get_state()
     if enrich.runner.running:
+        audit.log_event("enrich_refused", "enrichment already running",
+                        status=dict(enrich.runner.status))
         raise HTTPException(409, "enrichment already running")
     started = enrich.runner.start(
         s.cfg.sqlite_path, s.cfg,
         lambda db: Canonicalizer(db))
+    audit.log_event("enrich_started", "enrichment run started",
+                    started=started)
     return {"started": started}
 
 
