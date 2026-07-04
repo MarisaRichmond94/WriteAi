@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, KeyboardEvent } from "react";
-import { ChevronDown, ChevronRight, Eye, FileUp, Info, Loader2, RefreshCw, Send, ScanText, ClipboardCheck, Sparkles, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Eye, Info, Loader2, RefreshCw, RotateCcw, Send, ScanText, ClipboardCheck, Settings2, Sparkles, X } from "lucide-react";
 import { clsx } from "clsx";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -34,7 +34,6 @@ const SUGGESTIONS = [
   "Would you keep reading past this chapter? Where did you almost stop?",
   "What is the pivotal choice in this chapter, and what if it had gone the other way?",
   "Does anything here contradict what an attentive reader of the series would know?",
-  "What is this chapter really about, beneath the plot?",
 ];
 
 function uuid(): string {
@@ -150,7 +149,7 @@ function ResyncConfirmModal({
         {/* Header */}
         <div className="flex items-start justify-between border-b border-surface-border px-5 py-4">
           <div>
-            <p className="text-sm font-semibold text-ink-primary">Resync "{book}"</p>
+            <p className="text-sm font-semibold text-ink-primary">Re-index "{book}"</p>
             <p className="mt-0.5 text-[11px] text-ink-muted">Incremental re-ingest of this book</p>
           </div>
           <button
@@ -217,7 +216,7 @@ function ResyncConfirmModal({
             className="flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 px-4 py-1.5 text-[11px] font-medium text-accent transition-colors hover:bg-accent/20"
           >
             <RefreshCw className="h-3 w-3" />
-            Start Resync
+            Re-Index
           </button>
         </div>
 
@@ -405,6 +404,8 @@ export default function ReviewPane() {
   const [model, setModel] = useState<string>(defaultModel);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsRef = useRef<HTMLDivElement>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
@@ -631,6 +632,18 @@ export default function ReviewPane() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [modelDropdownOpen]);
+
+  // Close settings popover on outside click
+  useEffect(() => {
+    if (!settingsOpen) return;
+    function handler(e: MouseEvent) {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setSettingsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [settingsOpen]);
 
   // Reviewing mid-resync would submit stale text — wait for the index.
   const canSend = !!chapterText.trim() && !!filterBook && !isStreaming && !resyncing;
@@ -911,7 +924,7 @@ export default function ReviewPane() {
 
         {/* Left column — filter row + textarea + messages + footer */}
         <div className={clsx(
-          "flex flex-col overflow-hidden transition-all duration-300",
+          "relative flex flex-col overflow-hidden transition-all duration-300",
           sideOpen ? "w-[60%]" : "w-full"
         )}>
 
@@ -923,6 +936,21 @@ export default function ReviewPane() {
               options={bookOptions}
               placeholder="Select book…"
               onChange={(v) => { setFilterBook(v); setSelectedChapter(null); setChapterText(""); setDraft(null); setMessages([]); setPreviewOpen(false); setActiveCitation(null); setViewingReviewSessionId(null); activeSessionIdRef.current = null; resetCostControls(); }}
+            />
+
+            {/* Chapter dropdown */}
+            <Dropdown
+              value={selectedChapter === null ? "" : (selectedChapter as number | "new")}
+              options={chapterDropdownOptions}
+              placeholder={filterBook ? "Select chapter…" : "Select a book first"}
+              onChange={(v) => { setSelectedChapter(v); setDraft(null); setMessages([]); setPreviewOpen(false); setActiveCitation(null); setViewingReviewSessionId(null); activeSessionIdRef.current = null; resetCostControls(); }}
+              renderOption={(v) => (
+                <span className={v === "new" ? "text-accent" : undefined}>
+                  {v === "new" ? "+ New Chapter (paste)" : chapterLabel(v)}
+                </span>
+              )}
+              renderValue={(v) => v === "new" ? "New Chapter" : chapterLabel(v)}
+              maxHeight="198px"
             />
 
             {/* Reviewer persona dropdown */}
@@ -941,21 +969,6 @@ export default function ReviewPane() {
               )}
             />
 
-            {/* Chapter dropdown */}
-            <Dropdown
-              value={selectedChapter === null ? "" : (selectedChapter as number | "new")}
-              options={chapterDropdownOptions}
-              placeholder={filterBook ? "Select chapter…" : "Select a book first"}
-              onChange={(v) => { setSelectedChapter(v); setDraft(null); setMessages([]); setPreviewOpen(false); setActiveCitation(null); setViewingReviewSessionId(null); activeSessionIdRef.current = null; resetCostControls(); }}
-              renderOption={(v) => (
-                <span className={v === "new" ? "text-accent" : undefined}>
-                  {v === "new" ? "+ New Chapter (paste)" : chapterLabel(v)}
-                </span>
-              )}
-              renderValue={(v) => v === "new" ? "New Chapter" : chapterLabel(v)}
-              maxHeight="198px"
-            />
-
             {chapterFetching && (
               <span className="text-[10px] text-ink-muted animate-pulse">Loading chapter…</span>
             )}
@@ -963,23 +976,6 @@ export default function ReviewPane() {
               <span className="text-[10px] text-ink-muted animate-pulse">Reading draft…</span>
             )}
 
-            {/* Draft-mode badge: this review runs against the manuscript
-                file, not the index — free to iterate, resync when done. */}
-            {draft && !draftLoading && (
-              <span
-                title={draft.in_sync
-                  ? "Reviewing the manuscript file directly; the index matches it."
-                  : "Reviewing the manuscript file directly — no ingest cost. Resync when the revision lands to update the index."}
-                className={clsx(
-                  "rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                  draft.in_sync
-                    ? "border-surface-border text-ink-muted"
-                    : "border-amber-400/40 bg-amber-400/10 text-amber-300"
-                )}
-              >
-                {draft.in_sync ? "Draft · in sync" : "Draft · not indexed"}
-              </span>
-            )}
 
             {/* Chapter preview toggle */}
             {selectedChapter !== null && selectedChapter !== "new" && (
@@ -1003,35 +999,57 @@ export default function ReviewPane() {
               </button>
             )}
 
-            {/* Ideal Version + Review + Resync buttons */}
+            {/* Settings · Resync · Review · Re-Index */}
             {filterBook && (
               <div className="ml-auto flex items-center gap-2">
-                {/* Ideal Version toggle — ON for the first review, auto-OFF
-                    for iteration rounds (it's the dominant output cost). */}
-                <div className="relative group/idealbtn">
+
+                {/* Settings cog — Ideal Version and other per-session options */}
+                <div ref={settingsRef} className="relative">
                   <button
-                    onClick={() => setIncludeIdeal((v) => !v)}
+                    onClick={() => setSettingsOpen((v) => !v)}
+                    title="Review settings"
                     className={clsx(
-                      "flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] transition-colors",
-                      includeIdeal
+                      "flex items-center justify-center rounded border p-1.5 transition-colors",
+                      settingsOpen || includeIdeal
                         ? "border-accent/40 bg-accent/10 text-accent"
                         : "border-surface-border bg-surface text-ink-muted hover:border-accent/50 hover:text-ink-secondary"
                     )}
                   >
-                    <Sparkles className="h-3 w-3" />
-                    Ideal Version
+                    <Settings2 className="h-3.5 w-3.5" />
                   </button>
-                  <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-60 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/idealbtn:opacity-100">
-                    {includeIdeal
-                      ? "The review will end with a full tracked-changes rewrite of the chapter. This is the most expensive part of a review — it turns off automatically after the first round."
-                      : "Reviews will quote and mark up only the passages that need work, not rewrite the whole chapter. Toggle on for a full tracked-changes rewrite."}
-                  </div>
+                  {settingsOpen && (
+                    <div className="absolute right-0 top-full z-50 mt-1 w-60 rounded-md border border-surface-border bg-surface-card shadow-lg overflow-hidden">
+                      <button
+                        onClick={() => setIncludeIdeal((v) => !v)}
+                        className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-hover"
+                      >
+                        <Sparkles className={clsx("mt-0.5 h-3.5 w-3.5 flex-shrink-0", includeIdeal ? "text-accent" : "text-ink-muted")} />
+                        <div className="flex-1 min-w-0">
+                          <p className={clsx("text-[11px] font-medium", includeIdeal ? "text-accent" : "text-ink-secondary")}>Ideal Version</p>
+                          <p className="mt-0.5 text-[10px] text-ink-muted leading-relaxed">
+                            {includeIdeal
+                              ? "Full tracked-changes rewrite on next review. Auto-disables after round 1."
+                              : "Only marks passages needing work. Toggle on for a full rewrite."}
+                          </p>
+                        </div>
+                        <div className={clsx(
+                          "mt-0.5 h-4 w-7 flex-shrink-0 rounded-full transition-colors",
+                          includeIdeal ? "bg-accent" : "bg-surface-border"
+                        )}>
+                          <div className={clsx(
+                            "mt-0.5 ml-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform",
+                            includeIdeal ? "translate-x-3" : "translate-x-0"
+                          )} />
+                        </div>
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                {/* Draft iteration: re-read the manuscript file and continue
-                    the same conversation with the updated text. */}
+                {/* Draft iteration: re-reads the latest export from Loom and
+                    continues the same conversation — no reindex needed. */}
                 {draft && messages.length > 0 && (
-                  <div className="relative group/updbtn">
+                  <div className="relative group/resyncdraft">
                     <button
                       onClick={handleSendUpdatedDraft}
                       disabled={isStreaming || draftLoading || resyncing}
@@ -1042,14 +1060,16 @@ export default function ReviewPane() {
                           : "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
                       )}
                     >
-                      <FileUp className="h-3 w-3" />
-                      Send Updated Draft
+                      <RotateCcw className="h-3 w-3" />
+                      Resync
                     </button>
-                    <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-60 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/updbtn:opacity-100">
-                      Re-reads your latest export from Loom and asks the reviewer to assess the changes against its earlier feedback — same conversation, no reindex.
+                    <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-64 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/resyncdraft:opacity-100">
+                      Re-reads your latest export from Loom and continues the conversation with the updated text — picks up any edits you made since the last review without starting over.
                     </div>
                   </div>
                 )}
+
+                {/* Review button */}
                 <div className="relative group/revbtn">
                   <button
                     onClick={handleReviewClick}
@@ -1068,22 +1088,37 @@ export default function ReviewPane() {
                     {`Send this chapter to your selected reviewer (${filterFocus}). The review streams into the chat below, grounded in earlier books for continuity.`}
                   </div>
                 </div>
-                <div className="relative group/resyncbtn">
+
+                {/* Re-Index: amber warning when draft is out of sync,
+                    disabled when already in sync, neutral when no draft. */}
+                <div className="relative group/reindexbtn">
                   <button
-                    onClick={() => { if (!resyncing) setResyncModalOpen(true); }}
-                    disabled={resyncing}
+                    onClick={() => {
+                      if (!resyncing && !(draft?.in_sync)) setResyncModalOpen(true);
+                    }}
+                    disabled={resyncing || (draft != null && draft.in_sync)}
                     className={clsx(
                       "flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] transition-colors",
                       resyncing
                         ? "border-surface-border text-ink-muted cursor-not-allowed"
+                        : draft != null && !draft.in_sync
+                        ? "border-amber-400/40 bg-amber-400/10 text-amber-300 hover:bg-amber-400/20"
+                        : draft != null && draft.in_sync
+                        ? "border-surface-border text-ink-muted/40 cursor-not-allowed"
                         : "border-surface-border bg-surface text-ink-secondary hover:border-accent/50 hover:text-ink-primary"
                     )}
                   >
                     <RefreshCw className={clsx("h-3 w-3", resyncing && "animate-spin")} />
-                    {resyncing ? "Syncing…" : "Resync"}
+                    {resyncing ? "Indexing…" : "Re-Index"}
                   </button>
-                  <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-60 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/resyncbtn:opacity-100">
-                    Pull your latest manuscript edits into the app: re-ingests this book (only changed chapters are processed), so the review sees your current text. Shows a cost estimate before running.
+                  <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-64 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/reindexbtn:opacity-100">
+                    {resyncing
+                      ? "Re-indexing in progress…"
+                      : draft?.in_sync
+                      ? "The index is up to date — no re-index needed."
+                      : draft != null
+                      ? "Chapter isn't indexed yet — click to re-ingest and make it searchable."
+                      : "Pull your latest manuscript edits into the app: re-ingests this book (only changed chapters processed) so the review sees your current text. Shows a cost estimate before running."}
                   </div>
                 </div>
               </div>
@@ -1225,6 +1260,40 @@ export default function ReviewPane() {
         </div>
           </div>{/* end footer */}
 
+          {/* Chapter preview — absolute overlay clipped to this column so
+              the citation panel on the right stays unaffected. */}
+          {previewOpen && selectedChapter !== null && selectedChapter !== "new" && filterBook && (
+            <div
+              className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+              onClick={() => setPreviewOpen(false)}
+            >
+              <div
+                className="h-[85vh] w-[min(860px,92vw)] overflow-hidden rounded-xl shadow-2xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ChapterViewer
+                  citation={{
+                    book: filterBook,
+                    chapter: selectedChapter as number,
+                    chapter_heading: String(selectedChapter),
+                    pov: "",
+                    date: null,
+                    chunk_index: 0,
+                    snippet: "",
+                    distance: 0,
+                  }}
+                  bookId={bookNameToId(filterBook)}
+                  lightMode={lightMode}
+                  onToggleLightMode={() => setLightMode((v) => !v)}
+                  onClose={() => setPreviewOpen(false)}
+                  syncing={resyncing}
+                  refreshToken={syncVersion}
+                  contentOverride={draft ? { text: draft.text, rich: draft.rich } : undefined}
+                />
+              </div>
+            </div>
+          )}
+
         </div>{/* end left column */}
 
         {/* Citation viewer panel */}
@@ -1247,39 +1316,6 @@ export default function ReviewPane() {
 
       </div>{/* end main content row */}
 
-      {/* Chapter preview — a modal (click outside or ✕ to close) so the
-          filter row and chat keep the full pane width. */}
-      {previewOpen && selectedChapter !== null && selectedChapter !== "new" && filterBook && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
-          onClick={() => setPreviewOpen(false)}
-        >
-          <div
-            className="h-[85vh] w-[min(860px,92vw)] overflow-hidden rounded-xl shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <ChapterViewer
-              citation={{
-                book: filterBook,
-                chapter: selectedChapter as number,
-                chapter_heading: String(selectedChapter),
-                pov: "",
-                date: null,
-                chunk_index: 0,
-                snippet: "",
-                distance: 0,
-              }}
-              bookId={bookNameToId(filterBook)}
-              lightMode={lightMode}
-              onToggleLightMode={() => setLightMode((v) => !v)}
-              onClose={() => setPreviewOpen(false)}
-              syncing={resyncing}
-              refreshToken={syncVersion}
-              contentOverride={draft ? { text: draft.text, rich: draft.rich } : undefined}
-            />
-          </div>
-        </div>
-      )}
 
     </div>
   );
