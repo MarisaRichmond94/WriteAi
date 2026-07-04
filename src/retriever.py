@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from .query_prep import expand_characters
 from .query_router import QueryPlan, Scope
@@ -105,10 +106,20 @@ class Retriever:
         self.cfg = cfg
         self.store = store
         self.embedder = embedder
+        self._reranker = None
 
     @property
     def db(self):
         return self.store.db
+
+    @property
+    def reranker(self):
+        """Lazy (mirrors server/deps.py): CLI queries that never rerank must
+        not pay the cross-encoder model load."""
+        if self._reranker is None:
+            from .reranker import Reranker
+            self._reranker = Reranker(self.cfg)
+        return self._reranker
 
     def _alias_map(self, names: list[str]) -> dict[str, list[str]]:
         """name -> grounded alias list; identity mapping unless
@@ -134,22 +145,30 @@ class Retriever:
 
     def _semantic(self, plan: QueryPlan, top_k: int | None = None) -> list[dict]:
         top_k = top_k or self.cfg.top_k_results
+        # over-fetch slightly so a post-hoc chapter filter can't starve us;
+        # the reranker wants a deeper pool to rescore (it reorders pool -> top_k)
+        pool_n = top_k * 2
+        if self.cfg.enable_reranker:
+            pool_n = max(self.cfg.rerank_candidates, top_k * 2)
         embedding = self.embedder.embed_query(plan.question)
-        # over-fetch slightly so a post-hoc chapter filter can't starve us
-        hits = self.store.semantic_search(embedding, top_k * 2,
+        hits = self.store.semantic_search(embedding, pool_n,
                                           where=_scope_chroma(plan.scope))
         # Keyword fusion only pays off on entity-bearing queries (eval: lookup
         # and temporal_knowledge improve; continuity/general regress because
         # BM25's literal matches dilute the semantic list on abstract wording).
         if (self.cfg.enable_hybrid_search
                 and plan.qtype in ("lookup", "temporal_knowledge")):
-            keyword_hits = self.store.keyword_search(plan.question, top_k * 2,
+            keyword_hits = self.store.keyword_search(plan.question, pool_n,
                                                      plan.scope)
-            hits = _rrf_fuse(hits, keyword_hits)
-        excerpts = []
+            hits = _rrf_fuse(hits, keyword_hits)  # also dedupes on chunk_id
+        keep = pool_n if self.cfg.enable_reranker else top_k
+        excerpts, seen = [], set()
         for h in hits:
             if not _within_scope(h["metadata"], plan.scope):
                 continue
+            if h["chunk_id"] in seen:
+                continue
+            seen.add(h["chunk_id"])
             m = h["metadata"]
             excerpts.append({"chunk_id": h["chunk_id"],
                              "header": _header(m),
@@ -160,9 +179,15 @@ class Retriever:
                              "chapter_number": m.get("chapter_number"),
                              "pov_character": m.get("pov_character"),
                              "distance": h.get("distance")})
-            if len(excerpts) >= top_k:
+            if len(excerpts) >= keep:
                 break
-        return excerpts
+        if self.cfg.enable_reranker and len(excerpts) > 1:
+            t0 = time.perf_counter()
+            n_candidates = len(excerpts)
+            excerpts = self.reranker.rerank(plan.question, excerpts, top_k)
+            log.debug("rerank: %d candidates -> top %d in %.1f ms",
+                      n_candidates, top_k, (time.perf_counter() - t0) * 1000)
+        return excerpts[:top_k]
 
     def _general(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
         return self._semantic(plan), []

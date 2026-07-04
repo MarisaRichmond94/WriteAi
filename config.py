@@ -69,6 +69,9 @@ class Config:
     confirm_before_ingest: bool
     enable_hybrid_search: bool
     enable_alias_resolution: bool
+    enable_reranker: bool
+    reranker_model: str
+    rerank_candidates: int
     extraction_use_batches: bool
     log_level: str
     cost_log_enabled: bool = True
@@ -144,6 +147,12 @@ def load_config(env_file: Path | None = None) -> Config:
         confirm_before_ingest=_get_bool("CONFIRM_BEFORE_INGEST", True),
         enable_hybrid_search=_get_bool("ENABLE_HYBRID_SEARCH", False),
         enable_alias_resolution=_get_bool("ENABLE_ALIAS_RESOLUTION", False),
+        enable_reranker=_get_bool("ENABLE_RERANKER", False),
+        # `or`, not a .get() default: a blank RERANKER_MODEL= line means
+        # "use the default" (same convention as EMBEDDING_MODEL)
+        reranker_model=(os.environ.get("RERANKER_MODEL")
+                        or "cross-encoder/ms-marco-MiniLM-L-6-v2"),
+        rerank_candidates=_get_int("RERANK_CANDIDATES", 80),
         extraction_use_batches=_get_bool("EXTRACTION_USE_BATCHES", False),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         cost_log_enabled=_get_bool("COST_LOG_ENABLED", True),
