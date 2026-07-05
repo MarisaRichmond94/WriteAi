@@ -107,17 +107,30 @@ def _normalize_quote_text(text: str) -> str:
 
 
 def quote_metrics(answer: str, excerpts: list[dict],
+                  notes: list[str] | None = None,
                   min_words: int = 4) -> tuple[int, float | None]:
     """(n_quotes, quote_precision): the double-quoted spans of >= min_words
     words in the answer, and the fraction that appear verbatim (whitespace-
-    normalized, case-sensitive) in the union of retrieved excerpt texts.
+    normalized, case-sensitive) in the retrieved context — excerpt texts AND
+    note lines (notes carry verbatim source_quotes the model may legitimately
+    quote). An ellipsis-spliced span ("A ... B") counts as verbatim when every
+    fragment of >= min_words is found — a standard quoting convention.
     quote_precision is None when the answer contains no qualifying quotes."""
     spans = [s for s in re.findall(r'"([^"]+)"', _normalize_quote_text(answer))
              if len(s.split()) >= min_words]
     if not spans:
         return 0, None
-    corpus = _normalize_quote_text("\n".join(e["text"] for e in excerpts))
-    matched = sum(1 for s in spans if s in corpus)
+    corpus = _normalize_quote_text(
+        "\n".join([e["text"] for e in excerpts] + list(notes or [])))
+
+    def found(span: str) -> bool:
+        if span in corpus:
+            return True
+        fragments = [f.strip() for f in span.split("...")
+                     if len(f.split()) >= min_words]
+        return bool(fragments) and all(f in corpus for f in fragments)
+
+    matched = sum(1 for s in spans if found(s))
     return len(spans), round(matched / len(spans), 4)
 
 
@@ -306,7 +319,7 @@ def main() -> int:
                 sum(1 for m in must if m.lower() in answer_text.lower()) / len(must)
                 if must else None)
             row["n_quotes"], row["quote_precision"] = \
-                quote_metrics(answer_text, excerpts)
+                quote_metrics(answer_text, excerpts, notes)
 
         per_item.append(row)
         print(f"[{n}/{len(items)}] {item['id']} "
