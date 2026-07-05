@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from src.costlog import log_cost, usage_diff
 from src.query_router import Scope, classify
 
 from ..deps import get_state
@@ -96,9 +98,15 @@ def chat_stream(req: ChatRequest):
         if req.mode == "alternate":
             extra_parts.append(ALTERNATE_EXTRA)
         extra = "\n\n".join(extra_parts)
+        u0, c0, t0 = dict(answerer.usage), answerer.actual_cost_usd, time.monotonic()
         for delta in answerer.answer_stream(plan, excerpts, notes,
                                             history=history, system_extra=extra):
             yield {"type": "chunk", "content": delta}
+        log_cost(s.cfg, surface="chat", model=answerer.model, qtype=plan.qtype,
+                 usage=usage_diff(answerer.usage, u0),
+                 cost_usd=round(answerer.actual_cost_usd - c0, 4),
+                 latency_ms=int((time.monotonic() - t0) * 1000),
+                 extra={"mode": req.mode})
         yield citations_payload(excerpts)
         u = answerer.usage
         yield {"type": "usage", "model": answerer.model,
@@ -107,6 +115,10 @@ def chat_stream(req: ChatRequest):
                "input_tokens": (u["input_tokens"] + u["cache_write_tokens"]
                                 + u["cache_read_tokens"]),
                "output_tokens": u["output_tokens"],
+               # cache breakdown so the UI (and anyone watching the SSE
+               # stream) can see whether the prompt cache is engaging
+               "cache_write_tokens": u["cache_write_tokens"],
+               "cache_read_tokens": u["cache_read_tokens"],
                "cost_usd": answerer.actual_cost_usd}
 
     return stream_response(generate())

@@ -16,6 +16,9 @@ frontend/dist/
 # Logs
 logs/
 
+# Eval run artifacts (JSON result files; compare with eval/compare.py)
+eval/results/
+
 # Python
 __pycache__/
 *.pyc

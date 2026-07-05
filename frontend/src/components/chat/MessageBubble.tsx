@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import type { Citation, Message } from "../../types";
+import { extractQuotedSpans } from "../../lib/quoteHighlight";
 import CitationCard from "./CitationCard";
 import StreamingIndicator from "./StreamingIndicator";
 
@@ -43,6 +44,13 @@ export default function MessageBubble({ message, onCitationClick, activeCitation
   // Assistant message
   const hasCitations = !message.isStreaming && !!message.citations && message.citations.length > 0;
   const [sourcesOpen, setSourcesOpen] = useState(false);
+
+  // Direct quotes in the final answer (ENABLE_DIRECT_QUOTES) exist verbatim
+  // in the excerpts — extract them once so each card can mark its own.
+  const answerQuotes = useMemo(
+    () => (message.isStreaming ? [] : extractQuotedSpans(message.content)),
+    [message.isStreaming, message.content]
+  );
 
   return (
     <div className="flex justify-start">
@@ -94,6 +102,7 @@ export default function MessageBubble({ message, onCitationClick, activeCitation
                     key={i}
                     citation={citation}
                     index={i + 1}
+                    answerQuotes={answerQuotes}
                     isSelected={!!activeCitation && citationKey(activeCitation) === citationKey(citation)}
                     onClick={() => onCitationClick(citation)}
                   />

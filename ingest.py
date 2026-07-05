@@ -7,6 +7,12 @@ Usage:
                                   #   no database writes
     python ingest.py --full       # ignore stored hashes, re-ingest everything
     python ingest.py --book 2     # limit the run to one book
+    python ingest.py --batches    # extract via the Message Batches API
+                                  #   (50% token pricing, up to 1h latency)
+    python ingest.py --re-extract # re-run LLM metadata extraction for every
+                                  #   in-scope chunk; chunk text, embeddings
+                                  #   and the hash index are reused (composes
+                                  #   with --batches)
 
 Source files under BOOKS_DIR are READ ONLY — all conversion happens on
 staged copies under DATA_DIR, which are removed at the end of the run.
@@ -36,7 +42,7 @@ from src.discovery import discover_books
 from src.extractor import estimate_extraction_cost
 from src.ingestion import (BookDiff, chunk_text_hash, clear_staging,
                            diff_chunks, ingest_chunks, load_and_chunk_book,
-                           load_hash_index, save_hash_index)
+                           load_hash_index, reextract_chunks, save_hash_index)
 
 log = logging.getLogger("ingest")
 
@@ -54,13 +60,26 @@ def main() -> int:
                     help="show what would be processed; no API calls or DB writes")
     ap.add_argument("--full", action="store_true",
                     help="ignore stored hashes and re-ingest everything")
+    ap.add_argument("--re-extract", dest="re_extract", action="store_true",
+                    help="re-run LLM metadata extraction for every in-scope "
+                         "chunk WITHOUT re-parsing/re-chunking/re-embedding "
+                         "chunk text (embeddings are reused from ChromaDB)")
     ap.add_argument("--book", type=int, default=None, help="only this book number")
+    ap.add_argument("--batches", action="store_true",
+                    help="extract via the Anthropic Message Batches API "
+                         "(50%% token pricing; results may take up to an hour)")
     ap.add_argument("--label", default="Sync",
                     help='notification label, e.g. --label "Nightly sync"')
     args = ap.parse_args()
+    if args.full and args.re_extract:
+        ap.error("--full and --re-extract are mutually exclusive "
+                 "(--full re-embeds everything; --re-extract deliberately "
+                 "reuses embeddings)")
 
     started = time.time()
     cfg = load_config()
+    if args.batches:  # CLI flag overrides EXTRACTION_USE_BATCHES on
+        cfg.extraction_use_batches = True
 
     # ── discovery + source-file gate ───────────────────────────────────────
     books = discover_books(cfg)
@@ -90,6 +109,17 @@ def main() -> int:
             continue  # logged; skip bad file, never crash
         diffs[b.number] = (b, chunks, diff_chunks(chunks, index, b.number))
 
+    if args.re_extract:
+        # Metadata-only rerun: every current chunk goes through extraction
+        # again, but chunk text/embeddings/hash index are reused. Deleted
+        # chunks are still detected and removed as usual.
+        print("\n--re-extract: re-running metadata extraction for every "
+              "in-scope chunk (chunk text, embeddings and chunk_hashes.json "
+              "are reused; no re-parsing, re-chunking, or re-embedding).")
+        for num in diffs:
+            _, chunks, d = diffs[num]
+            d.new, d.updated, d.unchanged = [], list(chunks), []
+
     changed = [c for _, _, d in diffs.values() for c in d.changed]
     deleted = [cid for _, _, d in diffs.values() for cid in d.deleted_ids]
     unchanged = sum(len(d.unchanged) for _, _, d in diffs.values())
@@ -107,6 +137,11 @@ def main() -> int:
           f"${est['estimated_cost_usd']} "
           f"({est['estimated_input_tokens']:,} in / "
           f"{est['estimated_output_tokens']:,} out tokens on {est['model']})")
+
+    if cfg.extraction_use_batches:
+        print("\nBatch mode is ON: extraction goes through the Anthropic "
+              "Message Batches API at 50% token pricing.\n"
+              "Results may take up to an hour to come back (typically much less).")
 
     if args.dry_run:
         print("\n--dry-run: stopping before any API calls or database writes.")
@@ -152,9 +187,12 @@ def main() -> int:
         print(f"\n== book {num}: {b.title} "
               f"({len(d.changed)} chunk(s) to process) ==")
         book_reports.append(f"{b.title} ({len(d.changed)} chunk(s))")
-        summary = ingest_chunks(cfg, d.changed, extractor, embedder, store)
+        ingest_fn = reextract_chunks if args.re_extract else ingest_chunks
+        summary = ingest_fn(cfg, d.changed, extractor, embedder, store)
         if d.deleted_ids:
             store.delete_chunks(d.deleted_ids)
+            if cfg.enable_note_ranking:
+                store.delete_notes_for_chunks(d.deleted_ids)
             print(f"  removed {len(d.deleted_ids)} stale chunk(s)")
 
         failed = set(summary.get("failed_chunk_ids", []))
@@ -182,8 +220,18 @@ def main() -> int:
     print(f"  unchanged: {unchanged}")
     print(f"  api calls: {u['api_calls']}  "
           f"({u['input_tokens']:,} in / {u['output_tokens']:,} out tokens)")
+    if u.get("batch_input_tokens") or u.get("batch_output_tokens"):
+        print(f"  via batches api (billed at 50%): "
+              f"{u['batch_input_tokens']:,} in / "
+              f"{u['batch_output_tokens']:,} out tokens")
     print(f"  actual cost: ${extractor.actual_cost_usd}")
     print(f"  elapsed: {elapsed/60:.1f} min")
+    from src.costlog import log_cost
+    log_cost(cfg, surface="ingest", model=extractor.model, usage=u,
+             cost_usd=extractor.actual_cost_usd,
+             latency_ms=int(elapsed * 1000),
+             extra={"api_calls": u["api_calls"], "chunks": len(changed),
+                    "failed_chunks": total_failed})
     failures = (f" {total_failed} chunk(s) failed and will retry next run."
                 if total_failed else "")
     _notify(f"{args.label} complete",

@@ -67,7 +67,19 @@ class Config:
     max_chunk_tokens: int
     top_k_results: int
     confirm_before_ingest: bool
+    enable_hybrid_search: bool
+    enable_alias_resolution: bool
+    enable_reranker: bool
+    reranker_model: str
+    rerank_candidates: int
+    extraction_use_batches: bool
     log_level: str
+    cost_log_enabled: bool = True
+    enable_prompt_cache_v2: bool = False
+    enable_note_ranking: bool = False
+    continuity_notes_cap: int = 0
+    enable_sentiment_v2: bool = False
+    enable_direct_quotes: bool = False
 
     # Derived data locations (all under data_dir; created on demand)
     staging_dir: Path = field(init=False)
@@ -137,7 +149,22 @@ def load_config(env_file: Path | None = None) -> Config:
         max_chunk_tokens=_get_int("MAX_CHUNK_TOKENS", 800),
         top_k_results=_get_int("TOP_K_RESULTS", 15),
         confirm_before_ingest=_get_bool("CONFIRM_BEFORE_INGEST", True),
+        enable_hybrid_search=_get_bool("ENABLE_HYBRID_SEARCH", False),
+        enable_alias_resolution=_get_bool("ENABLE_ALIAS_RESOLUTION", False),
+        enable_reranker=_get_bool("ENABLE_RERANKER", False),
+        # `or`, not a .get() default: a blank RERANKER_MODEL= line means
+        # "use the default" (same convention as EMBEDDING_MODEL)
+        reranker_model=(os.environ.get("RERANKER_MODEL")
+                        or "cross-encoder/ms-marco-MiniLM-L-6-v2"),
+        rerank_candidates=_get_int("RERANK_CANDIDATES", 80),
+        extraction_use_batches=_get_bool("EXTRACTION_USE_BATCHES", False),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+        cost_log_enabled=_get_bool("COST_LOG_ENABLED", True),
+        enable_prompt_cache_v2=_get_bool("ENABLE_PROMPT_CACHE_V2", False),
+        enable_note_ranking=_get_bool("ENABLE_NOTE_RANKING", False),
+        continuity_notes_cap=_get_int("CONTINUITY_NOTES_CAP", 0),
+        enable_sentiment_v2=_get_bool("ENABLE_SENTIMENT_V2", False),
+        enable_direct_quotes=_get_bool("ENABLE_DIRECT_QUOTES", False),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)
 

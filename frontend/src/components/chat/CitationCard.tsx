@@ -1,11 +1,16 @@
+import { useMemo } from "react";
 import { clsx } from "clsx";
 import type { Citation } from "../../types";
+import { findQuoteRanges, segmentByRanges } from "../../lib/quoteHighlight";
 
 interface Props {
   citation: Citation;
   index: number;
   isSelected: boolean;
   onClick: () => void;
+  // Double-quoted spans from the answer text; any that appear verbatim in
+  // this citation's snippet get highlighted on the card.
+  answerQuotes?: string[];
 }
 
 const POV_PALETTE = [
@@ -23,9 +28,17 @@ function povColor(pov: string) {
   return POV_PALETTE[hash % POV_PALETTE.length];
 }
 
-export default function CitationCard({ citation, index, isSelected, onClick }: Props) {
+export default function CitationCard({ citation, index, isSelected, onClick, answerQuotes }: Props) {
   const relevance = Math.max(0, Math.min(100, Math.round((1 - citation.distance) * 100)));
   const pov = citation.pov ? povColor(citation.pov) : null;
+
+  // Snippet segments with the answer's verbatim quotes marked; null when no
+  // quote lands in this snippet (the card then stays in its compact form).
+  const quotedSegments = useMemo(() => {
+    if (!answerQuotes?.length || !citation.snippet) return null;
+    const ranges = findQuoteRanges(citation.snippet, answerQuotes);
+    return ranges.length ? segmentByRanges(citation.snippet, ranges) : null;
+  }, [citation.snippet, answerQuotes]);
 
   return (
     <div
@@ -64,7 +77,22 @@ export default function CitationCard({ citation, index, isSelected, onClick }: P
               ` · "${citation.chapter_heading}"`}
           </p>
 
-          {/* Row 3: relevance bar */}
+          {/* Row 3 (optional): snippet with the answer's verbatim quote marked */}
+          {quotedSegments && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-ink-secondary">
+              {quotedSegments.map((seg, si) =>
+                seg.marked ? (
+                  <mark key={si} className="rounded-sm px-0.5 bg-yellow-300/25 text-ink-primary">
+                    {seg.text}
+                  </mark>
+                ) : (
+                  <span key={si}>{seg.text}</span>
+                )
+              )}
+            </p>
+          )}
+
+          {/* Row 4: relevance bar */}
           <div className="mt-1.5 flex items-center gap-2">
             <div className="h-0.5 w-16 rounded-full bg-surface-border overflow-hidden">
               <div

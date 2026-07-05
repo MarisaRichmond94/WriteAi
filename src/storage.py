@@ -18,6 +18,8 @@ import logging
 import re
 import sqlite3
 
+from .notes import pair_quotes
+
 log = logging.getLogger(__name__)
 
 _SCHEMA = """
@@ -58,25 +60,45 @@ CREATE INDEX IF NOT EXISTS idx_locations_name ON locations(name);
 CREATE INDEX IF NOT EXISTS idx_locations_chunk ON locations(chunk_id);
 
 CREATE TABLE IF NOT EXISTS character_knowledge (
-    chunk_id  TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
-    character TEXT NOT NULL,
-    learns    TEXT NOT NULL
+    chunk_id     TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+    character    TEXT NOT NULL,
+    learns       TEXT NOT NULL,
+    source_quote TEXT           -- verbatim manuscript sentence(s), if any
 );
 CREATE INDEX IF NOT EXISTS idx_knowledge_character ON character_knowledge(character);
 CREATE INDEX IF NOT EXISTS idx_knowledge_chunk ON character_knowledge(chunk_id);
 
 CREATE TABLE IF NOT EXISTS foreshadowing (
-    chunk_id TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
-    detail   TEXT NOT NULL
+    chunk_id     TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+    detail       TEXT NOT NULL,
+    source_quote TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_foreshadowing_chunk ON foreshadowing(chunk_id);
 
 CREATE TABLE IF NOT EXISTS unresolved_questions (
-    chunk_id TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
-    question TEXT NOT NULL
+    chunk_id     TEXT NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+    question     TEXT NOT NULL,
+    source_quote TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_questions_chunk ON unresolved_questions(chunk_id);
+
+-- BM25 keyword index over chunk text (external content: rows shadow `chunks`).
+CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
+    USING fts5(text, content='chunks', content_rowid='rowid');
 """
+
+
+def migrate_schema(db: sqlite3.Connection) -> None:
+    """Idempotent post-DDL migrations for stores created before a column
+    existed (CREATE TABLE IF NOT EXISTS never alters an existing table).
+    Guarded by pragma_table_info so re-running is a no-op; nullable columns
+    only, so old rows stay readable and old queries keep working."""
+    for table in ("foreshadowing", "unresolved_questions", "character_knowledge"):
+        cols = {row[1] for row in
+                db.execute(f"SELECT * FROM pragma_table_info('{table}')")}
+        if "source_quote" not in cols:
+            log.info("migrating %s: adding source_quote column", table)
+            db.execute(f"ALTER TABLE {table} ADD COLUMN source_quote TEXT")
 
 
 def slugify(name: str) -> str:
@@ -91,10 +113,21 @@ class SeriesStore:
 
         cfg.ensure_data_dirs()
         self._chroma = chromadb.PersistentClient(path=str(cfg.chroma_dir))
+        self._collection_name = slugify(cfg.series_name)
         self.collection = self._chroma.get_or_create_collection(
-            name=slugify(cfg.series_name),
+            name=self._collection_name,
             metadata={"hnsw:space": "cosine"},
         )
+        self._notes_collection = None  # companion notes index; created lazily
+        # Exhaustive-depth vector search: at this corpus scale (~1.4k chunks)
+        # an ef_search beyond the collection size makes HNSW queries exact AND
+        # deterministic across processes (chroma 1.x's approximate path flips
+        # near-tie ranks per process, which breaks eval gating) at sub-ms cost.
+        # Idempotent: modify() only runs when the stored value is lower.
+        # Revisit if the corpus outgrows ~10k chunks.
+        hnsw_cfg = (self.collection.configuration_json or {}).get("hnsw") or {}
+        if hnsw_cfg.get("ef_search", 0) < 2000:
+            self.collection.modify(configuration={"hnsw": {"ef_search": 2000}})
         # One SQLite connection per thread: the web server calls this from a
         # threadpool, and sharing a single connection across threads
         # interleaves cursors. SQLite coordinates between connections.
@@ -102,7 +135,22 @@ class SeriesStore:
         self._cfg_path = cfg.sqlite_path
         self._local = threading.local()
         self.db.executescript(_SCHEMA)
+        migrate_schema(self.db)
+        self._backfill_fts()
         self.db.commit()
+
+    def _backfill_fts(self) -> None:
+        """One-time idempotent index build for stores created before chunks_fts
+        existed. New/updated rows are kept in sync by the write paths.
+
+        NB: on an external-content FTS5 table, `COUNT(*) FROM chunks_fts` reads
+        through to the content table, so the real index size must come from the
+        chunks_fts_docsize shadow table (one row per indexed document)."""
+        n_fts = self.db.execute("SELECT COUNT(*) FROM chunks_fts_docsize").fetchone()[0]
+        n_chunks = self.db.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+        if n_fts == 0 and n_chunks > 0:
+            log.info("building chunks_fts index for %d existing chunks", n_chunks)
+            self.db.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
 
     @property
     def db(self) -> sqlite3.Connection:
@@ -129,6 +177,12 @@ class SeriesStore:
         if not chunk_ids:
             return
         self.collection.delete(ids=chunk_ids)
+        # External-content FTS rows must be removed via the special 'delete'
+        # insert form, with the old rowid+text, BEFORE the source row goes.
+        self.db.executemany(
+            """INSERT INTO chunks_fts(chunks_fts, rowid, text)
+               SELECT 'delete', rowid, text FROM chunks WHERE chunk_id = ?""",
+            [(cid,) for cid in chunk_ids])
         self.db.executemany("DELETE FROM chunks WHERE chunk_id = ?",
                             [(cid,) for cid in chunk_ids])
         self.db.commit()
@@ -165,6 +219,123 @@ class SeriesStore:
             hits.append({"chunk_id": cid, "text": doc, "metadata": meta,
                          "distance": dist})
         return hits
+
+    def keyword_search(self, query_text: str, n: int, scope=None) -> list[dict]:
+        """BM25 keyword search over chunk text via FTS5.
+
+        Returns hits in the same shape as semantic_search ({chunk_id, text,
+        metadata, distance}); distance is None (it is a vector-space notion),
+        the BM25 score is exposed under 'bm25'. `scope` is an optional object
+        with book_min/book_max attributes (see query_router.Scope) — the same
+        book-level bound _scope_chroma applies to the vector path; finer
+        chapter bounds are the caller's post-hoc filter, as for Chroma.
+        """
+        match = self._fts_match_query(query_text)
+        if not match:
+            return []
+        clauses, params = ["chunks_fts MATCH ?"], [match]
+        if scope is not None:
+            if getattr(scope, "book_min", None) is not None:
+                clauses.append("c.book_number >= ?")
+                params.append(scope.book_min)
+            if getattr(scope, "book_max", None) is not None:
+                clauses.append("c.book_number <= ?")
+                params.append(scope.book_max)
+        try:
+            rows = self.db.execute(
+                f"""SELECT c.chunk_id, c.text, c.book_number, c.book_title,
+                           c.chapter_number, c.pov_character, c.date_line,
+                           bm25(chunks_fts) AS score
+                    FROM chunks_fts JOIN chunks c ON c.rowid = chunks_fts.rowid
+                    WHERE {' AND '.join(clauses)}
+                    ORDER BY bm25(chunks_fts), c.chunk_id
+                    LIMIT ?""",
+                [*params, n]).fetchall()
+        except sqlite3.OperationalError as e:  # pathological query text
+            log.warning("keyword_search failed for %r: %s", query_text, e)
+            return []
+        return [{"chunk_id": cid, "text": text,
+                 "metadata": {"book_number": bn, "book_title": bt,
+                              "chapter_number": ch, "pov_character": pov,
+                              "date_line": dl},
+                 "distance": None, "bm25": score}
+                for cid, text, bn, bt, ch, pov, dl, score in rows]
+
+    @staticmethod
+    def _fts_match_query(query_text: str) -> str:
+        """Recall-oriented MATCH expression: each token individually quoted
+        (disabling FTS5 operator syntax), joined with OR."""
+        tokens = [t.replace('"', "") for t in query_text.split()]
+        tokens = [t for t in tokens if any(c.isalnum() for c in t)]
+        return " OR ".join(f'"{t}"' for t in tokens)
+
+    # ── continuity-notes vector index ───────────────────────────────────────
+    # A second Chroma collection holding one embedded document per
+    # foreshadowing/unresolved-question row, rendered exactly as the
+    # retriever's note lines (see src/notes.py). Only touched when
+    # ENABLE_NOTE_RANKING is on (query path) or the backfill script runs —
+    # created lazily so flag-off runs never write to the shared data dir.
+
+    @property
+    def notes(self):
+        if self._notes_collection is None:
+            self._notes_collection = self._chroma.get_or_create_collection(
+                name=f"{self._collection_name[:57]}-notes",
+                metadata={"hnsw:space": "cosine"},
+            )
+            # Same exhaustive-search determinism trick as the chunk collection
+            # above, sized for the larger note corpus (~7k rows today).
+            # Revisit if the note count outgrows ~10k.
+            hnsw_cfg = (self._notes_collection.configuration_json or {}).get("hnsw") or {}
+            if hnsw_cfg.get("ef_search", 0) < 10000:
+                self._notes_collection.modify(
+                    configuration={"hnsw": {"ef_search": 10000}})
+        return self._notes_collection
+
+    def notes_count(self) -> int:
+        return self.notes.count()
+
+    def upsert_notes(self, note_docs: list[dict]) -> None:
+        """note_docs: [{id, text, embedding, metadata}] where metadata is
+        {kind, book_number, chapter_number, chunk_id}. Ids are deterministic
+        (src/notes.py), so re-upserting the same rows is idempotent."""
+        # collapse duplicate ids within the batch (Chroma rejects them)
+        note_docs = list({d["id"]: d for d in note_docs}.values())
+        for i in range(0, len(note_docs), 100):
+            batch = note_docs[i:i + 100]
+            self.notes.upsert(ids=[d["id"] for d in batch],
+                              embeddings=[d["embedding"] for d in batch],
+                              documents=[d["text"] for d in batch],
+                              metadatas=[d["metadata"] for d in batch])
+
+    def delete_notes_for_chunks(self, chunk_ids: list[str]) -> None:
+        """Drop every note vector belonging to these chunks (called before
+        re-upserting a changed chunk's notes, and when chunks are deleted)."""
+        if chunk_ids:
+            self.notes.delete(where={"chunk_id": {"$in": chunk_ids}})
+
+    def note_search(self, query_embedding: list[float], n: int,
+                    where: dict | None = None) -> list[tuple[str, dict]]:
+        """Top-n notes by cosine similarity: [(note line text, metadata)]."""
+        result = self.notes.query(query_embeddings=[query_embedding],
+                                  n_results=n, where=where,
+                                  include=["documents", "metadatas"])
+        return list(zip(result["documents"][0], result["metadatas"][0]))
+
+    def get_embeddings(self, chunk_ids: list[str]) -> dict[str, list]:
+        """Stored chunk vectors, by id. Used by `ingest.py --re-extract` to
+        re-run metadata extraction WITHOUT re-embedding unchanged chunk text.
+        Ids missing from the collection are simply absent from the result."""
+        out: dict[str, list] = {}
+        for i in range(0, len(chunk_ids), 100):
+            res = self.collection.get(ids=chunk_ids[i:i + 100],
+                                      include=["embeddings"])
+            embeddings = res.get("embeddings")
+            if embeddings is None:
+                continue
+            for cid, emb in zip(res["ids"], embeddings):
+                out[cid] = emb
+        return out
 
     def chunks_with_character(self, name: str) -> list[sqlite3.Row]:
         self.db.row_factory = sqlite3.Row
@@ -218,7 +389,13 @@ class SeriesStore:
         cur = self.db.cursor()
         for r in records:
             chunk, meta = r["chunk"], r["metadata"] or {}
-            # delete-then-insert keeps the side tables consistent (CASCADE)
+            # delete-then-insert keeps the side tables consistent (CASCADE);
+            # the FTS shadow row must be dropped first (external-content
+            # 'delete' form needs the old rowid+text) and re-added after.
+            cur.execute(
+                """INSERT INTO chunks_fts(chunks_fts, rowid, text)
+                   SELECT 'delete', rowid, text FROM chunks WHERE chunk_id = ?""",
+                (chunk.chunk_id,))
             cur.execute("DELETE FROM chunks WHERE chunk_id = ?", (chunk.chunk_id,))
             cur.execute(
                 """INSERT INTO chunks (chunk_id, book_number, book_title,
@@ -233,21 +410,32 @@ class SeriesStore:
                  meta.get("timeline_position"), chunk.text, r["text_hash"],
                  json.dumps(meta, ensure_ascii=False) if meta else None),
             )
+            cur.execute("INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)",
+                        (cur.lastrowid, chunk.text))
             cur.executemany(
                 "INSERT INTO characters (chunk_id, name) VALUES (?, ?)",
                 [(chunk.chunk_id, n) for n in meta.get("characters_present", [])])
             cur.executemany(
                 "INSERT INTO locations (chunk_id, name) VALUES (?, ?)",
                 [(chunk.chunk_id, n) for n in meta.get("locations", [])])
+            # quote lists ride alongside the value lists in the metadata,
+            # index-aligned (pair_quotes pads with None for pre-quote metadata)
+            knowledge_quotes = meta.get("character_knowledge_quotes") or {}
             cur.executemany(
-                "INSERT INTO character_knowledge (chunk_id, character, learns) VALUES (?, ?, ?)",
-                [(chunk.chunk_id, ch, fact)
+                "INSERT INTO character_knowledge (chunk_id, character, learns, source_quote)"
+                " VALUES (?, ?, ?, ?)",
+                [(chunk.chunk_id, ch, fact, quote)
                  for ch, facts in meta.get("character_knowledge_updates", {}).items()
-                 for fact in facts])
+                 for fact, quote in pair_quotes(facts, knowledge_quotes.get(ch))])
             cur.executemany(
-                "INSERT INTO foreshadowing (chunk_id, detail) VALUES (?, ?)",
-                [(chunk.chunk_id, d) for d in meta.get("foreshadowing", [])])
+                "INSERT INTO foreshadowing (chunk_id, detail, source_quote) VALUES (?, ?, ?)",
+                [(chunk.chunk_id, d, quote)
+                 for d, quote in pair_quotes(meta.get("foreshadowing", []),
+                                             meta.get("foreshadowing_quotes"))])
             cur.executemany(
-                "INSERT INTO unresolved_questions (chunk_id, question) VALUES (?, ?)",
-                [(chunk.chunk_id, q) for q in meta.get("unresolved_questions", [])])
+                "INSERT INTO unresolved_questions (chunk_id, question, source_quote)"
+                " VALUES (?, ?, ?)",
+                [(chunk.chunk_id, q, quote)
+                 for q, quote in pair_quotes(meta.get("unresolved_questions", []),
+                                             meta.get("unresolved_question_quotes"))])
         self.db.commit()
