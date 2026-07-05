@@ -337,6 +337,10 @@ export interface ReviewSession {
   focus: ReviewFocus;
   messages: ReviewMessage[];
   timestamp: Date;
+  /** review ran on a fresh manuscript read (Loom draft), not the index */
+  draft?: boolean;
+  /** the pasted text of a "new"-chapter review, so restore can resume it */
+  chapterText?: string;
 }
 
 export type PhaseStatus = "idle" | "running" | "success" | "failed" | "skipped";

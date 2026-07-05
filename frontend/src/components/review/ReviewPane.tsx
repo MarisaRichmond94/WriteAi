@@ -443,8 +443,9 @@ export default function ReviewPane() {
   // Fetch chapter text when a synced chapter is selected. Draft mode owns
   // the text instead — the index copy would stomp the fresh manuscript read.
   useEffect(() => {
-    if (draft) return;
-    if (selectedChapter === null || selectedChapter === "new" || !selectedBookObj) {
+    if (draft || draftLoading) return;   // a manuscript read owns (or is about to own) the text
+    if (selectedChapter === "new") return;  // the paste box owns the text (cleared on manual switch)
+    if (selectedChapter === null || !selectedBookObj) {
       setChapterText("");
       return;
     }
@@ -454,7 +455,7 @@ export default function ReviewPane() {
       .then(setChapterText)
       .catch(() => setChapterText(""))
       .finally(() => setChapterFetching(false));
-  }, [selectedChapter, selectedBookObj, syncVersion, draft]);
+  }, [selectedChapter, selectedBookObj, syncVersion, draft, draftLoading]);
 
   // Read the chapter's current text from the manuscript file on disk.
   // Content-hash cached server-side: only the first read after a fresh
@@ -571,6 +572,16 @@ export default function ReviewPane() {
     setPreviewOpen(false);
     setActiveCitation(null);
     setDraft(null);
+    // Re-acquire the reviewed text so follow-ups work after a refresh:
+    // pasted chapters restore their saved text; draft reviews re-read the
+    // manuscript file (fresh — "re-pulls the latest version"); synced
+    // chapters are handled by the index-fetch effect.
+    if (session.chapter === "new") {
+      setChapterText(session.chapterText ?? "");
+    } else if (session.draft) {
+      const b = books.find((x) => x.name === session.book);
+      if (b) loadDraft(String(b.id), session.chapter);
+    }
     resetCostControls();
   }, [viewingReviewSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -604,6 +615,8 @@ export default function ReviewPane() {
       focus: filterFocus,
       messages: msgs.map((m) => ({ ...m, isStreaming: false })),
       timestamp: new Date(),
+      draft: !!draft,
+      ...(selectedChapter === "new" && chapterText ? { chapterText } : {}),
     };
     upsertReview(session);
   }, [isStreaming]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -694,6 +707,8 @@ export default function ReviewPane() {
       focus: filterFocus,
       messages: newMessages.map((m) => ({ ...m, isStreaming: false })),
       timestamp: new Date(),
+      draft: !!draft,
+      ...(selectedChapter === "new" && reviewText ? { chapterText: reviewText } : {}),
     });
 
     const history = messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
@@ -943,7 +958,7 @@ export default function ReviewPane() {
               value={selectedChapter === null ? "" : (selectedChapter as number | "new")}
               options={chapterDropdownOptions}
               placeholder={filterBook ? "Select chapter…" : "Select a book first"}
-              onChange={(v) => { setSelectedChapter(v); setDraft(null); setMessages([]); setPreviewOpen(false); setActiveCitation(null); setViewingReviewSessionId(null); activeSessionIdRef.current = null; resetCostControls(); }}
+              onChange={(v) => { setSelectedChapter(v); setChapterText(""); setDraft(null); setMessages([]); setPreviewOpen(false); setActiveCitation(null); setViewingReviewSessionId(null); activeSessionIdRef.current = null; resetCostControls(); }}
               renderOption={(v) => (
                 <span className={v === "new" ? "text-accent" : undefined}>
                   {v === "new" ? "+ New Chapter (paste)" : chapterLabel(v)}
