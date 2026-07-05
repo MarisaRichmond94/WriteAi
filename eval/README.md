@@ -71,7 +71,7 @@ scope diversity and alias coverage), with each item checked so that:
 2. the expected chunk text actually contains/supports the answer,
 3. the question reads as natural author-phrased English,
 4. scopes mix single-book (35), multi-book (2), and whole-series (3) items,
-5. 4 items are tagged `alias` (tk-008, lk-006, lk-007, lk-008).
+5. 3 items are tagged `alias` (tk-008, lk-006, lk-007).
 
 Known data quirks accounted for during curation:
 
@@ -83,6 +83,37 @@ Known data quirks accounted for during curation:
   items list both chunks.
 - Raw location tags vary ("cemetery" vs "Dead Falls Cemetery"); `location_map`
   was used to union variants where they refer to the same place.
+
+## Re-curation log (2026-07-04)
+
+The original expectations were curated against an old extraction snapshot;
+after two re-extractions, several sentiment/alias items encoded extraction
+artifacts instead of prose ground truth. Rule applied for this pass: an
+`expected_chunk_id` is valid ONLY if the chunk's PROSE (`chunks.text`)
+contains the evidence the question asks about — metadata plays no role in
+validity. Every change is justified in the item's `notes` field.
+
+- **sn-004**: dropped `b03.c007.s01.k03` (zero Quinn mentions in prose —
+  stale scene-level tag); widened to 5 prose-verified Jared→Quinn chunks
+  (c007 k04/k05, c019.k03, c027.k02, c039.k01).
+- **sn-007**: widened from 1 to 6 prose-verified Noah→Bri chunks
+  (c006 k00/k01, c016.k02, c017.k00, c020.k00, c060.k00).
+- **sn-008**: series-wide question widened from 3 to 9 prose-verified
+  Noah→Jared chunks spanning all five books.
+- **sn-001, sn-003**: prose re-verified, kept unchanged (sn-003's evidence
+  sits late in the chunk; retrieval missing it is not a curation defect).
+- **tk-008, lk-006, lk-007**: questions flipped to the FULL name
+  ("Emma Mendoza", "Cat Kissinger", "Brielle Draper"). SQL `LIKE '%short%'`
+  already substring-matches the full form, so the original short-name
+  questions never exercised alias expansion; the full→short direction does
+  (bare "Emma"/"Cat"/"Bri*" metadata rows are only reachable via expansion).
+  tk-008's expected set was rebuilt from prose (the old backing knowledge row
+  disappeared in re-extraction); lk-007's set was re-derived from prose
+  presence; lk-006's ids were prose-confirmed unchanged.
+- **lk-008**: Cat Kissinger never appears on-page in book 2, so "appears"
+  became "is mentioned" and the set was rebuilt from prose mentions; `alias`
+  tag removed — book-2 rows carry only the full form, so neither question
+  direction can exercise alias expansion in this book.
 
 ## Regenerating and verifying
 
