@@ -412,6 +412,7 @@ export default function ReviewPane() {
   // Follow the stream only while the reader is at the bottom — scrolling up
   // mid-stream stops the auto-scroll; returning to the bottom resumes it.
   const stickToBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activeSessionIdRef = useRef<string | null>(null);
   const messagesRef = useRef<ReviewMessage[]>(messages);
@@ -631,7 +632,9 @@ export default function ReviewPane() {
   const handleMessagesScroll = () => {
     const el = messagesScrollRef.current;
     if (!el) return;
-    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stickToBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
   };
 
   // Close model dropdown on outside click
@@ -691,6 +694,7 @@ export default function ReviewPane() {
     setInputValue("");
     setIsStreaming(true);
     stickToBottomRef.current = true; // a fresh send always jumps to the reply
+    setIsAtBottom(true);
     if (textareaRef.current) textareaRef.current.style.height = "auto";
 
     // Immediately create/update the history entry so it appears in the sidebar right away
@@ -1159,46 +1163,53 @@ export default function ReviewPane() {
 
           {/* Message list — 16px margins keep a fixed gap to the filter row
               above and the input footer below even mid-scroll. */}
-          <div ref={messagesScrollRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto px-6 my-4">
-            {messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
-                <ClipboardCheck className="h-8 w-8 text-ink-muted/40" strokeWidth={1} />
-                <div>
-                  <p className="text-sm font-medium text-ink-secondary">
-                    {chapterText ? "Ready to review" : "Select a chapter to begin"}
-                  </p>
-                  <p className="mt-1 text-xs text-ink-muted">
-                    {chapterText
-                      ? `Click Review or ask a specific question below`
-                      : "Choose a book, focus, and chapter above, then ask for feedback."}
-                  </p>
-                </div>
-                {chapterText && (
-                  <div className="flex flex-wrap justify-center gap-2 max-w-sm">
-                    {SUGGESTIONS.map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => setInputValue(s)}
-                        disabled={isStreaming}
-                        className="rounded-full border border-surface-border bg-surface px-3 py-1 text-[11px] text-ink-secondary transition-colors hover:border-accent/50 hover:text-ink-primary"
-                      >
-                        "{s}"
-                      </button>
-                    ))}
+          <div className="relative flex-1 min-h-0">
+            <div ref={messagesScrollRef} onScroll={handleMessagesScroll} className="absolute inset-0 overflow-y-auto px-6 my-4">
+              {messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full gap-4 text-center">
+                  <ClipboardCheck className="h-8 w-8 text-ink-muted/40" strokeWidth={1} />
+                  <div>
+                    <p className="text-sm font-medium text-ink-secondary">
+                      {chapterText ? "Ready to review" : "Select a chapter to begin"}
+                    </p>
+                    <p className="mt-1 text-xs text-ink-muted">
+                      {chapterText
+                        ? `Click Review or ask a specific question below`
+                        : "Choose a book, focus, and chapter above, then ask for feedback."}
+                    </p>
                   </div>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {messages.map((m) => (
-                  <ReviewBubble
-                    key={m.id}
-                    message={m}
-                    onCitationClick={(c) => { setPreviewOpen(false); setActiveCitation(c); }}
-                    activeCitation={activeCitation}
-                  />
-                ))}
-                <div ref={messagesEndRef} />
+                  {chapterText && (
+                    <div className="flex flex-wrap justify-center gap-2 max-w-sm">
+                      {SUGGESTIONS.map((s) => (
+                        <button
+                          key={s}
+                          onClick={() => setInputValue(s)}
+                          disabled={isStreaming}
+                          className="rounded-full border border-surface-border bg-surface px-3 py-1 text-[11px] text-ink-secondary transition-colors hover:border-accent/50 hover:text-ink-primary"
+                        >
+                          "{s}"
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {messages.map((m) => (
+                    <ReviewBubble
+                      key={m.id}
+                      message={m}
+                      onCitationClick={(c) => { setPreviewOpen(false); setActiveCitation(c); }}
+                      activeCitation={activeCitation}
+                    />
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
+            </div>
+            {isStreaming && !isAtBottom && (
+              <div className="absolute bottom-4 right-6 z-10 rounded-full bg-surface-card/90 p-1.5 shadow-lg border border-surface-border">
+                <Loader2 className="h-4 w-4 animate-spin text-accent" />
               </div>
             )}
           </div>

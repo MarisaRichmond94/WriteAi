@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppStore } from "../../store/useAppStore";
 import MessageBubble from "./MessageBubble";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Loader2 } from "lucide-react";
 import type { Citation } from "../../types";
 
 interface Props {
@@ -10,11 +10,22 @@ interface Props {
 }
 
 export default function MessageList({ onCitationClick, activeCitation }: Props) {
-  const { messages } = useAppStore();
+  const { messages, isStreaming } = useAppStore();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const isAtBottomRef = useRef(true);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+
+  const handleScroll = () => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    isAtBottomRef.current = atBottom;
+    setIsAtBottom(atBottom);
+  };
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (isAtBottomRef.current) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   if (messages.length === 0) {
@@ -36,16 +47,23 @@ export default function MessageList({ onCitationClick, activeCitation }: Props) 
   }
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-4">
-      {messages.map((message) => (
-        <MessageBubble
-          key={message.id}
-          message={message}
-          onCitationClick={onCitationClick}
-          activeCitation={activeCitation}
-        />
-      ))}
-      <div ref={bottomRef} />
+    <div className="relative flex-1 min-h-0">
+      <div ref={scrollContainerRef} onScroll={handleScroll} className="absolute inset-0 overflow-y-auto px-4 py-4 flex flex-col gap-4">
+        {messages.map((message) => (
+          <MessageBubble
+            key={message.id}
+            message={message}
+            onCitationClick={onCitationClick}
+            activeCitation={activeCitation}
+          />
+        ))}
+        <div ref={bottomRef} />
+      </div>
+      {isStreaming && !isAtBottom && (
+        <div className="absolute bottom-4 right-4 z-10 rounded-full bg-surface-card/90 p-1.5 shadow-lg border border-surface-border">
+          <Loader2 className="h-4 w-4 animate-spin text-accent" />
+        </div>
+      )}
     </div>
   );
 }

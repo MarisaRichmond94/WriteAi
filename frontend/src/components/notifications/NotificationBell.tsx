@@ -42,6 +42,7 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const [prevUnread, setPrevUnread] = useState(0);
   const [pulse, setPulse] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { setActivePane, bellRefreshSignal } = useAppStore();
 
@@ -195,9 +196,24 @@ export default function NotificationBell() {
                       <p className="mt-0.5 text-xs font-medium text-ink-primary leading-snug">
                         {n.title}
                       </p>
-                      <p className="mt-0.5 text-[11px] text-ink-muted leading-snug line-clamp-2">
+                      <p className={clsx("mt-0.5 text-[11px] text-ink-muted leading-snug", !expanded.has(n.id) && "line-clamp-2")}>
                         {n.body}
                       </p>
+                      {n.body && n.body.length > 80 && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpanded((prev) => {
+                              const next = new Set(prev);
+                              next.has(n.id) ? next.delete(n.id) : next.add(n.id);
+                              return next;
+                            });
+                          }}
+                          className="mt-0.5 text-[10px] font-semibold text-accent hover:underline"
+                        >
+                          {expanded.has(n.id) ? "Show less" : "Show more"}
+                        </button>
+                      )}
                       <div className="mt-1.5 flex items-center gap-2">
                         <span className="text-[10px] text-ink-muted">
                           {formatRelative(n.created_at)}
