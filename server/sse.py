@@ -43,7 +43,8 @@ def stream_response(generator) -> StreamingResponse:
 def citations_payload(excerpts: list[dict]) -> dict:
     """Citation shape the UI's citation cards render: book name, chapter,
     POV, snippet, distance (plus chunk_id so the source viewer can open the
-    exact passage)."""
+    exact passage). `text` carries the full chunk so the card can quote-match
+    and sentence-snap; `snippet` stays as the legacy 220-char prefix."""
     sources = []
     for e in excerpts:
         chunk_index = 0
@@ -61,6 +62,7 @@ def citations_payload(excerpts: list[dict]) -> dict:
             "date": None,
             "chunk_index": chunk_index,
             "snippet": (e.get("text") or "")[:220],
+            "text": e.get("text") or "",
             "distance": e.get("distance") if e.get("distance") is not None else 0.5,
             "chunk_id": e.get("chunk_id"),
         })

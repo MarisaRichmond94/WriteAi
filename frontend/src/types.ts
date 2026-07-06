@@ -10,6 +10,8 @@ export interface Citation {
   date?: string | null;
   chunk_index: number;
   snippet: string;
+  /** Full chunk text (superset of snippet); optional for synthetic citations. */
+  text?: string;
   distance: number;
 }
 

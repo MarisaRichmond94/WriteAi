@@ -31,6 +31,7 @@ import re
 import time
 
 from .chunker import Chunk
+from .quotesnap import normalize_quote, snap_quote_to_sentences
 
 log = logging.getLogger(__name__)
 
@@ -143,16 +144,9 @@ OUTPUT_SCHEMA = {
 
 # Light normalization for verbatim-quote verification: models straighten curly
 # quotes/apostrophes and collapse whitespace when copying; the words themselves
-# must still match exactly.
-_QUOTE_CHAR_MAP = str.maketrans({
-    "‘": "'", "’": "'",     # curly single quotes / apostrophes
-    "“": '"', "”": '"',     # curly double quotes
-    "…": "...",                  # ellipsis character
-})
-
-
-def _normalize_quote(s: str) -> str:
-    return re.sub(r"\s+", " ", s.translate(_QUOTE_CHAR_MAP)).strip()
+# must still match exactly. Shared with the sentence-snapping module so the
+# verifier, the snapper, and scripts/snap_quote_sentences.py can never drift.
+_normalize_quote = normalize_quote
 
 
 def _split_items(raw, key: str) -> tuple[list[str], list[str | None]]:
@@ -422,17 +416,20 @@ class MetadataExtractor:
         return (self._extract_batch(batch[:mid], depth + 1)
                 + self._extract_batch(batch[mid:], depth + 1))
 
-    def _verify_quotes(self, quotes: list[str | None],
+    def _verify_quotes(self, quotes: list[str | None], chunk_text: str,
                        normalized_chunk_text: str) -> list[str | None]:
         """Keep a source_quote only when it is a true substring of the chunk
         text (after light normalization on both sides); fabricated quotes are
-        nulled and counted — a bad quote NEVER fails the chunk."""
+        nulled and counted — a bad quote NEVER fails the chunk. Verified
+        quotes are then snapped to their enclosing sentence boundaries
+        (src/quotesnap.py) so they never start or stop mid-sentence — the
+        snapped text is a literal slice of the chunk, so it stays verbatim."""
         out: list[str | None] = []
         for q in quotes:
             if q is None:
                 out.append(None)
             elif _normalize_quote(q) in normalized_chunk_text:
-                out.append(q)
+                out.append(snap_quote_to_sentences(q, chunk_text))
                 self.quote_stats["kept"] += 1
             else:
                 out.append(None)
@@ -457,7 +454,7 @@ class MetadataExtractor:
             if facts:
                 knowledge[entry["character"]] = facts
                 knowledge_quotes[entry["character"]] = self._verify_quotes(
-                    fact_quotes, norm_text)
+                    fact_quotes, chunk.text, norm_text)
         return {
             # structural (from the chunker — exact, free)
             "chunk_id": chunk.chunk_id,
@@ -485,7 +482,10 @@ class MetadataExtractor:
             # (None where the model gave no quote or the quote failed the
             # verbatim check)
             "character_knowledge_quotes": knowledge_quotes,
-            "emotional_beat_quotes": self._verify_quotes(beat_quotes, norm_text),
-            "foreshadowing_quotes": self._verify_quotes(fs_quotes, norm_text),
-            "unresolved_question_quotes": self._verify_quotes(q_quotes, norm_text),
+            "emotional_beat_quotes": self._verify_quotes(
+                beat_quotes, chunk.text, norm_text),
+            "foreshadowing_quotes": self._verify_quotes(
+                fs_quotes, chunk.text, norm_text),
+            "unresolved_question_quotes": self._verify_quotes(
+                q_quotes, chunk.text, norm_text),
         }

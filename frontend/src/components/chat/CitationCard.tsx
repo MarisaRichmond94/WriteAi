@@ -1,7 +1,12 @@
 import { useMemo } from "react";
 import { clsx } from "clsx";
 import type { Citation } from "../../types";
-import { findQuoteRanges, segmentByRanges } from "../../lib/quoteHighlight";
+import {
+  expandToSentenceWindow,
+  findQuoteRanges,
+  segmentByRanges,
+  snapToSentence,
+} from "../../lib/quoteHighlight";
 
 interface Props {
   citation: Citation;
@@ -9,7 +14,7 @@ interface Props {
   isSelected: boolean;
   onClick: () => void;
   // Double-quoted spans from the answer text; any that appear verbatim in
-  // this citation's snippet get highlighted on the card.
+  // this citation's full chunk text get highlighted on the card.
   answerQuotes?: string[];
 }
 
@@ -32,13 +37,38 @@ export default function CitationCard({ citation, index, isSelected, onClick, ans
   const relevance = Math.max(0, Math.min(100, Math.round((1 - citation.distance) * 100)));
   const pov = citation.pov ? povColor(citation.pov) : null;
 
-  // Snippet segments with the answer's verbatim quotes marked; null when no
-  // quote lands in this snippet (the card then stays in its compact form).
+  // Prefer the full chunk text (new payloads) over the legacy 220-char
+  // snippet so quotes deep in the chunk can still match.
+  const chunkText = citation.text || citation.snippet;
+
+  // When an answer quote lands in this chunk, show its enclosing sentence(s)
+  // with the quote marked; null when no quote matches (compact card).
   const quotedSegments = useMemo(() => {
-    if (!answerQuotes?.length || !citation.snippet) return null;
-    const ranges = findQuoteRanges(citation.snippet, answerQuotes);
-    return ranges.length ? segmentByRanges(citation.snippet, ranges) : null;
-  }, [citation.snippet, answerQuotes]);
+    if (!answerQuotes?.length || !chunkText) return null;
+    const ranges = findQuoteRanges(chunkText, answerQuotes);
+    if (!ranges.length) return null;
+    // Window around the full span of matches, snapped to sentence boundaries.
+    const span = { start: ranges[0].start, end: ranges[ranges.length - 1].end };
+    const win = expandToSentenceWindow(chunkText, span, 400);
+    const windowText = chunkText.slice(win.start, win.end);
+    const shifted = ranges
+      .filter((r) => r.end > win.start && r.start < win.end)
+      .map((r) => ({
+        start: Math.max(0, r.start - win.start),
+        end: Math.min(windowText.length, r.end - win.start),
+      }));
+    return {
+      segments: segmentByRanges(windowText, shifted),
+      leadingEllipsis: win.leadingEllipsis,
+      trailingEllipsis: win.trailingEllipsis,
+    };
+  }, [chunkText, answerQuotes]);
+
+  // Compact form: a sentence-snapped snippet instead of the raw 220 prefix.
+  const compactSnippet = useMemo(
+    () => (quotedSegments || !chunkText ? null : snapToSentence(chunkText, 220)),
+    [quotedSegments, chunkText]
+  );
 
   return (
     <div
@@ -77,10 +107,13 @@ export default function CitationCard({ citation, index, isSelected, onClick, ans
               ` · "${citation.chapter_heading}"`}
           </p>
 
-          {/* Row 3 (optional): snippet with the answer's verbatim quote marked */}
+          {/* Row 3 (optional): enclosing sentence(s) with the answer's
+              verbatim quote marked — or a sentence-snapped snippet when no
+              quote lands in this chunk */}
           {quotedSegments && (
             <p className="mt-1.5 text-[10px] leading-relaxed text-ink-secondary">
-              {quotedSegments.map((seg, si) =>
+              {quotedSegments.leadingEllipsis && <span>… </span>}
+              {quotedSegments.segments.map((seg, si) =>
                 seg.marked ? (
                   <mark key={si} className="rounded-sm px-0.5 bg-yellow-300/25 text-ink-primary">
                     {seg.text}
@@ -89,6 +122,12 @@ export default function CitationCard({ citation, index, isSelected, onClick, ans
                   <span key={si}>{seg.text}</span>
                 )
               )}
+              {quotedSegments.trailingEllipsis && <span> …</span>}
+            </p>
+          )}
+          {compactSnippet && (
+            <p className="mt-1.5 text-[10px] leading-relaxed text-ink-secondary">
+              {compactSnippet}
             </p>
           )}
 
