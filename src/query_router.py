@@ -32,6 +32,54 @@ _LOOKUP = re.compile(
     r"\bevery (?:scene|chapter|time)\b|\blist (?:all|every)\b|\ball the (?:scenes|chapters)\b"
     r"|\bhow many (?:scenes|chapters|times)\b", re.I)
 
+# ── first-occurrence questions ("when does X first learn about Y") ──────────
+# These always carried routing metadata (first_occurrence/topic on the plan);
+# retrieval/answering only consume it when ENABLE_FIRST_OCCURRENCE is on.
+_FIRST_VERBS = r"(?:learns?|hears?|finds? out|discovers?|sees?|encounters?|reads?)"
+# "when/where does|did X first learn|hear|... (about|of|that) Y"
+_FIRST_LEARN = re.compile(
+    r"\b(?:when|where)\s+(?:do(?:es)?|did)\s+(?P<who>.+?)\s+first\s+"
+    + _FIRST_VERBS + r"(?:\s+(?:about|of|that))?\b\s*(?P<obj>[^?.!]*)", re.I)
+# "what is/was the first time X sees|hears|... Y"
+_FIRST_TIME = re.compile(
+    r"\bwhat(?:'s|’s|\s+is|\s+was)\s+the\s+first\s+time\s+(?:that\s+)?(?P<who>.+?)\s+"
+    + _FIRST_VERBS + r"(?:\s+(?:about|of|that))?\b\s*(?P<obj>[^?.!]*)", re.I)
+# "when/where is|was Y first mentioned/introduced" — no character X
+_FIRST_MENTION = re.compile(
+    r"\b(?:when|where)\s+(?:is|was)\s+(?P<obj>.+?)\s+first\s+"
+    r"(?:mentioned|introduced|referenced|named|described)\b", re.I)
+
+# Leading fillers stripped off the about-object ("the existence of The Black
+# Hand" -> "The Black Hand"). Applied repeatedly until stable.
+_TOPIC_FILLERS = re.compile(
+    r"^(?:the\s+(?:existence|truth|idea|news|fact|meaning|details?|concept)\s+"
+    r"(?:of|about|behind|that)\s+|that\s+|about\s+|of\s+)", re.I)
+# Trailing scope phrasing stripped ("... in book 4" belongs to Scope, not topic).
+_TOPIC_TRAILING_SCOPE = re.compile(
+    r"\s+(?:in|by|before|after|during|until)\s+(?:book|chapter)\s+\d+.*$", re.I)
+# Multiword Title-Case run — the preferred topic form ("The Black Hand").
+_TITLE_RUN = re.compile(r"\b[A-Z][\w'’-]*(?: [A-Z][\w'’-]*)+\b")
+
+
+def _clean_topic(obj: str) -> str | None:
+    """Normalize the about-object of a first-occurrence question into a topic
+    string suitable for LIKE matching: strip fillers and scope tails, then
+    prefer the longest Title-Case multiword phrase (proper noun) if present."""
+    obj = obj.strip().strip('"“”').rstrip("?.!,;: ").strip()
+    obj = _TOPIC_TRAILING_SCOPE.sub("", obj).strip()
+    while True:
+        stripped = _TOPIC_FILLERS.sub("", obj)
+        if stripped == obj:
+            break
+        obj = stripped
+    obj = obj.rstrip("?.!,;: ").strip()
+    if not obj:
+        return None
+    runs = _TITLE_RUN.findall(obj)
+    if runs:
+        return max(runs, key=len)
+    return re.sub(r"^(?:the|a|an)\s+", "", obj, flags=re.I).strip() or None
+
 _BOOK_RE = re.compile(r"\bbook (\d+)\b", re.I)
 _CHAPTER_RE = re.compile(r"\bchapter (\d+)\b", re.I)
 # Quoted names or Capitalized First [Last] sequences — candidate character names.
@@ -66,6 +114,10 @@ class QueryPlan:
     qtype: str                      # temporal_knowledge|sentiment|continuity|lookup|general
     scope: Scope = field(default_factory=Scope)
     characters: list[str] = field(default_factory=list)  # names found in the question
+    # "when does X first learn about Y" metadata; consumed by the retriever /
+    # answerer only when ENABLE_FIRST_OCCURRENCE is on (harmless otherwise).
+    first_occurrence: bool = False
+    topic: str | None = None        # the about-object Y ("The Black Hand")
 
 
 def parse_scope(scope_str: str) -> Scope:
@@ -86,12 +138,37 @@ def parse_scope(scope_str: str) -> Scope:
     return scope
 
 
+def _extract_names(text: str) -> list[str]:
+    names = []
+    for m in _NAME_RE.findall(text):
+        first = m.split()[0]
+        if first not in _NAME_STOPWORDS and m not in names:
+            names.append(m)
+    return names
+
+
 def classify(question: str, scope_str: str | None = None,
              forced_type: str | None = None) -> QueryPlan:
+    # First-occurrence detection ("when does X first learn about Y"). The
+    # match only counts when a usable topic Y could be extracted.
+    first_who: str | None = None
+    first_topic: str | None = None
+    m = _FIRST_LEARN.search(question) or _FIRST_TIME.search(question)
+    if m:
+        first_topic = _clean_topic(m.group("obj"))
+        first_who = m.group("who")
+    else:
+        m = _FIRST_MENTION.search(question)
+        if m:  # "when is Y first mentioned" — Y is the topic, no character X
+            first_topic = _clean_topic(m.group("obj"))
+    first_occurrence = first_topic is not None
+
     if forced_type:
         qtype = forced_type
     elif _CONTINUITY.search(question):
         qtype = "continuity"
+    elif first_occurrence:
+        qtype = "temporal_knowledge"
     elif _TEMPORAL.search(question):
         qtype = "temporal_knowledge"
     elif _SENTIMENT.search(question):
@@ -115,10 +192,15 @@ def classify(question: str, scope_str: str | None = None,
         if chapters and scope.book_max is not None:
             scope.chapter_max = max(chapters)
 
-    names = []
-    for m in _NAME_RE.findall(question):
-        first = m.split()[0]
-        if first not in _NAME_STOPWORDS and m not in names:
-            names.append(m)
+    if first_occurrence:
+        # Character = the X in the first-occurrence pattern. This fixes the
+        # generic parser mangling topic words into names (e.g. "the existence
+        # of The Black Hand" -> ['Noah', 'Hand']). Mention-form questions
+        # ("when is Y first mentioned") have no character -> empty list.
+        names = _extract_names(first_who) if first_who else []
+    else:
+        names = _extract_names(question)
 
-    return QueryPlan(question=question, qtype=qtype, scope=scope, characters=names)
+    return QueryPlan(question=question, qtype=qtype, scope=scope,
+                     characters=names, first_occurrence=first_occurrence,
+                     topic=first_topic)

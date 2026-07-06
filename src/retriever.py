@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 
 from .notes import NOTE_TABLES, pair_quotes, render_note, with_quote
@@ -26,6 +27,11 @@ from .query_prep import expand_characters
 from .query_router import QueryPlan, Scope
 
 log = logging.getLogger(__name__)
+
+# ENABLE_FIRST_OCCURRENCE: header line prepended to the ledger notes so the
+# answerer's FIRST_OCCURRENCE_INSTRUCTION can reference them explicitly.
+FIRST_OCC_NOTES_HEADER = ("== EARLIEST KNOWLEDGE-LEDGER ENTRIES (chronological; "
+                          "drawn from an exhaustive per-chunk index) ==")
 
 
 def _like_clause(column: str, aliases: list[str]) -> tuple[str, list[str]]:
@@ -194,6 +200,10 @@ class Retriever:
         return self._semantic(plan), []
 
     def _temporal(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
+        if (getattr(self.cfg, "enable_first_occurrence", False)
+                and getattr(plan, "first_occurrence", False)
+                and getattr(plan, "topic", None)):
+            return self._first_occurrence(plan)
         where, params = _scope_sql(plan.scope)
         aliases = self._alias_map(plan.characters)
         notes = []
@@ -213,6 +223,118 @@ class Retriever:
             log.info("truncating knowledge notes: %d -> 400", len(notes))
             notes = notes[:400]
         return self._semantic(plan), notes
+
+    def _first_occurrence(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
+        """ENABLE_FIRST_OCCURRENCE: "when does X first learn about Y".
+
+        Semantic top-k cannot establish FIRSTNESS — the topic may appear in
+        prose across 20+ chapters, mostly in other characters' POV, so the
+        sample never proves which mention is earliest for X. Both halves of
+        the answer exist mechanically:
+
+          notes    — the earliest character_knowledge ledger rows where X's
+                     `learns` mentions the topic, in chronological order,
+                     under FIRST_OCC_NOTES_HEADER (never truncated/reordered
+                     by the generic 400-cap: this branch caps at 30).
+          excerpts — the earliest prose chunks containing the topic where X
+                     is on the page, PREPENDED before the usual semantic
+                     hits (normal excerpt shape, so citations/quotes work).
+
+        Prose candidates prefer X's own POV chunks (strongest evidence of
+        first exposure) and only then chunks where X is tagged present — the
+        `characters` side table also tags mere narration mentions, so a flat
+        chronological OR would surface scenes X never witnessed. A word-
+        boundary post-filter drops LIKE substring false positives (topic
+        "Black Hand" must not match "black handle").
+        """
+        where, params = _scope_sql(plan.scope)
+        aliases = self._alias_map(plan.characters)
+        topic = plan.topic
+
+        # ── (a) earliest knowledge-ledger entries ────────────────────────────
+        def ledger_rows(learns_clause: str, learns_params: list[str]) -> list:
+            rows = []
+            for name in plan.characters or [""]:
+                clause, likes = _like_clause("k.character",
+                                             aliases.get(name, [name]))
+                rows.extend(self.db.execute(
+                    f"""SELECT c.book_number, c.chapter_number, c.chunk_index,
+                               k.character, k.learns, k.source_quote
+                        FROM character_knowledge k
+                        JOIN chunks c ON c.chunk_id = k.chunk_id
+                        WHERE {clause} AND {learns_clause} AND {where}
+                        ORDER BY c.book_number, c.chapter_number, c.chunk_index""",
+                    [*likes, *learns_params, *params]).fetchall())
+            rows.sort(key=lambda r: (r[0], r[1], r[2]))
+            return rows
+
+        rows = ledger_rows("k.learns LIKE ?", [f"%{topic}%"])
+        if len(rows) < 3:
+            # tolerant fallback: AND the topic tokens ("Black" AND "Hand")
+            tokens = [t for t in re.findall(r"[\w'’-]+", topic)
+                      if t.lower() not in ("the", "a", "an", "of")]
+            if len(tokens) > 1:
+                rows = ledger_rows(
+                    " AND ".join("k.learns LIKE ?" for _ in tokens),
+                    [f"%{t}%" for t in tokens])
+        notes = []
+        if rows:
+            notes.append(FIRST_OCC_NOTES_HEADER)
+            notes.extend(
+                f"[Book {b}, Ch {ch}] {who} learns: {with_quote(fact, quote)}"
+                for b, ch, _, who, fact, quote in rows[:30])
+
+        # ── (b) earliest prose mentions, then the usual semantic hits ───────
+        char_sql, char_likes = "", []
+        if plan.characters:
+            names = [a for n in plan.characters for a in aliases.get(n, [n])]
+            pov_clause, pov_likes = _like_clause("c.pov_character", names)
+            tag_clause, tag_likes = _like_clause("ch.name", names)
+            char_sql = (f" AND ({pov_clause} OR EXISTS "
+                        f"(SELECT 1 FROM characters ch "
+                        f"WHERE ch.chunk_id = c.chunk_id AND {tag_clause}))")
+            char_likes = [*pov_likes, *tag_likes]
+        chunk_rows = self.db.execute(
+            f"""SELECT c.chunk_id, c.book_number, c.book_title,
+                       c.chapter_number, c.pov_character, c.date_line, c.text
+                FROM chunks c
+                WHERE c.text LIKE ?{char_sql} AND {where}
+                ORDER BY c.book_number, c.chapter_number, c.chunk_index""",
+            [f"%{topic}%", *char_likes, *params]).fetchall()
+        topic_re = re.compile(r"(?<!\w)" + re.escape(topic) + r"(?!\w)", re.I)
+        pov_names = ([a.lower() for n in plan.characters
+                      for a in aliases.get(n, [n])])
+
+        def is_pov(pov: str | None) -> bool:
+            return bool(pov) and any(a in pov.lower() for a in pov_names)
+
+        prose = []
+        for pov_only in (True, False) if pov_names else (False,):
+            for cid, bn, bt, ch, pov, dl, text in chunk_rows:
+                if not topic_re.search(text):
+                    continue
+                if pov_names and is_pov(pov) != pov_only:
+                    continue
+                if any(e["chunk_id"] == cid for e in prose):
+                    continue
+                prose.append({"chunk_id": cid,
+                              "header": _header({"book_number": bn,
+                                                 "book_title": bt,
+                                                 "chapter_number": ch,
+                                                 "pov_character": pov,
+                                                 "date_line": dl}),
+                              "text": text,
+                              "book_number": bn, "book_title": bt,
+                              "chapter_number": ch, "pov_character": pov,
+                              "distance": None})
+                if len(prose) >= 4:
+                    break
+            if len(prose) >= 4:
+                break
+        prose_ids = {e["chunk_id"] for e in prose}
+        semantic = [e for e in self._semantic(plan)
+                    if e["chunk_id"] not in prose_ids]
+        return prose + semantic, notes
 
     def _sentiment(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
         where, params = _scope_sql(plan.scope)

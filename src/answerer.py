@@ -18,6 +18,8 @@ SYSTEM_PROMPT = """You are analyzing a fiction series for its author. Answer bas
 
 TEMPORAL_INSTRUCTION = """IMPORTANT: This is a point-in-time knowledge question. Only consider what has been revealed within {bound}. Distinguish carefully between what the READER knows and what the named CHARACTER has personally witnessed, been told, or deduced — answer for the character's knowledge, not the reader's."""
 
+FIRST_OCCURRENCE_INSTRUCTION = """This asks when something FIRST happens for a character. The earliest-mentions excerpts and ledger entries are drawn CHRONOLOGICALLY from an exhaustive index of the whole series — the earliest entry shown IS the first occurrence in the indexed text. Answer decisively from them. Distinguish first EXPOSURE (seeing/hearing the term) from first UNDERSTANDING (learning what it means) when the material shows both moments."""
+
 QUOTE_INSTRUCTION = """When the provided excerpts contain the relevant passage, support your claims with short verbatim quotes: reproduce the exact words inside double quotation marks, immediately followed by the citation (Book N, Chapter M). Prefer one or two sentences per quote, and quote each passage contiguously — do not splice separate sentences together with ellipses. Preserve the original capitalization and punctuation exactly, even when a quote begins mid-sentence. Quote only text that appears word-for-word in the excerpts — never reconstruct dialogue or narration from memory. Story notes sometimes end with a verbatim manuscript quote after an em dash — you may re-quote THAT quoted portion, but never place a note's summary wording inside quotation marks; if only a note's summary supports a claim, cite it without quotation marks."""
 
 CONTINUITY_INSTRUCTION = """For each foreshadowing element or open question in the notes, judge from the excerpts and notes whether it is: Resolved (say where), Unresolved, or Potentially Contradicted (explain the conflict). Group your answer by those three categories and cite (Book N, Chapter M) throughout. Merge duplicate notes that describe the same underlying thread."""
@@ -41,6 +43,11 @@ class Answerer:
         # system prompt. Flag off -> build_request output is byte-identical
         # to the legacy shape.
         self.enable_direct_quotes = getattr(cfg, "enable_direct_quotes", False)
+        # ENABLE_FIRST_OCCURRENCE: first-occurrence plans swap the temporal
+        # instruction for FIRST_OCCURRENCE_INSTRUCTION. Flag off -> requests
+        # are byte-identical to the legacy shape.
+        self.enable_first_occurrence = getattr(cfg, "enable_first_occurrence",
+                                               False)
         self.usage = {"input_tokens": 0, "output_tokens": 0,
                       "cache_write_tokens": 0, "cache_read_tokens": 0}
 
@@ -86,7 +93,14 @@ class Answerer:
                 parts.append("")
 
         if plan.qtype == "temporal_knowledge":
-            parts.append(TEMPORAL_INSTRUCTION.format(bound=plan.scope.describe()))
+            # first_occurrence wins over the plain temporal instruction (same
+            # condition the retriever's first-occurrence branch gates on)
+            if (self.enable_first_occurrence
+                    and getattr(plan, "first_occurrence", False)
+                    and getattr(plan, "topic", None)):
+                parts.append(FIRST_OCCURRENCE_INSTRUCTION)
+            else:
+                parts.append(TEMPORAL_INSTRUCTION.format(bound=plan.scope.describe()))
         elif plan.qtype == "continuity":
             parts.append(CONTINUITY_INSTRUCTION)
         parts.append(f"QUESTION: {plan.question}")
