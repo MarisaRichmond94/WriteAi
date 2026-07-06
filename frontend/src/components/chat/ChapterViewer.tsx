@@ -83,7 +83,7 @@ export default function ChapterViewer({ citation, bookId, lightMode, onToggleLig
     if (!text) return;
     scrollBehaviorRef.current = chapterChanged ? "instant" : "smooth";
     scrollToMark();
-  }, [text, citation.snippet, scrollToMark]);
+  }, [text, citation.text, citation.snippet, scrollToMark]);
 
   useEffect(() => {
     if (!text) return;
@@ -120,9 +120,15 @@ export default function ChapterViewer({ citation, bookId, lightMode, onToggleLig
       color: run.color,
     });
 
-    // Locate the snippet in flat character coordinates over all run text.
+    // Locate the retrieved passage in flat character coordinates over all
+    // run text. Prefer the FULL chunk text (complete paragraphs) so the
+    // highlight never cuts mid-sentence; fall back to the 220-char snippet
+    // for old transcripts and synthetic citations that carry no full text.
     let mark: { start: number; end: number } | null = null;
-    if (citation.snippet) {
+    const needles = [citation.text, citation.snippet]
+      .filter((n): n is string => !!n)
+      .filter((n, i, arr) => arr.indexOf(n) === i);
+    if (needles.length) {
       let strippedAll = "";
       const flatOf: number[] = []; // stripped index -> flat char index
       let flat = 0;
@@ -138,11 +144,13 @@ export default function ChapterViewer({ citation, bookId, lightMode, onToggleLig
           flat += run.text.length;
         }
       }
-      const { stripped: snippetStripped } = buildStrippedMap(citation.snippet);
-      if (snippetStripped) {
-        const idx = strippedAll.indexOf(snippetStripped);
+      for (const needle of needles) {
+        const { stripped: needleStripped } = buildStrippedMap(needle);
+        if (!needleStripped) continue;
+        const idx = strippedAll.indexOf(needleStripped);
         if (idx !== -1) {
-          mark = { start: flatOf[idx], end: flatOf[idx + snippetStripped.length - 1] + 1 };
+          mark = { start: flatOf[idx], end: flatOf[idx + needleStripped.length - 1] + 1 };
+          break;
         }
       }
     }
@@ -207,18 +215,28 @@ export default function ChapterViewer({ citation, bookId, lightMode, onToggleLig
       lightMode ? "text-gray-700" : "text-ink-secondary"
     );
 
-    const snippet = citation.snippet;
-    if (!snippet) return <p className={baseClass}>{text}</p>;
+    // Prefer the full chunk text (complete paragraphs — never cuts
+    // mid-sentence); fall back to the 220-char snippet for old transcripts
+    // and synthetic citations without full text.
+    const needles = [citation.text, citation.snippet]
+      .filter((n): n is string => !!n)
+      .filter((n, i, arr) => arr.indexOf(n) === i);
+    if (!needles.length) return <p className={baseClass}>{text}</p>;
 
     const { stripped: textStripped, map: textMap } = buildStrippedMap(text);
-    const { stripped: snippetStripped } = buildStrippedMap(snippet);
-    if (!snippetStripped) return <p className={baseClass}>{text}</p>;
-
-    const strippedIdx = textStripped.indexOf(snippetStripped);
-    if (strippedIdx === -1) return <p className={baseClass}>{text}</p>;
-
-    const originalStart = textMap[strippedIdx];
-    const originalEnd = textMap[strippedIdx + snippetStripped.length - 1] + 1;
+    let originalStart = -1;
+    let originalEnd = -1;
+    for (const needle of needles) {
+      const { stripped: needleStripped } = buildStrippedMap(needle);
+      if (!needleStripped) continue;
+      const strippedIdx = textStripped.indexOf(needleStripped);
+      if (strippedIdx !== -1) {
+        originalStart = textMap[strippedIdx];
+        originalEnd = textMap[strippedIdx + needleStripped.length - 1] + 1;
+        break;
+      }
+    }
+    if (originalStart === -1) return <p className={baseClass}>{text}</p>;
 
     return (
       <p className={baseClass}>
