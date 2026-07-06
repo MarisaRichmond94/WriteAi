@@ -231,10 +231,18 @@ def review_stream(req: ReviewRequest):
         question = req.message or f"Give your review of this chapter as a {req.focus}."
         if req.chapter is None:
             ch_label = ", new draft"
-        elif req.chapter == 0:
-            ch_label = ", Prologue"
         else:
-            ch_label = f", Chapter {req.chapter}"
+            ch_label = ", Prologue" if req.chapter == 0 else f", Chapter {req.chapter}"
+            meta_row = s.db.execute(
+                "SELECT pov_character, date_line FROM chunks "
+                "WHERE book_number = ? AND chapter_number = ? "
+                "ORDER BY chunk_index LIMIT 1",
+                (req.book, req.chapter)).fetchone()
+            if meta_row:
+                if meta_row[0]:
+                    ch_label += f", POV {meta_row[0]}"
+                if meta_row[1]:
+                    ch_label += f", {meta_row[1]}"
         review_plan = QueryPlan(
             question=(f"CHAPTER UNDER REVIEW (Book {req.book}{ch_label}):"
                       f"\n\n{text}\n\n{question}"),
