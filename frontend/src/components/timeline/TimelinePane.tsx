@@ -3,7 +3,7 @@ import { ArrowLeft, BookOpen, Calendar, ChevronDown, ChevronLeft, ChevronRight, 
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import type { Citation, TimelineEvent, EventSourceQuote } from "../../types";
-import { fetchEvents } from "../../api/events";
+import { fetchEvents, fetchStoryOrderAvailable } from "../../api/events";
 import { fetchCharacters } from "../../api/characters";
 import ChapterViewer from "../chat/ChapterViewer";
 import { generateMockCharacterProfile } from "../../mocks/timelineMocks";
@@ -53,6 +53,17 @@ function eventTypeColor(type: string): string {
 
 function eventTypeDotColor(type: string): string {
   return EVENT_TYPE_DOT_COLORS[eventTypeHash(type) % EVENT_TYPE_DOT_COLORS.length];
+}
+
+// ── Temporal-mode badge (story order only) ─────────────────────────────────────
+
+function TemporalBadge({ mode }: { mode?: string | null }) {
+  if (mode !== "flashback" && mode !== "flashforward") return null;
+  return (
+    <span className="flex-shrink-0 rounded border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400">
+      {mode === "flashback" ? "Flashback" : "Flash-forward"}
+    </span>
+  );
 }
 
 // ── Book color palette ─────────────────────────────────────────────────────────
@@ -354,8 +365,11 @@ function EventDrawer({
               <div className="flex-shrink-0 border-b border-surface-border px-6 py-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="min-w-0">
-                  <span className={clsx("rounded border px-1.5 py-0.5 text-[10px] font-semibold", eventTypeColor(event.type))}>
-                    {event.type}
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className={clsx("rounded border px-1.5 py-0.5 text-[10px] font-semibold", eventTypeColor(event.type))}>
+                      {event.type}
+                    </span>
+                    <TemporalBadge mode={event.temporal_mode} />
                   </span>
                   <h2 className="mt-2 text-base font-bold text-ink-primary">{event.title}</h2>
                   {event.date && (
@@ -591,6 +605,7 @@ function ListView({
             <span className={clsx("flex-shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold", eventTypeColor(ev.type))}>
               {ev.type}
             </span>
+            <TemporalBadge mode={ev.temporal_mode} />
 
             {/* Title + participants */}
             <div className="flex-1 min-w-0 text-left">
@@ -1016,6 +1031,15 @@ export default function TimelinePane() {
   const [filterType, setFilterType] = useState("");
   const [filterBook, setFilterBook] = useState("");
   const [filterPov, setFilterPov] = useState("");
+  // Narrative vs story-chronological order; toggle only rendered when the
+  // backend reports story order available (flag on + chapter_timeline built).
+  const [storyOrderAvailable, setStoryOrderAvailable] = useState(false);
+  const [orderMode, setOrderMode] = useState<"narrative" | "story">(
+    () => (localStorage.getItem("timeline_order") === "story" ? "story" : "narrative")
+  );
+  useEffect(() => { localStorage.setItem("timeline_order", orderMode); }, [orderMode]);
+  useEffect(() => { fetchStoryOrderAvailable().then(setStoryOrderAvailable); }, []);
+  const effectiveOrder = storyOrderAvailable ? orderMode : "narrative";
   const [events, setEvents] = useState<TimelineEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1045,14 +1069,15 @@ export default function TimelinePane() {
   useEffect(() => {
     setLoading(true);
     setError(null);
-    const filters: Record<string, string> = {};
+    const filters: { book?: string; pov?: string; order?: "narrative" | "story" } = {};
     if (filterBook) filters.book = filterBook;
     if (filterPov) filters.pov = filterPov;
+    if (effectiveOrder === "story") filters.order = "story";
     fetchEvents(Object.keys(filters).length ? filters : undefined)
       .then(setEvents)
       .catch(() => setError("Failed to load events. Run extraction to generate events data."))
       .finally(() => setLoading(false));
-  }, [filterBook, filterPov]);
+  }, [filterBook, filterPov, effectiveOrder]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1151,6 +1176,28 @@ export default function TimelinePane() {
               </button>
             ))}
           </div>
+          {/* Narrative / Story order toggle — only when the backend supports it */}
+          {storyOrderAvailable && (
+            <div className="flex items-center rounded border border-surface-border overflow-hidden">
+              {(["narrative", "story"] as const).map((o) => (
+                <button
+                  key={o}
+                  onClick={() => setOrderMode(o)}
+                  title={o === "narrative"
+                    ? "Order events as they appear in the books"
+                    : "Order events in story-chronological time (flashbacks sort where they happened)"}
+                  className={clsx(
+                    "px-3 py-1 text-[11px] font-medium capitalize transition-colors",
+                    orderMode === o
+                      ? "bg-accent/20 text-accent"
+                      : "bg-surface text-ink-muted hover:bg-surface-hover hover:text-ink-secondary"
+                  )}
+                >
+                  {o === "narrative" ? "Narrative" : "Story"}
+                </button>
+              ))}
+            </div>
+          )}
           {/* Search — list only */}
           <div className={clsx(
             "relative transition-all duration-200",

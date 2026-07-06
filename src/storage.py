@@ -82,6 +82,25 @@ CREATE TABLE IF NOT EXISTS unresolved_questions (
 );
 CREATE INDEX IF NOT EXISTS idx_questions_chunk ON unresolved_questions(chunk_id);
 
+-- Story-chronological placement of each chapter (ENABLE_STORY_ORDER).
+-- Populated by scripts/resolve_chronology.py: story_year is a small relative
+-- epoch consistent ACROSS books (never real calendar years — the date lines
+-- carry no years); month/day are parsed deterministically from the chapter's
+-- date line. Rows with manual_override=1 are never rewritten by the script.
+CREATE TABLE IF NOT EXISTS chapter_timeline (
+    book_number     INTEGER NOT NULL,
+    chapter_number  INTEGER NOT NULL,
+    story_year      INTEGER NOT NULL,
+    month           INTEGER,          -- 1-12, NULL when the date line has none
+    day             INTEGER,          -- 1-31, NULL when the date line has none
+    temporal_mode   TEXT NOT NULL DEFAULT 'primary',
+                    -- 'primary' | 'flashback' | 'flashforward' | 'unknown'
+    confidence      REAL,
+    rationale       TEXT,
+    manual_override INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (book_number, chapter_number)
+);
+
 -- BM25 keyword index over chunk text (external content: rows shadow `chunks`).
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
     USING fts5(text, content='chunks', content_rowid='rowid');

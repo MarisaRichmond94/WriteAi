@@ -527,9 +527,15 @@ class EnrichmentRunner:
             loc_batches, loc_hash = _loc_inputs(db)
             if _state(db, "locmap") == loc_hash:
                 loc_batches = []
+            # story-order chronology (ENABLE_STORY_ORDER): one task per book
+            # whose chapters changed this run. Flag off -> empty -> the run
+            # is exactly what it was before this phase existed.
+            chrono_books: list[int] = (
+                sorted({c["book_number"] for c in chapters})
+                if getattr(cfg, "enable_story_order", False) else [])
             self.status.update(state="running", done=0,
                                total=(len(chapters) + len(profiles) + len(rels)
-                                      + len(loc_batches)),
+                                      + len(loc_batches) + len(chrono_books)),
                                cost_usd=0.0, error=None)
 
             def call(system, user, schema):
@@ -548,6 +554,7 @@ class EnrichmentRunner:
                 return json.loads(next(b.text for b in r.content if b.type == "text"))
 
             # events + chapter summary — one call per chapter, with prose
+            processed_books: set[int] = set()  # books actually (re)enriched
             for c in chapters:
                 try:
                     data = call(EVENTS_PROMPT, json.dumps(
@@ -571,6 +578,7 @@ class EnrichmentRunner:
                     _set_state(db, f"events:{c['book_number']}.{c['chapter_number']}",
                                c["content_hash"])
                     db.commit()
+                    processed_books.add(c["book_number"])
                 except Exception as e:
                     log.warning("event enrichment failed for book %s ch %s: %s",
                                 c["book_number"], c["chapter_number"], e)
@@ -659,6 +667,48 @@ class EnrichmentRunner:
                 if not failed_batches:
                     _set_state(db, "locmap", loc_hash)
                     db.commit()
+
+            # chronology — re-resolve story_year for just the books whose
+            # chapters were (re)enriched, so ?order=story stays current after
+            # a resync with no manual step. Its spend goes to the existing
+            # "chronology" cost surface (logged inside resolve_chronology),
+            # NOT to this run's "enrich" line. Non-fatal by convention: on
+            # failure story order is merely stale and can be rebuilt with
+            # scripts/resolve_chronology.py.
+            if chrono_books:
+                done_before = self.status["done"]
+                affected = sorted(processed_books)
+                if affected:
+                    try:
+                        from src.chronology import resolve_chronology
+
+                        def _chrono_tick(*_args):
+                            self.status["done"] = min(
+                                self.status["done"] + 1,
+                                done_before + len(chrono_books))
+
+                        chrono_stats: dict = {}
+                        resolve_chronology(db, cfg, client,
+                                           books=set(affected),
+                                           on_book=_chrono_tick,
+                                           stats=chrono_stats)
+                        try:
+                            from . import audit
+                            audit.log_event(
+                                "chronology_resolved",
+                                "story chronology re-resolved after enrichment",
+                                books=chrono_stats.get("books_resolved",
+                                                       affected),
+                                chapters_upserted=chrono_stats.get("upserts", 0),
+                                cost_usd=chrono_stats.get("cost_usd", 0.0))
+                        except Exception:
+                            pass
+                    except Exception as e:
+                        log.warning("chronology resolution failed for books %s "
+                                    "(story order may be stale; run "
+                                    "scripts/resolve_chronology.py): %s",
+                                    affected, e)
+                self.status["done"] = done_before + len(chrono_books)
 
             self._reconcile_directions(db)
             self.status["state"] = "done"
