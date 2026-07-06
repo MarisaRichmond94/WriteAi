@@ -8,6 +8,7 @@ export async function fetchEvents(filters?: {
   book?: string;
   pov?: string;
   granularity?: string;
+  order?: "narrative" | "story";
 }): Promise<TimelineEvent[]> {
   if (isMockMode()) {
     let results = MOCK_EVENTS;
@@ -21,9 +22,23 @@ export async function fetchEvents(filters?: {
   if (filters?.book) params.set("book", filters.book);
   if (filters?.pov) params.set("pov", filters.pov);
   if (filters?.granularity) params.set("granularity", filters.granularity);
+  if (filters?.order && filters.order !== "narrative") params.set("order", filters.order);
 
   const url = params.size > 0 ? `${BASE}?${params}` : BASE;
   const res = await fetch(url);
   if (!res.ok) throw new Error("Failed to fetch events");
   return res.json();
+}
+
+/** Whether story-chronological ordering is available (ENABLE_STORY_ORDER on
+ * AND the chapter_timeline table populated). Drives the order toggle. */
+export async function fetchStoryOrderAvailable(): Promise<boolean> {
+  if (isMockMode()) return false;
+  try {
+    const res = await fetch(`${BASE}/meta`);
+    if (!res.ok) return false;
+    return Boolean((await res.json()).story_order_available);
+  } catch {
+    return false;
+  }
 }

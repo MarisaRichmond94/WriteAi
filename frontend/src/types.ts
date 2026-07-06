@@ -317,6 +317,10 @@ export interface TimelineEvent {
   cross_book_payoff: string | null;
   internal_year: number | null;
   date_source: "extracted" | "user" | null;
+  // Present only on ?order=story responses (ENABLE_STORY_ORDER):
+  // relative story epoch and the chapter's timeline placement.
+  story_year?: number | null;
+  temporal_mode?: "primary" | "flashback" | "flashforward" | "unknown" | null;
 }
 
 export type ReviewFocus = "Literary Agent" | "Casual Reader" | "Hard-Core Reader" | "Philosopher" | "What-If Explorer";
