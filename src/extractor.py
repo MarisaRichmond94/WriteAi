@@ -67,12 +67,12 @@ For EVERY chunk you receive, extract metadata based only on what the text of tha
 Be exhaustive. List every distinct key event, revealed fact, character knowledge update, emotional beat, foreshadowing hint, and unresolved question the chunk supports — a typical chunk yields 2-5 entries per field, and rich chunks more. Do not merge distinct items into one, and do not drop minor items for brevity: a small planted detail or a passing emotional shift still gets its own entry.
 
 Field guidance:
-- characters_present: characters who appear or speak in the chunk (canonical full names when known, e.g. "Maria Santos" rather than "Maria").
+- characters_present: characters who appear or speak in the chunk (canonical full names when known — first and last name rather than the first name alone; never invent a surname the text does not support).
 - locations: physical places where the chunk's action occurs or that are meaningfully referenced. Name only what the text supports — never infer whether a home is a house or an apartment; when the chunk does not say, use a neutral form ("Jared's home", "Jared's bedroom").
 - timeline_position: when this happens relative to the story (use the chunk's date header and in-text time cues), or null if nothing indicates it.
 - key_events: the concrete plot events that happen in this chunk.
 - new_information_revealed: facts the READER learns for the first time in this chunk.
-- character_knowledge_updates: for each character who LEARNS something in this chunk, what they learn — include every character who learns anything, even small facts (a name, a location, another character's feelings), and list each distinct fact as its own entry: a character often learns several separate things in one chunk. Only include knowledge gained here, by that character — not things the reader knows but the character does not. Never use "Reader" as a character here; what the reader learns belongs in new_information_revealed.
+- character_knowledge_updates: for each character who LEARNS something in this chunk, what they learn — include every character who learns anything, even small facts (a name, a location, another character's feelings), and list each distinct fact as its own entry: a character often learns several separate things in one chunk. Only include knowledge gained here, by that character — not things the reader knows but the character does not. Never use "Reader" as a character here; what the reader learns belongs in new_information_revealed. The character field is a name and nothing else, following the same canonical-full-name rule as characters_present: one character per entry (never "X and Y" — give each their own entry), no annotations or qualifiers appended to the name (never "X (learns)" or "X (indirectly)"), and for a first-person narrator use the POV character's actual name, never "Narrator".
 - emotional_beats: character emotional states and shifts (e.g. "the narrator feels cornered and ashamed").
 - foreshadowing: hints, planted details, or ominous notes that seem intended to pay off later. Err on the side of inclusion: subtle imagery, repeated motifs, and offhand remarks that could pay off later all count.
 - unresolved_questions: questions this chunk raises that it does not answer — every question a careful reader would still have: unexplained motives, unidentified people or objects, unstated outcomes, and questions the characters themselves voice.
@@ -444,6 +444,7 @@ class MetadataExtractor:
         alongside in parallel `*_quotes` lists, index-aligned with the values.
         """
         norm_text = _normalize_quote(chunk.text)
+        stats_before = dict(self.quote_stats)
         foreshadowing, fs_quotes = _split_items(item.get("foreshadowing"), "detail")
         questions, q_quotes = _split_items(item.get("unresolved_questions"), "question")
         beats, beat_quotes = _split_items(item.get("emotional_beats"), "beat")
@@ -455,6 +456,17 @@ class MetadataExtractor:
                 knowledge[entry["character"]] = facts
                 knowledge_quotes[entry["character"]] = self._verify_quotes(
                     fact_quotes, chunk.text, norm_text)
+        verified_beat_quotes = self._verify_quotes(beat_quotes, chunk.text, norm_text)
+        verified_fs_quotes = self._verify_quotes(fs_quotes, chunk.text, norm_text)
+        verified_q_quotes = self._verify_quotes(q_quotes, chunk.text, norm_text)
+        # Per-chunk verification tally, persisted in metadata_json: with it, a
+        # null quote in the side tables can be split into "model offered no
+        # quote" (item count - kept - rejected) vs "quote failed the verbatim
+        # check" (rejected) — the two need opposite fixes.
+        quote_audit = {
+            "kept": self.quote_stats["kept"] - stats_before["kept"],
+            "rejected": self.quote_stats["rejected"] - stats_before["rejected"],
+        }
         return {
             # structural (from the chunker — exact, free)
             "chunk_id": chunk.chunk_id,
@@ -482,10 +494,8 @@ class MetadataExtractor:
             # (None where the model gave no quote or the quote failed the
             # verbatim check)
             "character_knowledge_quotes": knowledge_quotes,
-            "emotional_beat_quotes": self._verify_quotes(
-                beat_quotes, chunk.text, norm_text),
-            "foreshadowing_quotes": self._verify_quotes(
-                fs_quotes, chunk.text, norm_text),
-            "unresolved_question_quotes": self._verify_quotes(
-                q_quotes, chunk.text, norm_text),
+            "emotional_beat_quotes": verified_beat_quotes,
+            "foreshadowing_quotes": verified_fs_quotes,
+            "unresolved_question_quotes": verified_q_quotes,
+            "quote_audit": quote_audit,
         }

@@ -231,7 +231,9 @@ def main() -> int:
              cost_usd=extractor.actual_cost_usd,
              latency_ms=int(elapsed * 1000),
              extra={"api_calls": u["api_calls"], "chunks": len(changed),
-                    "failed_chunks": total_failed})
+                    "failed_chunks": total_failed,
+                    "quotes_kept": extractor.quote_stats["kept"],
+                    "quotes_rejected": extractor.quote_stats["rejected"]})
     failures = (f" {total_failed} chunk(s) failed and will retry next run."
                 if total_failed else "")
     _notify(f"{args.label} complete",
