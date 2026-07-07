@@ -394,6 +394,24 @@ def _loc_inputs(db) -> tuple[list[list[str]], str]:
     return batches, _hash(["locmap-v1", raws])
 
 
+def _loc_pending(db, cfg) -> tuple[list[list[str]], str | None]:
+    """Location batches still to resolve, honoring ENABLE_LOCATION_V2.
+
+    v2 (flag on) returns per-book batches — book-scoped state lives inside
+    src.location_resolve, so the hash is None. v1 returns the series-wide
+    batches plus the state hash that skips the whole pass when unchanged."""
+    if getattr(cfg, "enable_location_v2", False):
+        from src.location_resolve import BATCH_SIZE, ensure_table, pending_books
+        ensure_table(db)
+        return [raws[i:i + BATCH_SIZE]
+                for _b, raws in sorted(pending_books(db).items())
+                for i in range(0, len(raws), BATCH_SIZE)], None
+    batches, h = _loc_inputs(db)
+    if _state(db, "locmap") == h:
+        batches = []
+    return batches, h
+
+
 def _profile_inputs(db, canon, min_chunks: int = 8) -> list[dict]:
     """Per-character payloads for the profile pass (main cast only)."""
     canon.ensure_built()
@@ -462,9 +480,7 @@ def preview(db, cfg, canon) -> dict:
                 if _state(db, f"profile:{p['name']}") != p["content_hash"]]
     rels = [r for r in _rel_inputs(db, canon)
             if _state(db, f"rels:{r['name']}") != r["content_hash"]]
-    loc_batches, loc_hash = _loc_inputs(db)
-    if _state(db, "locmap") == loc_hash:
-        loc_batches = []
+    loc_batches, _loc_hash = _loc_pending(db, cfg)
     in_tok = sum(len(json.dumps(b)) // 3 + 600 for b in loc_batches) + sum(len(json.dumps(c["notes"])) // 3
                  + sum(len(t["text"]) for t in c["prose"]) // 3 + 400
                  for c in chapters) \
@@ -524,9 +540,7 @@ class EnrichmentRunner:
                         if _state(db, f"profile:{p['name']}") != p["content_hash"]]
             rels = [r for r in _rel_inputs(db, canon)
                     if _state(db, f"rels:{r['name']}") != r["content_hash"]]
-            loc_batches, loc_hash = _loc_inputs(db)
-            if _state(db, "locmap") == loc_hash:
-                loc_batches = []
+            loc_batches, loc_hash = _loc_pending(db, cfg)
             # story-order chronology (ENABLE_STORY_ORDER): one task per book
             # whose chapters changed this run. Flag off -> empty -> the run
             # is exactly what it was before this phase existed.
@@ -635,8 +649,30 @@ class EnrichmentRunner:
                     log.warning("relationship enrichment failed for %s: %s", r["name"], e)
                 self.status["done"] += 1
 
-            # location gazetteer — sequential batches share the growing canon
-            if loc_batches:
+            # location gazetteer — v2 (ENABLE_LOCATION_V2) resolves per book
+            # in src.location_resolve with its own state keys and cost
+            # surface ("locations_v2", logged inside resolve_locations, NOT
+            # this run's "enrich" line). Non-fatal by convention: on failure
+            # the gazetteer is merely stale and can be rebuilt with
+            # scripts/resolve_locations.py.
+            if loc_batches and getattr(cfg, "enable_location_v2", False):
+                done_before = self.status["done"]
+                try:
+                    from src.location_resolve import resolve_locations
+
+                    def _loc_tick(*_args):
+                        self.status["done"] = min(
+                            self.status["done"] + 1,
+                            done_before + len(loc_batches))
+
+                    resolve_locations(db, cfg, client, on_batch=_loc_tick)
+                except Exception as e:
+                    log.warning("location v2 resolution failed (gazetteer "
+                                "may be stale; run "
+                                "scripts/resolve_locations.py): %s", e)
+                self.status["done"] = done_before + len(loc_batches)
+            # v1 gazetteer — sequential batches share the growing canon
+            elif loc_batches:
                 known: dict[str, str | None] = {}
                 failed_batches = 0
                 for batch in loc_batches:

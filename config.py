@@ -82,6 +82,7 @@ class Config:
     enable_direct_quotes: bool = False
     enable_first_occurrence: bool = False
     enable_story_order: bool = False
+    enable_location_v2: bool = False
 
     # Derived data locations (all under data_dir; created on demand)
     staging_dir: Path = field(init=False)
@@ -169,6 +170,7 @@ def load_config(env_file: Path | None = None) -> Config:
         enable_direct_quotes=_get_bool("ENABLE_DIRECT_QUOTES", False),
         enable_first_occurrence=_get_bool("ENABLE_FIRST_OCCURRENCE", False),
         enable_story_order=_get_bool("ENABLE_STORY_ORDER", False),
+        enable_location_v2=_get_bool("ENABLE_LOCATION_V2", False),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)
 
