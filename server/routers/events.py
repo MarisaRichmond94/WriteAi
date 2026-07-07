@@ -209,8 +209,9 @@ def list_events(book: str | None = None, pov: str | None = None,
     flag existed."""
     s = get_state()
     enrich.ensure_tables(s.db)
-    from .locations import resolved_map
-    loc_map = resolved_map(s.db)
+    from .locations import resolved_map, resolved_map_v2
+    loc_v2 = getattr(s.cfg, "enable_location_v2", False)
+    loc_map = resolved_map_v2(s.db) if loc_v2 else resolved_map(s.db)
     titles = _titles(s)
     book_num = None
     if book:
@@ -279,7 +280,8 @@ def list_events(book: str | None = None, pov: str | None = None,
             # normalized through the gazetteer: "Emma's house · Dead Falls";
             # unmappable raw locations show nothing (better none than bad)
             "location": (lambda pp: (f"{pp[0]} · {pp[1]}" if pp and pp[0] and pp[1]
-                                     else pp[0] if pp else None))(loc_map.get(r[9]))
+                                     else pp[0] if pp else None))(
+                            loc_map.get((r[1], r[9]) if loc_v2 else r[9]))
                         if r[9] else None,
             "type": r[5],
             "summary": r[8] or "",

@@ -27,8 +27,7 @@ def _curation() -> dict:
     return d
 
 
-def resolved_map(db) -> dict[str, tuple[str | None, str | None]]:
-    """raw -> (place, parent) with writer renames/hides applied."""
+def _fixer():
     cur = _curation()
     renames, hidden = cur["renames"], set(cur["hidden"])
 
@@ -38,6 +37,12 @@ def resolved_map(db) -> dict[str, tuple[str | None, str | None]]:
         name = renames.get(name, name)
         return None if name in hidden else name
 
+    return fix
+
+
+def resolved_map(db) -> dict[str, tuple[str | None, str | None]]:
+    """raw -> (place, parent) with writer renames/hides applied."""
+    fix = _fixer()
     out: dict[str, tuple[str | None, str | None]] = {}
     try:
         rows = db.execute("SELECT raw, place, parent FROM location_map").fetchall()
@@ -46,6 +51,21 @@ def resolved_map(db) -> dict[str, tuple[str | None, str | None]]:
     for raw, place, parent in rows:
         p = fix(place)
         out[raw] = (p, fix(parent) if p else None)
+    return out
+
+
+def resolved_map_v2(db) -> dict[tuple[int, str], tuple[str | None, str | None]]:
+    """(book, raw) -> (place, parent) with writer renames/hides applied."""
+    fix = _fixer()
+    out: dict[tuple[int, str], tuple[str | None, str | None]] = {}
+    try:
+        rows = db.execute("SELECT book_number, raw, place, parent "
+                          "FROM location_map_v2").fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    for book, raw, place, parent in rows:
+        p = fix(place)
+        out[(book, raw)] = (p, fix(parent) if p else None)
     return out
 
 
@@ -58,15 +78,24 @@ def list_locations(include_hidden: bool = False):
     def fix(name):
         return renames.get(name, name) if name else None
 
+    # v2 rows are book-scoped, so the same raw string may resolve to a
+    # different place per book (a character who moves). v1 rows get a None
+    # book and behave exactly as before.
+    v2 = getattr(s.cfg, "enable_location_v2", False)
     try:
-        rows = s.db.execute("SELECT raw, place, parent FROM location_map").fetchall()
+        if v2:
+            rows = s.db.execute("SELECT book_number, raw, place, parent "
+                                "FROM location_map_v2").fetchall()
+        else:
+            rows = [(None, raw, place, parent) for raw, place, parent in
+                    s.db.execute("SELECT raw, place, parent FROM location_map")]
     except sqlite3.OperationalError:
         return {"places": [], "unmapped": 0}
 
     places: dict[str, dict] = {}
     unmapped = 0
-    raw_to_place: dict[str, str] = {}
-    for raw, place, parent in rows:
+    raw_to_place: dict = {}  # v1: raw -> place; v2: (book, raw) -> place
+    for book, raw, place, parent in rows:
         place, parent = fix(place), fix(parent)
         if not place:
             unmapped += 1
@@ -78,15 +107,16 @@ def list_locations(include_hidden: bool = False):
         })
         if parent and not entry["parent"]:
             entry["parent"] = parent
-        entry["raw_variants"].append(raw)
-        raw_to_place[raw] = place
+        if raw not in entry["raw_variants"]:
+            entry["raw_variants"].append(raw)
+        raw_to_place[(book, raw) if v2 else raw] = place
 
     # chapter presence: distinct (book, chapter) whose chunks name any variant
     chapters_by_place: dict[str, set] = {}
     for raw, book, ch in s.db.execute(
             """SELECT l.name, c.book_number, c.chapter_number
                FROM locations l JOIN chunks c ON c.chunk_id = l.chunk_id"""):
-        place = raw_to_place.get(raw)
+        place = raw_to_place.get((book, raw) if v2 else raw)
         if place:
             chapters_by_place.setdefault(place, set()).add((book, ch))
     for place, chs in chapters_by_place.items():
@@ -94,10 +124,10 @@ def list_locations(include_hidden: bool = False):
             places[place]["chapter_count"] = len(chs)
 
     try:
-        for loc, n in s.db.execute(
-                "SELECT location, COUNT(*) FROM events WHERE location IS NOT NULL "
-                "GROUP BY location"):
-            place = raw_to_place.get(loc, fix(loc))
+        for book, loc, n in s.db.execute(
+                "SELECT book_number, location, COUNT(*) FROM events "
+                "WHERE location IS NOT NULL GROUP BY book_number, location"):
+            place = raw_to_place.get((book, loc) if v2 else loc, fix(loc))
             if place and place in places:
                 places[place]["event_count"] += n
     except sqlite3.OperationalError:

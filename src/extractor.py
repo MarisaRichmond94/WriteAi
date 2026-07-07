@@ -68,7 +68,7 @@ Be exhaustive. List every distinct key event, revealed fact, character knowledge
 
 Field guidance:
 - characters_present: characters who appear or speak in the chunk (canonical full names when known, e.g. "Maria Santos" rather than "Maria").
-- locations: physical places where the chunk's action occurs or that are meaningfully referenced.
+- locations: physical places where the chunk's action occurs or that are meaningfully referenced. Name only what the text supports — never infer whether a home is a house or an apartment; when the chunk does not say, use a neutral form ("Jared's home", "Jared's bedroom").
 - timeline_position: when this happens relative to the story (use the chunk's date header and in-text time cues), or null if nothing indicates it.
 - key_events: the concrete plot events that happen in this chunk.
 - new_information_revealed: facts the READER learns for the first time in this chunk.
