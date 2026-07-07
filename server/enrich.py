@@ -453,10 +453,14 @@ def _profile_inputs(db, canon, min_chunks: int = 8) -> list[dict]:
 
 
 def _rel_inputs(db, canon) -> list[dict]:
-    """Per-character evidence bundles for the relationship-nature pass."""
+    """Per-character evidence bundles for the relationship-nature pass.
+
+    Candidates go deeper than the profile payload's top-8 co-occurring:
+    ground-truth checks showed real relationships (user-curated ones) falling
+    outside the top 8, so this pass considers the top 16."""
     out = []
     for p in _profile_inputs(db, canon):
-        others = p["co_occurring"]
+        others = [n for n, _ in canon.co_occurrence(p["name"])[:16]]
         if not others:
             continue
         evidence = relationship_evidence(db, canon, p["name"], others)
@@ -464,9 +468,60 @@ def _rel_inputs(db, canon) -> list[dict]:
             "name": p["name"],
             "others": others,
             "evidence": evidence,
-            "content_hash": _hash(["rel-v5", evidence]),
+            "content_hash": _hash(["rel-v7", evidence]),
         })
     return out
+
+
+_STRONG_HINTS = ("older brother", "oldest brother", "big brother",
+                 "little brother", "best friend", "girlfriend",
+                 "boyfriend", "my cousin", "stepbrother")
+
+_REL_RETRY_NOTE = (
+    "\n\nRETRY: your previous evidence for this character was rejected "
+    "because it was not an exact substring of any excerpt. Pick the single "
+    "most decisive excerpt and copy the evidence from it character for "
+    "character — no ellipses, no merging, no rephrasing.")
+
+
+def _evidence_verifies(evidence: str | None, snippets: list[str]) -> bool:
+    return bool(evidence) and any(
+        norm_quote(evidence) in norm_quote(s) for s in snippets)
+
+
+def label_relationships(call, bundle: dict) -> dict:
+    """Run one evidence bundle through the model: the main call, then one
+    focused retry per pair that either (a) came back null despite a decisive
+    phrase sitting in the snippets, or (b) came back with a nature whose
+    evidence is not a verbatim substring of any snippet — _store_relationships
+    would null it, and a correct nature with a sloppy quote is the most
+    common recoverable failure. `call` is (system, user, schema) -> dict."""
+    data = call(REL_PROMPT, json.dumps({
+        "main_character": bundle["name"],
+        "characters": bundle["others"],
+        "excerpts": bundle["evidence"],
+    }, ensure_ascii=False), _REL_SCHEMA)
+    by_name = {x.get("name"): x for x in data.get("relationships", [])}
+    for o in bundle["others"]:
+        x = by_name.get(o) or {}
+        snippets = bundle["evidence"].get(o, [])
+        bad_quote = bool(x.get("nature")) and not _evidence_verifies(
+            x.get("evidence"), snippets)
+        missed = not x.get("nature") and any(
+            h in s.lower() for s in snippets for h in _STRONG_HINTS)
+        if not (bad_quote or missed):
+            continue
+        retry = call(REL_PROMPT + (_REL_RETRY_NOTE if bad_quote else ""),
+                     json.dumps({
+                         "main_character": bundle["name"],
+                         "characters": [o],
+                         "excerpts": {o: snippets},
+                     }, ensure_ascii=False), _REL_SCHEMA)
+        for rx in retry.get("relationships", []):
+            if (rx.get("name") == o and rx.get("nature")
+                    and _evidence_verifies(rx.get("evidence"), snippets)):
+                by_name[o] = rx
+    return {"relationships": list(by_name.values())}
 
 
 # ── cost preview ────────────────────────────────────────────────────────────
@@ -481,21 +536,26 @@ def preview(db, cfg, canon) -> dict:
     rels = [r for r in _rel_inputs(db, canon)
             if _state(db, f"rels:{r['name']}") != r["content_hash"]]
     loc_batches, _loc_hash = _loc_pending(db, cfg)
+    rel_in = sum(len(json.dumps(r["evidence"])) // 3 + 400 for r in rels)
+    rel_out = len(rels) * 250
     in_tok = sum(len(json.dumps(b)) // 3 + 600 for b in loc_batches) + sum(len(json.dumps(c["notes"])) // 3
                  + sum(len(t["text"]) for t in c["prose"]) // 3 + 400
                  for c in chapters) \
-        + sum((len(p["knowledge"]) + len(p["beats"])) * 20 + 500 for p in profiles) \
-        + sum(len(json.dumps(r["evidence"])) // 3 + 400 for r in rels)
-    out_tok = (len(chapters) * 550 + len(profiles) * 500 + len(rels) * 250
+        + sum((len(p["knowledge"]) + len(p["beats"])) * 20 + 500 for p in profiles)
+    out_tok = (len(chapters) * 550 + len(profiles) * 500
                + sum(len(b) * 25 for b in loc_batches))
     in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))
+    rel_model = cfg.enrich_rel_model or cfg.extraction_model
+    rel_in_p, rel_out_p = PRICING_PER_MTOK.get(rel_model, (in_p, out_p))
     return {
         "chapters_to_process": len(chapters),
         "profiles_to_process": len(profiles),
         "relationships_to_process": len(rels),
         "location_batches_to_process": len(loc_batches),
-        "estimated_cost_usd": round((in_tok * in_p + out_tok * out_p) / 1e6, 3),
+        "estimated_cost_usd": round((in_tok * in_p + out_tok * out_p
+                                     + rel_in * rel_in_p + rel_out * rel_out_p) / 1e6, 3),
         "model": cfg.extraction_model,
+        "rel_model": rel_model,
     }
 
 
@@ -552,14 +612,16 @@ class EnrichmentRunner:
                                       + len(loc_batches) + len(chrono_books)),
                                cost_usd=0.0, error=None)
 
-            def call(system, user, schema):
+            def call(system, user, schema, model=None):
+                m = model or cfg.extraction_model
+                m_in, m_out = PRICING_PER_MTOK.get(m, (in_p, out_p))
                 r = client.messages.create(
-                    model=cfg.extraction_model, max_tokens=8000, system=system,
+                    model=m, max_tokens=8000, system=system,
                     output_config={"format": {"type": "json_schema", "schema": schema}},
                     messages=[{"role": "user", "content": user}])
                 self.status["cost_usd"] = round(
                     self.status["cost_usd"]
-                    + (r.usage.input_tokens * in_p + r.usage.output_tokens * out_p) / 1e6, 4)
+                    + (r.usage.input_tokens * m_in + r.usage.output_tokens * m_out) / 1e6, 4)
                 run_usage["input_tokens"] += r.usage.input_tokens
                 run_usage["output_tokens"] += r.usage.output_tokens
                 run_usage["api_calls"] += 1
@@ -612,36 +674,16 @@ class EnrichmentRunner:
                     log.warning("profile enrichment failed for %s: %s", p["name"], e)
                 self.status["done"] += 1
 
-            # relationship natures — evidence-based, quote-verified
-            strong_hint = ("older brother", "oldest brother", "big brother",
-                           "little brother", "best friend", "girlfriend",
-                           "boyfriend", "my cousin", "stepbrother")
+            # relationship natures — evidence-based, quote-verified. Runs on
+            # ENRICH_REL_MODEL when set: direction inference is the one
+            # enrichment task where the small extraction model demonstrably
+            # fails (nulls with decisive evidence in hand, flipped
+            # older/younger), and the pass is tiny relative to extraction.
+            rel_model = cfg.enrich_rel_model or None
             for r in rels:
                 try:
-                    user = json.dumps({
-                        "main_character": r["name"],
-                        "characters": r["others"],
-                        "excerpts": r["evidence"],
-                    }, ensure_ascii=False)
-                    data = call(REL_PROMPT, user, _REL_SCHEMA)
-                    by_name = {x.get("name"): x for x in data.get("relationships", [])}
-                    # focused retry: pairs the model left null even though a
-                    # decisive phrase is sitting in the snippets
-                    for o in r["others"]:
-                        answered = by_name.get(o, {}).get("nature")
-                        snippets = r["evidence"].get(o, [])
-                        if answered or not any(
-                                h in s.lower() for s in snippets for h in strong_hint):
-                            continue
-                        retry = call(REL_PROMPT, json.dumps({
-                            "main_character": r["name"],
-                            "characters": [o],
-                            "excerpts": {o: snippets},
-                        }, ensure_ascii=False), _REL_SCHEMA)
-                        for x in retry.get("relationships", []):
-                            if x.get("name") == o and x.get("nature"):
-                                by_name[o] = x
-                    data = {"relationships": list(by_name.values())}
+                    data = label_relationships(
+                        lambda s, u, sc: call(s, u, sc, model=rel_model), r)
                     self._store_relationships(db, r, data)
                     _set_state(db, f"rels:{r['name']}", r["content_hash"])
                     db.commit()
