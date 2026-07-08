@@ -1092,25 +1092,28 @@ export default function ReviewPane() {
                   </div>
                 )}
 
-                {/* Review button */}
-                <div className="relative group/revbtn">
-                  <button
-                    onClick={handleReviewClick}
-                    disabled={!canSend}
-                    className={clsx(
-                      "flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                      canSend
-                        ? "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
-                        : "border-surface-border text-ink-muted/30 cursor-not-allowed"
-                    )}
-                  >
-                    <ScanText className="h-3 w-3" />
-                    Review
-                  </button>
-                  <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-60 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/revbtn:opacity-100">
-                    {`Send this chapter to your selected reviewer (${filterFocus}). The review streams into the chat below, grounded in earlier books for continuity.`}
+                {/* Review button — hidden once a draft has a review underway;
+                    Resync (above) is the follow-up action in that state. */}
+                {!(draft && messages.length > 0) && (
+                  <div className="relative group/revbtn">
+                    <button
+                      onClick={handleReviewClick}
+                      disabled={!canSend}
+                      className={clsx(
+                        "flex items-center gap-1.5 rounded border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                        canSend
+                          ? "border-accent/40 bg-accent/10 text-accent hover:bg-accent/20"
+                          : "border-surface-border text-ink-muted/30 cursor-not-allowed"
+                      )}
+                    >
+                      <ScanText className="h-3 w-3" />
+                      Review
+                    </button>
+                    <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-60 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/revbtn:opacity-100">
+                      {`Send this chapter to your selected reviewer (${filterFocus}). The review streams into the chat below, grounded in earlier books for continuity.`}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Re-Index: amber warning when draft is out of sync,
                     disabled when already in sync, neutral when no draft. */}
