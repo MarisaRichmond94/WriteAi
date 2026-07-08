@@ -29,11 +29,16 @@ const NAV_GROUPS = [
   },
 ] as const;
 
-export default function Sidebar() {
+export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
   const { activePane, setActivePane, siteName } = useAppStore();
 
   return (
-    <aside className="flex h-full w-64 flex-shrink-0 flex-col border-r border-surface-border bg-surface-card">
+    <aside
+      className={clsx(
+        "flex h-full flex-shrink-0 flex-col overflow-hidden bg-surface-card transition-[width] duration-300 ease-in-out",
+        collapsed ? "w-0 border-r-0" : "w-64 border-r border-surface-border"
+      )}
+    >
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-surface-border px-4 py-4">
         <img src="/logo.svg" alt="" className="h-10 w-10 flex-shrink-0" />

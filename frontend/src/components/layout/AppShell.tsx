@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
-import { Moon, Settings as SettingsIcon, Sun } from "lucide-react";
+import { ChevronLeft, ChevronRight, Moon, Settings as SettingsIcon, Sun } from "lucide-react";
 import { fetchBooks, fetchIndexStatus } from "../../api/books";
 import { fetchSessions } from "../../api/sessions";
 import { fetchSettings } from "../../api/settings";
@@ -71,6 +71,40 @@ export default function AppShell() {
       return next;
     });
 
+  // Sidebar collapse (Loom's pattern): plain state + localStorage, no store.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => localStorage.getItem("writeai-sidebar-collapsed") === "true"
+  );
+  const [edgeHovered, setEdgeHovered] = useState(false);
+  const edgeLeaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function toggleSidebar() {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      localStorage.setItem("writeai-sidebar-collapsed", String(next));
+      return next;
+    });
+  }
+  function onEdgeEnter() {
+    if (edgeLeaveTimer.current) clearTimeout(edgeLeaveTimer.current);
+    setEdgeHovered(true);
+  }
+  function onEdgeLeave() {
+    edgeLeaveTimer.current = setTimeout(() => setEdgeHovered(false), 150);
+  }
+
+  // ⌥⇧1 toggles the sidebar — matches Loom's shortcut for the same action.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.altKey && e.shiftKey && e.code === "Digit1") {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     params.set("pane", activePane);
@@ -120,7 +154,37 @@ export default function AppShell() {
         </div>
       )}
       <div className="flex flex-1 overflow-hidden bg-surface">
-      <Sidebar />
+      {/* Wrapper stays w-3 when collapsed so the hover strip (and handle) stay reachable at the edge */}
+      <div
+        className={clsx(
+          "relative flex-shrink-0 transition-[width] duration-300 ease-in-out",
+          sidebarCollapsed ? "w-3" : "w-64"
+        )}
+        onMouseEnter={onEdgeEnter}
+        onMouseLeave={onEdgeLeave}
+      >
+        <Sidebar collapsed={sidebarCollapsed} />
+
+        <div
+          className="absolute inset-y-0 left-full z-40 flex items-center"
+          onMouseEnter={onEdgeEnter}
+          onMouseLeave={onEdgeLeave}
+        >
+          <button
+            onClick={toggleSidebar}
+            title={`${sidebarCollapsed ? "Expand" : "Collapse"} sidebar (⌥⇧1)`}
+            aria-label={`${sidebarCollapsed ? "Expand" : "Collapse"} sidebar`}
+            className={clsx(
+              "flex h-14 items-center justify-center overflow-hidden rounded-r-xl border border-l-0 border-surface-border bg-surface-card text-ink-muted shadow-lg transition-all duration-300 ease-in-out hover:text-ink-primary",
+              edgeHovered ? "w-7 opacity-100" : "w-0 opacity-0"
+            )}
+          >
+            {sidebarCollapsed
+              ? <ChevronRight className="h-3.5 w-3.5 flex-shrink-0" />
+              : <ChevronLeft className="h-3.5 w-3.5 flex-shrink-0" />}
+          </button>
+        </div>
+      </div>
       <main className={clsx("relative flex flex-1 flex-col overflow-hidden", lightMode && "light-body")}>
         <div className="absolute right-6 top-5 z-50 flex items-center gap-2">
           {appSettings === null ? (
