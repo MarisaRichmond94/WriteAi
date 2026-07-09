@@ -1067,6 +1067,7 @@ export default function TimelinePane() {
   }, []);
 
   useEffect(() => {
+    let ignore = false;
     setLoading(true);
     setError(null);
     const filters: { book?: string; pov?: string; order?: "narrative" | "story" } = {};
@@ -1074,9 +1075,10 @@ export default function TimelinePane() {
     if (filterPov) filters.pov = filterPov;
     if (effectiveOrder === "story") filters.order = "story";
     fetchEvents(Object.keys(filters).length ? filters : undefined)
-      .then(setEvents)
-      .catch(() => setError("Failed to load events. Run extraction to generate events data."))
-      .finally(() => setLoading(false));
+      .then((res) => { if (!ignore) setEvents(res); })
+      .catch(() => { if (!ignore) setError("Failed to load events. Run extraction to generate events data."); })
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
   }, [filterBook, filterPov, effectiveOrder]);
 
   useEffect(() => {
