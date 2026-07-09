@@ -5,6 +5,9 @@ import { generateMockChapterText } from "../mocks/timelineMocks";
 
 export interface ReviewRequest {
   chapter_text: string;
+  // draft reviewed last turn — the backend computes a diff against it so the
+  // re-review assesses actual changes instead of reconstructing them
+  previous_text?: string;
   chapter?: number;   // synced chapter number — backend scopes context strictly before it
   book: string;
   focus: ReviewFocus;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
 import sqlite3
 import time
@@ -97,6 +98,21 @@ NO_IDEAL_INSTRUCTION = """Do not produce a full rewritten version of the chapter
 STORY_NOTES_HEADER = ("== STORY SO FAR (events from earlier in the series, "
                       "for continuity checking — not under review) ==")
 
+# Re-review of an updated draft: the previous draft never survives in the
+# conversation history (user turns store only the short message), so without
+# an explicit diff the model must reconstruct "what changed" from its own
+# earlier reply — the main source of hallucinated repetitions/regressions.
+DRAFT_DIFF_HEADER = ("== CHANGES FROM THE PREVIOUS DRAFT (computed diff of the "
+                     "draft you last reviewed against the chapter above) ==")
+DRAFT_DIFF_INSTRUCTION = (
+    "The chapter above is the author's updated draft of the SAME chapter you "
+    "reviewed earlier in this conversation — it replaces that draft; it is "
+    "not a new or repeated chapter. The diff lists every passage that "
+    "changed; everything not listed is unchanged from the draft you already "
+    "reviewed. Base your assessment of what changed strictly on the diff — "
+    "do not infer other changes, and do not treat unchanged prose as new or "
+    "repeated material.")
+
 # how many events immediately preceding the chapter get full summaries
 _DIGEST_TAIL = 12
 # hard cap on digest lines; oldest lines drop first (recency matters most)
@@ -107,6 +123,7 @@ class ReviewRequest(BaseModel):
     book: int | str
     chapter: int | None = None        # synced chapter…
     chapter_text: str | None = None   # …or a pasted/draft text (wins over the index)
+    previous_text: str | None = None  # draft reviewed last turn (re-review diffs against it)
     focus: str = "Casual Reader"
     message: str = ""
     conversation_history: list[dict] = []
@@ -162,6 +179,27 @@ def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
         dropped = len(lines) - _DIGEST_MAX
         lines = [f"(…{dropped} earlier events omitted)"] + lines[-_DIGEST_MAX:]
     return lines
+
+
+def _draft_diff(old: str, new: str) -> str:
+    """Readable paragraph-level diff between two drafts of the same chapter.
+    Empty string when nothing changed beyond whitespace."""
+    old_paras = [p.strip() for p in old.split("\n\n") if p.strip()]
+    new_paras = [p.strip() for p in new.split("\n\n") if p.strip()]
+    sm = difflib.SequenceMatcher(a=old_paras, b=new_paras, autojunk=False)
+    blocks = []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            continue
+        block = [f"--- change {len(blocks) + 1} ---"]
+        if tag in ("replace", "delete"):
+            block.append("BEFORE:" if tag == "replace" else "REMOVED:")
+            block += old_paras[i1:i2]
+        if tag in ("replace", "insert"):
+            block.append("AFTER:" if tag == "replace" else "ADDED:")
+            block += new_paras[j1:j2]
+        blocks.append("\n".join(block))
+    return "\n\n".join(blocks)
 
 
 def _probes(text: str, message: str) -> list[str]:
@@ -243,9 +281,15 @@ def review_stream(req: ReviewRequest):
                     ch_label += f", POV {meta_row[0]}"
                 if meta_row[1]:
                     ch_label += f", {meta_row[1]}"
+        chapter_block = (f"CHAPTER UNDER REVIEW (Book {req.book}{ch_label}):"
+                         f"\n\n{text}")
+        if req.previous_text and req.previous_text != text:
+            diff = _draft_diff(req.previous_text, text)
+            if diff:
+                chapter_block += (f"\n\n{DRAFT_DIFF_HEADER}\n{diff}"
+                                  f"\n\n{DRAFT_DIFF_INSTRUCTION}")
         review_plan = QueryPlan(
-            question=(f"CHAPTER UNDER REVIEW (Book {req.book}{ch_label}):"
-                      f"\n\n{text}\n\n{question}"),
+            question=f"{chapter_block}\n\n{question}",
             qtype="general")
 
         answerer = s.new_answerer(model=req.model)
@@ -267,7 +311,8 @@ def review_stream(req: ReviewRequest):
                  usage=usage_diff(answerer.usage, u0),
                  cost_usd=round(answerer.actual_cost_usd - c0, 4),
                  latency_ms=int((time.monotonic() - t0) * 1000),
-                 extra={"focus": req.focus, "include_ideal": req.include_ideal})
+                 extra={"focus": req.focus, "include_ideal": req.include_ideal,
+                        "draft_rereview": bool(req.previous_text)})
         yield citations_payload(excerpts)
         yield {"type": "usage", "model": answerer.model,
                "cost_usd": answerer.actual_cost_usd}

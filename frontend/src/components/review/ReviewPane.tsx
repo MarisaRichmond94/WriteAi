@@ -665,9 +665,15 @@ export default function ReviewPane() {
   const canSend = !!chapterText.trim() && !!filterBook && !isStreaming && !resyncing;
 
   // textOverride carries a just-loaded updated draft — state hasn't
-  // re-rendered yet when the send fires.
-  const sendMessage = useCallback(async (text: string, textOverride?: string) => {
-    const reviewText = textOverride ?? chapterText;
+  // re-rendered yet when the send fires (same for modelOverride, which the
+  // updated-draft flow sets alongside a setModel call). previousText rides
+  // to the backend so a re-review diffs the drafts instead of asking the
+  // model to reconstruct what changed.
+  const sendMessage = useCallback(async (
+    text: string,
+    opts?: { textOverride?: string; previousText?: string; modelOverride?: string },
+  ) => {
+    const reviewText = opts?.textOverride ?? chapterText;
     if (!reviewText.trim() || !filterBook || isStreaming || resyncing || !text.trim()) return;
 
     const userMsg: ReviewMessage = {
@@ -720,12 +726,13 @@ export default function ReviewPane() {
     try {
       const gen = streamReview({
         chapter_text: reviewText,
+        previous_text: opts?.previousText,
         chapter: typeof selectedChapter === "number" ? selectedChapter : undefined,
         book: filterBook,
         focus: filterFocus,
         message: text,
         conversation_history: history,
-        model,
+        model: opts?.modelOverride ?? model,
         include_ideal: includeIdeal,
       });
 
@@ -779,9 +786,14 @@ export default function ReviewPane() {
       refreshBell();
       return;
     }
+    // Diffing drafts is the hardest turn of the conversation — undo the
+    // automatic cheap-model downshift for it (visibly, via the dropdown).
+    // A model the writer picked by hand sticks.
+    const reviewModel = autoTunedRef.current ? defaultModel : model;
+    if (autoTunedRef.current) setModel(defaultModel);
     sendMessage(
       "I've revised the chapter — here is my updated draft. Assess the changes against your earlier feedback: what improved, and what still needs work?",
-      d.text,
+      { textOverride: d.text, previousText: prevText, modelOverride: reviewModel },
     );
   };
 
