@@ -4,7 +4,7 @@ import type { AppSettings } from "../types";
 interface BackendSettings {
   fields: { key: string; value: string }[];
   profile: { writer_name: string; site_name: string; writer_photo_url?: string | null;
-             book_order?: string[] };
+             book_order?: string[]; sync_time?: string; auto_sync_enabled?: boolean };
   discovered_books?: string[];
 }
 
@@ -23,8 +23,8 @@ export async function fetchSettings(): Promise<AppSettings> {
     books_dir: f("TEXT_EXPORT_DIR"),
     data_dir: f("DATA_DIR"),
     backup_retention_days: 30,
-    sync_time: "02:30",
-    auto_sync_enabled: true,
+    sync_time: data.profile.sync_time ?? "02:30",
+    auto_sync_enabled: data.profile.auto_sync_enabled ?? true,
     book_order: data.profile.book_order ?? [],
     query_model: f("QUERY_MODEL"),
     extraction_model: f("EXTRACTION_MODEL"),
@@ -55,6 +55,8 @@ export async function saveSettings(
   if (updates.site_name !== undefined) profile.site_name = updates.site_name;
   if (updates.book_order !== undefined) profile.book_order = updates.book_order;
   if (updates.writer_photo_url !== undefined) profile.writer_photo_url = updates.writer_photo_url;
+  if (updates.sync_time !== undefined) profile.sync_time = updates.sync_time;
+  if (updates.auto_sync_enabled !== undefined) profile.auto_sync_enabled = updates.auto_sync_enabled;
 
   const res = await fetch("/api/settings", {
     method: "PUT",

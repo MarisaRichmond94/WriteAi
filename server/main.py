@@ -7,7 +7,9 @@ Serves /api/* plus the built frontend (frontend/dist) when present.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +17,7 @@ from fastapi.staticfiles import StaticFiles
 
 from config import REPO_ROOT
 
+from . import scheduler
 from .routers import (books, characters, chat, events, locations,
                       notifications, plan, review, sessions, settings,
                       writer_events)
@@ -23,7 +26,15 @@ logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
                     datefmt="%H:%M:%S")
 
-app = FastAPI(title="Series RAG", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    task = asyncio.create_task(scheduler.run_forever())
+    yield
+    task.cancel()
+
+app = FastAPI(title="Series RAG", docs_url="/api/docs", openapi_url="/api/openapi.json",
+              lifespan=lifespan)
 
 app.add_middleware(  # dev server on :5173 talks to us directly
     CORSMiddleware, allow_origins=["http://localhost:5173"],
