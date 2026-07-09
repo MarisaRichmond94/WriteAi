@@ -224,6 +224,36 @@ def ensure_tables(db: sqlite3.Connection) -> None:
     db.commit()
 
 
+def gc_orphans(db: sqlite3.Connection) -> int:
+    """Remove enrichment rows for (book, chapter) pairs no longer present in
+    chunks. Enrichment only ever rewrites chapters that currently exist, so
+    after a renumbering or a shrunk book the vanished chapter numbers would
+    keep serving their old events/summaries forever — the same scenes under
+    stale labels, which reviews then present as duplicate story material.
+    Returns the number of rows deleted. Safe on a DB with no chunks table yet."""
+    ensure_tables(db)
+    total = 0
+    try:
+        for table in ("events", "chapter_summaries"):
+            total += db.execute(
+                f"""DELETE FROM {table} WHERE NOT EXISTS (
+                        SELECT 1 FROM chunks k
+                        WHERE k.book_number = {table}.book_number
+                          AND k.chapter_number = {table}.chapter_number)"""
+            ).rowcount
+        total += db.execute(
+            """DELETE FROM enrich_state WHERE scope LIKE 'events:%'
+               AND scope NOT IN (SELECT 'events:' || book_number || '.'
+                                        || chapter_number FROM chunks)"""
+        ).rowcount
+    except sqlite3.OperationalError:  # ingest has never run — nothing to GC
+        db.rollback()
+        return 0
+    if total:
+        db.commit()
+    return total
+
+
 def norm_quote(s: str) -> str:
     """Normalize for verbatim-quote matching: models straighten curly quotes
     and collapse whitespace when copying, but the words must match exactly."""
@@ -589,6 +619,10 @@ class EnrichmentRunner:
             db = sqlite3.connect(db_path)  # thread-local connection
             canon = canon_factory(db)
             ensure_tables(db)
+            removed = gc_orphans(db)
+            if removed:
+                log.info("enrichment GC: removed %d stale row(s) for chapters "
+                         "no longer in the index", removed)
             client = anthropic.Anthropic(api_key=cfg.anthropic_api_key or None,
                                          max_retries=4)
             in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))

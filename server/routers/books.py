@@ -561,6 +561,22 @@ def ingest_run(book: int | None = None):
             code = proc.wait()
             audit.log_event("ingest_exited", f"re-ingest of {scope} exited",
                             exit_code=code)
+            if code == 0:
+                # chapters may have been renumbered or removed by this sync:
+                # purge enrichment rows (events/summaries) stranded at chapter
+                # numbers that no longer exist, or reviews serve the old
+                # numbering back as duplicate "earlier" story material.
+                # get_state().db is thread-local — safe from this thread.
+                try:
+                    from ..enrich import gc_orphans
+                    removed = gc_orphans(get_state().db)
+                    if removed:
+                        audit.log_event(
+                            "enrich_gc",
+                            "purged stale enrichment rows after re-ingest",
+                            rows=removed)
+                except Exception:
+                    log.exception("post-ingest enrichment GC failed")
             if code != 0:
                 from .. import notify
                 notify.add("error", "Sync failed",

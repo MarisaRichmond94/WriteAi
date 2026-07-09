@@ -122,7 +122,10 @@ function ResyncConfirmModal({
   onConfirm: (runEnrich: boolean) => void;
   onCancel: () => void;
 }) {
-  const [runEnrich, setRunEnrich] = useState(false);
+  // Default ON: skipping enrichment leaves events/summaries describing the
+  // pre-sync chapter numbering, which reviews then serve back as duplicate
+  // "earlier" story material. Unchecking is the writer's cost-saving opt-out.
+  const [runEnrich, setRunEnrich] = useState(true);
   const [estimate, setEstimate] = useState<PipelineCostEstimate | null>(initialEstimate ?? null);
   const [estimating, setEstimating] = useState(false);
 
@@ -721,7 +724,10 @@ export default function ReviewPane() {
       ...(selectedChapter === "new" && reviewText ? { chapterText: reviewText } : {}),
     });
 
-    const history = messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
+    // Full history — the server pins the original review, strips Ideal
+    // Version rewrites, and windows the rest. Slicing here would evict the
+    // round-1 feedback that re-review turns explicitly refer back to.
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
 
     try {
       const gen = streamReview({

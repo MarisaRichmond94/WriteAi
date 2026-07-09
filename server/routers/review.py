@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import difflib
 import logging
+import re
 import sqlite3
 import time
 
@@ -118,6 +119,22 @@ _DIGEST_TAIL = 12
 # hard cap on digest lines; oldest lines drop first (recency matters most)
 _DIGEST_MAX = 120
 
+# conversation window sent to the model. The FIRST exchange (the original
+# review) is pinned: re-review turns explicitly refer back to "your earlier
+# feedback", which a blind tail window evicts by round three.
+_HISTORY_KEEP = 6
+
+# an assistant reply's "## Ideal Version" section is a near-full rewrite of
+# the chapter; replayed on later turns it reads as the chapter appearing
+# twice and gets misattributed to the author as repetition
+_IDEAL_RE = re.compile(r"^#{1,4}\s*Ideal Version\b.*$",
+                       re.MULTILINE | re.IGNORECASE)
+
+# background excerpts whose word-shingles mostly appear in the chapter under
+# review are almost certainly a stale indexed copy of that very chapter
+# (e.g. at its pre-renumbering position) — the numeric scope can't catch those
+_SELF_SIM = 0.5
+
 
 class ReviewRequest(BaseModel):
     book: int | str
@@ -141,10 +158,16 @@ def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
     else:
         cond = "book_number < ? OR (book_number = ? AND chapter_number < ?)"
         params = [book, book, chapter]
+    # the EXISTS guards skip enrichment rows stranded at chapter numbers that
+    # no longer exist in the index (renumbered/removed chapters): they repeat
+    # the story under stale labels until an enrichment run GCs them
     try:
         rows = db.execute(
             f"""SELECT book_number, chapter_number, title, granularity, summary
-                FROM events WHERE {cond}
+                FROM events WHERE ({cond})
+                  AND EXISTS (SELECT 1 FROM chunks k
+                              WHERE k.book_number = events.book_number
+                                AND k.chapter_number = events.chapter_number)
                 ORDER BY book_number, chapter_number, position""", params).fetchall()
     except sqlite3.OperationalError:    # enrichment hasn't run yet
         return []
@@ -156,6 +179,9 @@ def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
         prose = db.execute(
             f"""SELECT chapter_number, summary FROM chapter_summaries
                 WHERE book_number = ? AND {ch_cond}
+                  AND EXISTS (SELECT 1 FROM chunks k
+                              WHERE k.book_number = chapter_summaries.book_number
+                                AND k.chapter_number = chapter_summaries.chapter_number)
                 ORDER BY chapter_number""", ch_params).fetchall()
     except sqlite3.OperationalError:
         prose = []
@@ -202,6 +228,70 @@ def _draft_diff(old: str, new: str) -> str:
     return "\n\n".join(blocks)
 
 
+def _strip_ideal(content: str) -> str:
+    """Drop the tracked-changes rewrite from a replayed assistant reply,
+    keeping the critique above it. The rewrite is a near-copy of the chapter
+    — on later turns the model sees it next to the re-sent draft and
+    misreads the duplication as the author repeating herself."""
+    m = _IDEAL_RE.search(content)
+    if m is None:
+        return content
+    return (content[:m.start()].rstrip()
+            + "\n\n[A full tracked-changes rewrite of the chapter followed "
+              "here — omitted from the replayed conversation.]")
+
+
+def _condense_history(raw: list[dict]) -> list[dict]:
+    """API-ready conversation history: Ideal Version rewrites stripped, the
+    first exchange pinned, the most recent turns kept."""
+    msgs = [{"role": m["role"],
+             "content": (_strip_ideal(m["content"]) if m["role"] == "assistant"
+                         else m["content"])}
+            for m in raw
+            if m.get("role") in ("user", "assistant") and m.get("content")]
+    if len(msgs) <= _HISTORY_KEEP:
+        return msgs
+    if msgs[0]["role"] == "user" and msgs[1]["role"] == "assistant":
+        head, rest = msgs[:2], msgs[2:]
+    else:                               # unexpected shape — plain tail window
+        head, rest = [], msgs
+    tail = rest[-(_HISTORY_KEEP - len(head)):]
+    while tail and tail[0]["role"] != "user":   # keep roles alternating
+        tail.pop(0)
+    return head + tail
+
+
+def _shingles(text: str, n: int = 8) -> set[tuple[str, ...]]:
+    """Overlapping n-word windows — cheap, order-sensitive text fingerprint."""
+    words = text.lower().split()
+    return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def _match_indexed_chapter(db, book: int, text: str) -> int | None:
+    """The chapter of `book` a pasted draft is a revision of, if any.
+
+    A paste with no chapter number is otherwise scoped as following the whole
+    book — wrong when it is really a rework of an indexed chapter: the old
+    copy of that same chapter becomes retrievable background and the story
+    digest includes the chapter itself. A majority of the draft's shingles
+    landing in one chapter is decisive; a mostly-new chapter matches nothing
+    and keeps the end-of-book scoping."""
+    draft = _shingles(text)
+    if not draft:
+        return None
+    chapters: dict[int, list[str]] = {}
+    for cn, t in db.execute(
+            "SELECT chapter_number, text FROM chunks WHERE book_number = ? "
+            "ORDER BY chapter_number, chunk_index", (book,)):
+        chapters.setdefault(cn, []).append(t)
+    best, best_ratio = None, 0.0
+    for cn, parts in chapters.items():
+        ratio = len(draft & _shingles("\n\n".join(parts))) / len(draft)
+        if ratio > best_ratio:
+            best, best_ratio = cn, ratio
+    return best if best_ratio >= _SELF_SIM else None
+
+
 def _probes(text: str, message: str) -> list[str]:
     """Retrieval probes covering the whole chapter, not just its opening."""
     probes = [message] if message.strip() else []
@@ -239,6 +329,15 @@ def review_stream(req: ReviewRequest):
     if not text:
         raise HTTPException(400, "no chapter selected or pasted")
 
+    # a pasted draft is often a revision of an already-indexed chapter —
+    # recognize it and scope as that chapter, so its old copy doesn't come
+    # back as "earlier" background
+    if req.chapter is None:
+        req.chapter = _match_indexed_chapter(s.db, req.book, text)
+        if req.chapter is not None:
+            log.info("review: pasted draft matched Book %s Chapter %s — "
+                     "scoping as a revision of it", req.book, req.chapter)
+
     # context bound: strictly BEFORE the chapter under review. A prologue
     # (or chapter 0/1) gets earlier books only; a pasted draft is assumed
     # to come after everything synced for its book.
@@ -256,13 +355,27 @@ def review_stream(req: ReviewRequest):
         excerpts: list[dict] = []
         if not no_prior:
             seen = set()
+            dropped_self = 0
+            chapter_shingles = _shingles(text)
             per_probe = max(3, s.cfg.top_k_results // 2)
             for probe in _probes(text, req.message):
                 plan = QueryPlan(question=probe, qtype="general", scope=scope)
                 for e in s.retriever._semantic(plan, top_k=per_probe):
-                    if e["chunk_id"] not in seen:
-                        seen.add(e["chunk_id"])
-                        excerpts.append(e)
+                    if e["chunk_id"] in seen:
+                        continue
+                    seen.add(e["chunk_id"])
+                    # a stale copy of the chapter under review (say, indexed
+                    # at its pre-renumbering number) passes the numeric scope
+                    # but reads as the author repeating the chapter — drop on
+                    # content overlap
+                    esh = _shingles(e["text"])
+                    if esh and len(esh & chapter_shingles) / len(esh) >= _SELF_SIM:
+                        dropped_self += 1
+                        continue
+                    excerpts.append(e)
+            if dropped_self:
+                log.info("review: dropped %d excerpt(s) near-identical to the "
+                         "chapter under review", dropped_self)
             excerpts = excerpts[:s.cfg.top_k_results + 2]
         notes = [] if no_prior else _story_so_far(s.db, req.book, req.chapter)
 
@@ -293,9 +406,7 @@ def review_stream(req: ReviewRequest):
             qtype="general")
 
         answerer = s.new_answerer(model=req.model)
-        history = [{"role": m["role"], "content": m["content"]}
-                   for m in req.conversation_history[-6:]
-                   if m.get("role") in ("user", "assistant") and m.get("content")]
+        history = _condense_history(req.conversation_history)
         # the Ideal Version section rewrites the whole chapter with markup —
         # far past the default 12K output budget
         ideal = IDEAL_VERSION_INSTRUCTION if req.include_ideal else NO_IDEAL_INSTRUCTION
