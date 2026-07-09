@@ -890,6 +890,8 @@ function Section({ title, children, prominent, grow, className }: { title: strin
 // ── Main pane ─────────────────────────────────────────────────────────────────
 export default function CharactersPane() {
   const { showToast, setActivePane, setPendingPipelineBook, books } = useAppStore();
+  const pendingCharacterName = useAppStore((s) => s.pendingCharacterName);
+  const setPendingCharacterName = useAppStore((s) => s.setPendingCharacterName);
   const bookOrder = books.map((b) => b.name);
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -946,6 +948,25 @@ export default function CharactersPane() {
   useEffect(() => {
     load(bookFilter);
   }, [bookFilter, load]);
+
+  // Cross-pane deep link: when arriving with a pending character name (e.g. from
+  // the timeline event drawer), resolve it to a card and open its profile panel.
+  useEffect(() => {
+    if (!pendingCharacterName || characters.length === 0) return;
+    const target = pendingCharacterName.toLowerCase();
+    const match =
+      characters.find((c) => c.name.toLowerCase() === target) ??
+      characters.find((c) => c.name.split(" ")[0].toLowerCase() === target.split(" ")[0]);
+    setPendingCharacterName(null);
+    if (!match) return;
+    if (match.hidden) setShowHidden(true);
+    setActiveId(match.id);
+    setPanelOpen(true);
+    setViewerOpen(false);
+    setTimeout(() => {
+      cardRefs.current[match.id]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 100);
+  }, [pendingCharacterName, characters, setPendingCharacterName]);
 
   // Sync search to URL; clear on unmount (when user leaves the tab)
   useEffect(() => {

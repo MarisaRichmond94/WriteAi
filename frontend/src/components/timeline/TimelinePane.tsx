@@ -168,118 +168,6 @@ function AvatarCircle({
   );
 }
 
-// ── Character profile panel ────────────────────────────────────────────────────
-
-function CharacterProfilePanel({
-  name,
-  filterBook,
-  characterPhotos,
-}: {
-  name: string;
-  filterBook: string;
-  characterPhotos: Record<string, string>;
-}) {
-  const stub = generateMockCharacterProfile(name, filterBook || undefined);
-  const [real, setReal] = useState<Record<string, any> | null>(null);
-  useEffect(() => {
-    setReal(null);
-    fetch(`/api/characters/${encodeURIComponent(name)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then(setReal)
-      .catch(() => setReal(null));
-  }, [name]);
-  const profile = real
-    ? {
-        ...stub,
-        role: real.is_pov ? "POV Character" : "Character",
-        aliases: (real.aliases ?? []).map((a: any) => a.alias ?? a),
-        traits: real.traits ?? [],
-        relationships: (real.relationships ?? []).slice(0, 8).map((r: any) => ({
-          name: r.target,
-          nature: r.status,
-        })),
-        books: real.books ?? [],
-        description: Object.values(real.arc ?? {})
-          .flat()
-          .map((a: any) => a?.insight)
-          .filter(Boolean)
-          .join(" ")
-          .slice(0, 400),
-      }
-    : stub;
-
-  return (
-    <div className="flex h-full flex-col bg-surface-card">
-      {/* Header — avatar circle fills the padded height on the left */}
-      <div className="flex-shrink-0 flex border-b border-surface-border">
-        {/* Avatar column: py matches text column so circle is same height as text content */}
-        <div className="flex-shrink-0 flex items-center py-4 pl-4 pr-3">
-          <AvatarCircle
-            name={name}
-            photoUrl={resolvePhoto(name, characterPhotos)}
-            className="h-10 w-10 text-base"
-          />
-        </div>
-        {/* Text column */}
-        <div className="flex-1 min-w-0 py-4 pr-4">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-ink-muted mb-1">{profile.role}</p>
-          <h3 className="text-base font-bold text-ink-primary">{profile.name}</h3>
-          {profile.aliases.length > 0 && (
-            <p className="mt-0.5 text-[11px] text-ink-muted">Also known as: {profile.aliases.join(", ")}</p>
-          )}
-        </div>
-      </div>
-      {/* Body */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-5 py-4 space-y-4">
-        <p className="text-sm leading-relaxed text-ink-secondary">{profile.description}</p>
-
-        {profile.traits.length > 0 && (
-          <div>
-            <SectionHeader label="Traits" />
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {profile.traits.map((t: string) => (
-                <span key={t} className="rounded border border-surface-border bg-surface px-2 py-0.5 text-[11px] text-ink-secondary">{t}</span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {profile.relationships.length > 0 && (
-          <div>
-            <SectionHeader label="Relationships" count={profile.relationships.length} />
-            <div className="mt-1.5 space-y-2">
-              {profile.relationships.map((r: { name: string; nature: string }) => (
-                <div key={r.name} className="flex items-center gap-2.5 rounded-md border border-surface-border bg-surface px-3 py-2">
-                  <AvatarCircle
-                    name={r.name}
-                    photoUrl={resolvePhoto(r.name, characterPhotos)}
-                    className="h-8 w-8 text-[10px]"
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-semibold text-ink-primary">{r.name}</p>
-                    <p title={r.nature} className="mt-0.5 text-[11px] text-ink-muted truncate">{r.nature}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {profile.booksAppearing.length > 0 && (
-          <div>
-            <SectionHeader label="Appears In" count={profile.booksAppearing.length} />
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {profile.booksAppearing.map((b: string) => (
-                <span key={b} className={clsx("rounded border px-2 py-0.5 text-[11px]", bookPillColor(b))}>{b}</span>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ── EventDrawer ───────────────────────────────────────────────────────────────
 
 function EventDrawer({
@@ -302,23 +190,23 @@ function EventDrawer({
   onClose: () => void;
 }) {
   const [activePill, setActivePill] = useState<EventSourceQuote | null>(null);
-  const [selectedCharacter, setSelectedCharacter] = useState<string | null>(null);
   const [lightMode, setLightMode] = useState(() => useAppStore.getState().appSettings?.viewer_light_mode ?? true);
+  const setActivePane = useAppStore((s) => s.setActivePane);
+  const setPendingCharacterName = useAppStore((s) => s.setPendingCharacterName);
 
   // Reset side panels when event changes
   useEffect(() => {
     setActivePill(null);
-    setSelectedCharacter(null);
   }, [event?.id]);
 
   function openSource(quote: EventSourceQuote) {
     setActivePill(prev => prev === quote ? null : quote);
-    setSelectedCharacter(null);
   }
 
+  // Hand off to the Characters pane, which resolves the name and opens the profile.
   function openCharacter(name: string) {
-    setSelectedCharacter(prev => prev === name ? null : name);
-    setActivePill(null);
+    setPendingCharacterName(name);
+    setActivePane("characters");
   }
 
   const citation: Citation | null = activePill
@@ -334,7 +222,7 @@ function EventDrawer({
       }
     : null;
 
-  const sideOpen = citation !== null || selectedCharacter !== null;
+  const sideOpen = citation !== null;
 
   return (
     <div className={clsx("flex h-full flex-1 flex-col overflow-hidden relative", event && "border-t border-surface-border")}>
@@ -419,17 +307,12 @@ function EventDrawer({
                       {event.participants.map((p) => {
                         const profile = generateMockCharacterProfile(p);
                         const aliases = profile.aliases.slice(0, 3);
-                        const active = selectedCharacter === p;
                         return (
                           <button
                             key={p}
                             onClick={() => openCharacter(p)}
-                            className={clsx(
-                              "flex items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors",
-                              active
-                                ? "border-accent/50 bg-accent/10"
-                                : "border-surface-border bg-surface hover:border-accent/30 hover:bg-surface-hover"
-                            )}
+                            title={`View ${p} in Characters`}
+                            className="flex items-center gap-2.5 rounded-lg border border-surface-border bg-surface px-3 py-2 text-left transition-colors hover:border-accent/30 hover:bg-surface-hover"
                           >
                             <AvatarCircle
                               name={p}
@@ -437,7 +320,7 @@ function EventDrawer({
                               className="h-9 w-9 text-[11px]"
                             />
                             <div className="min-w-0">
-                              <div className={clsx("text-[12px] font-semibold", active ? "text-accent" : "text-ink-primary")}>
+                              <div className="text-[12px] font-semibold text-ink-primary">
                                 {p}
                               </div>
                               {aliases.length > 0 && (
@@ -535,13 +418,6 @@ function EventDrawer({
               bookId={bookIdFromName(citation.book)}
               lightMode={lightMode}
               onToggleLightMode={() => setLightMode((v) => !v)}
-            />
-          )}
-          {selectedCharacter && !citation && (
-            <CharacterProfilePanel
-              name={selectedCharacter}
-              filterBook={filterBook}
-              characterPhotos={characterPhotos}
             />
           )}
         </div>

@@ -85,6 +85,9 @@ interface AppState {
   setActivePane: (pane: "explore" | "timeline" | "writer-timeline" | "locations" | "plan" | "review" | "status" | "characters" | "import" | "pipeline" | "quality-review" | "odv-lab" | "settings") => void;
   pendingPipelineBook: string | null;
   setPendingPipelineBook: (book: string | null) => void;
+  // Cross-pane handoff: name of a character to select on the Characters pane
+  pendingCharacterName: string | null;
+  setPendingCharacterName: (name: string | null) => void;
 
   // Site settings
   siteName: string;
@@ -273,6 +276,8 @@ export const useAppStore = create<AppState>((set) => ({
 
   pendingPipelineBook: null,
   setPendingPipelineBook: (book) => set({ pendingPipelineBook: book }),
+  pendingCharacterName: null,
+  setPendingCharacterName: (name) => set({ pendingCharacterName: name }),
 
   siteName: "The Archive",
   setSiteName: (name) => set({ siteName: name }),
