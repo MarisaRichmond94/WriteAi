@@ -358,21 +358,31 @@ def review_stream(req: ReviewRequest):
             dropped_self = 0
             chapter_shingles = _shingles(text)
             per_probe = max(3, s.cfg.top_k_results // 2)
-            for probe in _probes(text, req.message):
-                plan = QueryPlan(question=probe, qtype="general", scope=scope)
-                for e in s.retriever._semantic(plan, top_k=per_probe):
-                    if e["chunk_id"] in seen:
-                        continue
-                    seen.add(e["chunk_id"])
-                    # a stale copy of the chapter under review (say, indexed
-                    # at its pre-renumbering number) passes the numeric scope
-                    # but reads as the author repeating the chapter — drop on
-                    # content overlap
-                    esh = _shingles(e["text"])
-                    if esh and len(esh & chapter_shingles) / len(esh) >= _SELF_SIM:
-                        dropped_self += 1
-                        continue
-                    excerpts.append(e)
+            try:
+                for probe in _probes(text, req.message):
+                    plan = QueryPlan(question=probe, qtype="general", scope=scope)
+                    for e in s.retriever._semantic(plan, top_k=per_probe):
+                        if e["chunk_id"] in seen:
+                            continue
+                        seen.add(e["chunk_id"])
+                        # a stale copy of the chapter under review (say, indexed
+                        # at its pre-renumbering number) passes the numeric scope
+                        # but reads as the author repeating the chapter — drop on
+                        # content overlap
+                        esh = _shingles(e["text"])
+                        if esh and len(esh & chapter_shingles) / len(esh) >= _SELF_SIM:
+                            dropped_self += 1
+                            continue
+                        excerpts.append(e)
+            except Exception:
+                # Never let retrieval kill the stream. A re-index in another
+                # process can leave this process's cached Chroma handle
+                # inconsistent with the rewritten segments; degrade to a review
+                # with no prior-context excerpts (the story-so-far notes below
+                # still come from SQLite) rather than emit a blank bubble.
+                log.exception("review: semantic retrieval failed — continuing "
+                              "without prior-context excerpts")
+                excerpts = []
             if dropped_self:
                 log.info("review: dropped %d excerpt(s) near-identical to the "
                          "chapter under review", dropped_self)

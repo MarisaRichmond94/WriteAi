@@ -577,6 +577,16 @@ def ingest_run(book: int | None = None):
                             rows=removed)
                 except Exception:
                     log.exception("post-ingest enrichment GC failed")
+                # The subprocess rewrote the Chroma segments under this
+                # process; our cached client/collection is now stale and would
+                # serve broken semantic search (blank review bubbles) until a
+                # restart. Rebuild the search stack against the new segments.
+                try:
+                    get_state().reload_index()
+                    audit.log_event("index_reloaded",
+                                    "rebuilt search stack after re-ingest")
+                except Exception:
+                    log.exception("post-ingest index reload failed")
             if code != 0:
                 from .. import notify
                 notify.add("error", "Sync failed",

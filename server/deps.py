@@ -70,6 +70,21 @@ class AppState:
         from src.answerer import Answerer
         return Answerer(self.cfg, model=model)
 
+    def reload_index(self):
+        """Rebuild the Chroma-backed search stack after an out-of-process
+        re-ingest.
+
+        Re-indexing runs in a subprocess that rewrites the on-disk Chroma
+        segments. This process's cached PersistentClient/collection keeps
+        serving its now-inconsistent in-memory view of those segments until
+        the process restarts — which silently breaks semantic retrieval (and
+        thus review). Swap in a fresh SeriesStore (new client + collection)
+        and drop the retriever so it rebuilds against it on next use. The
+        embedder is unaffected by a re-ingest, so it's left in place."""
+        with self._lock:
+            self.store = SeriesStore(self.cfg)
+            self._retriever = None
+
 
 state: AppState | None = None
 _state_lock = threading.Lock()
