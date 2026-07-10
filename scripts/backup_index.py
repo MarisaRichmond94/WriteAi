@@ -15,8 +15,13 @@ Usage (from the repo root):
     .venv/bin/python scripts/backup_index.py snapshot                # back up now
     .venv/bin/python scripts/backup_index.py snapshot --label pre-full-reindex
     .venv/bin/python scripts/backup_index.py list                    # show snapshots
+    .venv/bin/python scripts/backup_index.py prune                   # keep newest 5
     .venv/bin/python scripts/backup_index.py restore <name>          # roll back
     .venv/bin/python scripts/backup_index.py restore latest --yes
+
+Only the newest MAX_BACKUPS (5) snapshots are kept: `snapshot` prunes older
+ones after each run, and `ingest.py` takes an automatic `pre-ingest` snapshot
+before every reindex (skip with `ingest.py --no-backup`).
 
 restore first takes an automatic `pre-restore-<ts>` snapshot of the current
 state, so a restore is itself reversible. After restoring while the server is
@@ -39,6 +44,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from config import load_config
 
 MANIFEST_NAME = "manifest.json"
+MAX_BACKUPS = 5  # snapshots kept after pruning; older ones are deleted
 
 
 def _index_paths(cfg) -> list[tuple[str, Path]]:
@@ -147,6 +153,27 @@ def list_snapshots(cfg) -> int:
     return 0
 
 
+def prune(cfg, keep: int = MAX_BACKUPS, protect: tuple[Path, ...] = (),
+          *, quiet: bool = False) -> list[Path]:
+    """Delete the oldest snapshots beyond `keep`. Returns the dirs removed.
+
+    Snapshot dir names are timestamp-prefixed, so lexical order == chronological.
+    Anything in `protect` is never deleted (used by restore to shield the very
+    snapshot it is restoring from), and stays even if that leaves > keep.
+    """
+    protected = {p.resolve() for p in protect}
+    snaps = _snapshots(cfg)  # oldest -> newest
+    removable = [p for p in snaps if p.resolve() not in protected]
+    excess = max(0, len(snaps) - keep)
+    removed: list[Path] = []
+    for p in removable[:excess]:
+        shutil.rmtree(p)
+        removed.append(p)
+        if not quiet:
+            print(f"  pruned {p.name}")
+    return removed
+
+
 def _resolve(cfg, name: str) -> Path:
     snaps = _snapshots(cfg)
     if not snaps:
@@ -198,6 +225,10 @@ def restore(cfg, name: str, *, assume_yes: bool) -> int:
         tmp.rename(live)
         print(f"  restored {e['key']}")
 
+    # Keep the backup set bounded, but never delete the snapshot we just
+    # restored from — it's still the user's chosen rollback point.
+    prune(cfg, protect=(src,), quiet=True)
+
     print("\ndone. If the server is running, restart it (or hit rebuild) so it "
           "reloads the restored Chroma segments.")
     return 0
@@ -209,8 +240,14 @@ def main() -> int:
 
     ps = sub.add_parser("snapshot", help="back up the current index")
     ps.add_argument("--label", help="suffix for the snapshot dir name")
+    ps.add_argument("--keep", type=int, default=MAX_BACKUPS,
+                    help=f"snapshots to keep after this one (default {MAX_BACKUPS})")
 
     sub.add_parser("list", help="list snapshots")
+
+    pp = sub.add_parser("prune", help=f"delete all but the newest N snapshots")
+    pp.add_argument("--keep", type=int, default=MAX_BACKUPS,
+                    help=f"snapshots to keep (default {MAX_BACKUPS})")
 
     pr = sub.add_parser("restore", help="restore a snapshot (rolls the index back)")
     pr.add_argument("name", help="snapshot dir name (or a unique prefix, or 'latest')")
@@ -221,9 +258,15 @@ def main() -> int:
 
     if args.cmd == "snapshot":
         snapshot(cfg, args.label)
+        prune(cfg, keep=args.keep)
         return 0
     if args.cmd == "list":
         return list_snapshots(cfg)
+    if args.cmd == "prune":
+        removed = prune(cfg, keep=args.keep)
+        print(f"pruned {len(removed)} snapshot(s); "
+              f"{len(_snapshots(cfg))} remaining")
+        return 0
     if args.cmd == "restore":
         return restore(cfg, args.name, assume_yes=args.yes)
     return 1

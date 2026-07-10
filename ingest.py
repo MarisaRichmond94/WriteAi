@@ -70,6 +70,11 @@ def main() -> int:
                          "(50%% token pricing; results may take up to an hour)")
     ap.add_argument("--label", default="Sync",
                     help='notification label, e.g. --label "Nightly sync"')
+    ap.add_argument("--no-backup", dest="no_backup", action="store_true",
+                    help="skip the automatic pre-ingest index snapshot "
+                         "(scripts/backup_index.py); by default every run that "
+                         "will write to the index is backed up first so it can "
+                         "be rolled back")
     args = ap.parse_args()
     if args.full and args.re_extract:
         ap.error("--full and --re-extract are mutually exclusive "
@@ -166,6 +171,25 @@ def main() -> int:
         if not confirm("Proceed with API calls?", args.yes):
             print("aborted — no API calls made")
             return 0
+
+    # ── auto-backup: snapshot the index before the first destructive write ──
+    # Guards both this CLI and the UI rebuild button (which spawns this file).
+    # We're past the dry-run/no-op/confirmation gates, so a run reaching here
+    # WILL upsert/delete in chroma + sqlite + chunk_hashes.json. A backup
+    # failure aborts rather than silently reindexing unprotected.
+    if not args.no_backup:
+        try:
+            from scripts.backup_index import prune, snapshot
+            dest = snapshot(cfg, "pre-ingest", quiet=True)
+            prune(cfg, quiet=True)
+            print(f"\nIndex backed up before reindex -> {dest.name}\n"
+                  f"  roll back with: python scripts/backup_index.py restore {dest.name}")
+        except Exception as e:
+            print(f"\nERROR: pre-ingest backup failed ({type(e).__name__}: {e}).")
+            print("Refusing to reindex without a safety snapshot. "
+                  "Re-run with --no-backup to override.")
+            _notify("Sync aborted", f"pre-ingest backup failed: {e}", ok=False)
+            return 1
 
     # Heavy imports only once we know there's work to do.
     from src.embedder import Embedder
