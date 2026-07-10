@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 
@@ -39,6 +40,7 @@ log = logging.getLogger(__name__)
 PRICING_PER_MTOK = {
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-sonnet-4-6": (3.00, 15.00),
+    "claude-sonnet-5": (2.00, 10.00),   # intro pricing thru 2026-08-31; $3/$15 after
     "claude-opus-4-8": (5.00, 25.00),
     "claude-fable-5": (10.00, 50.00),
 }
@@ -51,8 +53,11 @@ EST_OUTPUT_TOKENS_PER_CHUNK = 800
 
 # Batching limits: keep well inside the 200K context of claude-haiku-4-5 and
 # inside a 16K non-streaming output budget (~18 chunks * 800 tokens ≈ 14.4K).
-MAX_BATCH_WORDS = 9000
-MAX_BATCH_CHUNKS = 18
+# Both are env-overridable — a more verbose extraction model (e.g. Sonnet 5)
+# emits more tokens per chunk and truncates/splits at 18, so lower MAX_BATCH_CHUNKS
+# for it (e.g. 8) to keep each call's output under the 16K cap without splitting.
+MAX_BATCH_WORDS = int(os.environ.get("MAX_BATCH_WORDS", "9000"))
+MAX_BATCH_CHUNKS = int(os.environ.get("MAX_BATCH_CHUNKS", "18"))
 MAX_OUTPUT_TOKENS = 16000
 
 # Message Batches API: 50% of standard token prices; poll cadence for the

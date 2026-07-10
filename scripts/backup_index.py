@@ -189,12 +189,17 @@ def _resolve(cfg, name: str) -> Path:
     exact = _backups_dir(cfg) / name
     if exact.is_dir():
         return exact
-    matches = [p for p in snaps if p.name.startswith(name)]
+    # Match on the timestamp prefix OR the --label (which is a suffix of the
+    # dir name), so `restore baseline-pre-rebuild` finds 20260710-...-baseline...
+    matches = [p for p in snaps if p.name.startswith(name) or name in p.name]
     if len(matches) == 1:
         return matches[0]
     if not matches:
         raise SystemExit(f"no snapshot matching {name!r}")
-    raise SystemExit("ambiguous name; matches: " + ", ".join(p.name for p in matches))
+    # Prefer the newest on an ambiguous label so a repeated label still resolves.
+    raise SystemExit("ambiguous name; matches (newest last): "
+                     + ", ".join(p.name for p in matches)
+                     + f"\nuse the full name, e.g. {matches[-1].name}")
 
 
 def restore(cfg, name: str, *, assume_yes: bool) -> int:
