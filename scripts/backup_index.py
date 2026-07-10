@@ -8,8 +8,13 @@ each other by chunk_id, with no transaction spanning them:
   * data/chunk_hashes.json       — the change-detection ledger the next diff reads
 
 If a run crashes or produces a bad index, these can end up inconsistent. This
-tool copies all three (plus the rebuildable extracted_text / rich_text caches)
-into data/backups/<timestamp>/ as one set, and restores them together.
+tool copies all three (plus the small rich_text UI sidecars) into
+data/backups/<timestamp>/ as one set, and restores them together.
+
+The extracted_text/ cache is deliberately NOT snapshotted: it is content-
+addressed by source-file hash and a reindex only appends to it, so the old
+chunks' extracted text is still present after any reindex — restoring the three
+core stores is enough, and skipping the cache roughly halves snapshot size.
 
 Usage (from the repo root):
     .venv/bin/python scripts/backup_index.py snapshot                # back up now
@@ -48,17 +53,18 @@ MAX_BACKUPS = 5  # snapshots kept after pruning; older ones are deleted
 
 
 def _index_paths(cfg) -> list[tuple[str, Path]]:
-    """(label, path) for every piece of a complete, consistent index state.
+    """(label, path) for every piece backed up to make a consistent index state.
 
-    Order-independent, but the first three are the destructive-upsert core that
-    ingest.py rewrites in place; the last two are rebuildable caches included so
-    a snapshot is a full point-in-time copy. staging_dir is transient — excluded.
+    The first three are the destructive-upsert core that ingest.py rewrites in
+    place; rich_text is a small rebuildable UI sidecar included so the snapshot
+    is a complete point-in-time copy. extracted_text/ is intentionally omitted
+    (content-addressed, append-only cache — see the module docstring), and
+    staging_dir is transient.
     """
     return [
         ("chroma_db", Path(cfg.chroma_dir)),
         ("series_metadata.sqlite", Path(cfg.sqlite_path)),
         ("chunk_hashes.json", Path(cfg.chunk_hashes_path)),
-        ("extracted_text", Path(cfg.extracted_text_dir)),
         ("rich_text", Path(cfg.rich_text_dir)),
     ]
 
