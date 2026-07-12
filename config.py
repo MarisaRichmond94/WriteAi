@@ -160,16 +160,17 @@ def load_config(env_file: Path | None = None) -> Config:
         enable_alias_resolution=_get_bool("ENABLE_ALIAS_RESOLUTION", False),
         enable_reranker=_get_bool("ENABLE_RERANKER", False),
         # `or`, not a .get() default: a blank RERANKER_MODEL= line means
-        # "use the default" (same convention as EMBEDDING_MODEL)
+        # "use the default" (same convention as EMBEDDING_MODEL).
+        # Default is the shipped, held-out-verified config (2026-07-12).
         reranker_model=(os.environ.get("RERANKER_MODEL")
-                        or "cross-encoder/ms-marco-MiniLM-L-6-v2"),
-        rerank_candidates=_get_int("RERANK_CANDIDATES", 80),
+                        or "BAAI/bge-reranker-v2-m3"),
+        rerank_candidates=_get_int("RERANK_CANDIDATES", 200),
         extraction_use_batches=_get_bool("EXTRACTION_USE_BATCHES", False),
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         cost_log_enabled=_get_bool("COST_LOG_ENABLED", True),
         enable_prompt_cache_v2=_get_bool("ENABLE_PROMPT_CACHE_V2", False),
         enable_note_ranking=_get_bool("ENABLE_NOTE_RANKING", False),
-        continuity_notes_cap=_get_int("CONTINUITY_NOTES_CAP", 0),
+        continuity_notes_cap=_get_int("CONTINUITY_NOTES_CAP", 200),
         enable_sentiment_v2=_get_bool("ENABLE_SENTIMENT_V2", False),
         enable_direct_quotes=_get_bool("ENABLE_DIRECT_QUOTES", False),
         enable_first_occurrence=_get_bool("ENABLE_FIRST_OCCURRENCE", False),

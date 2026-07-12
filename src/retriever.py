@@ -98,29 +98,6 @@ def _rrf_fuse(semantic_hits: list[dict], keyword_hits: list[dict],
     return [best[cid] for cid in sorted(scores, key=lambda c: (-scores[c], c))]
 
 
-# Interrogative templates the query types are phrased with (see query_router).
-# Stripping them leaves the content words that actually appear in prose.
-_QUERY_BOILERPLATE = re.compile(
-    r"^(?:what|how|why|when|where|who)\s+(?:does|do|did|is|was|are|were|has|have)\s+"
-    r"|^what\s+(?:happens|happened)\s+(?:when|to|in)\s+"
-    r"|\b(?:know|learn|reveal|feel|think)s?\s+about\b"
-    r"|\bin\s+this\s+(?:chapter|passage|scene)\b"
-    r"|\bthis\s+(?:chapter|passage)\s+reveal(?:s)?\s+about\b",
-    re.I)
-
-
-def _strip_question_boilerplate(question: str) -> str:
-    """Remove interrogative scaffolding, keep the content words. Applied
-    repeatedly so stacked templates all fall away; returns "" when nothing
-    but scaffolding is left (caller then skips the variant)."""
-    prev = None
-    text = question.strip().rstrip("?.! ")
-    while text != prev:
-        prev = text
-        text = _QUERY_BOILERPLATE.sub(" ", text).strip()
-    return " ".join(text.split())
-
-
 def _header(meta: dict) -> str:
     ch = meta.get("chapter_number")
     parts = [f"Book {meta.get('book_number')} \"{meta.get('book_title')}\"",
@@ -184,27 +161,12 @@ class Retriever:
         embedding = self.embedder.embed_query(plan.question)
         hits = self.store.semantic_search(embedding, pool_n,
                                           where=_scope_chroma(plan.scope))
-        # MULTI_QUERY=strip: also search with the question's template
-        # boilerplate removed ("What does X know about …" -> the topic words).
-        # Interrogative framing pushes the query vector away from narrative
-        # prose; the stripped variant recovers chunks the full question misses,
-        # and the cross-encoder re-sorts the union.
-        if os.environ.get("MULTI_QUERY") == "strip":
-            alt = _strip_question_boilerplate(plan.question)
-            if alt and alt.lower() != plan.question.lower():
-                alt_hits = self.store.semantic_search(
-                    self.embedder.embed_query(alt), pool_n,
-                    where=_scope_chroma(plan.scope))
-                hits = _rrf_fuse(hits, alt_hits)
-        # Keyword fusion pays off on entity-bearing queries (eval: lookup and
-        # temporal_knowledge improve). HYBRID_QTYPES extends it (e.g. general):
-        # BM25's literal matches dilute the pool on abstract wording, which
-        # only a strong reranker can afford to clean up.
-        hybrid_qtypes = tuple(
-            s.strip() for s in os.environ.get(
-                "HYBRID_QTYPES", "lookup,temporal_knowledge").split(","))
+        # Keyword (BM25) fusion pays off on entity-bearing queries — lookup and
+        # temporal_knowledge, where literal name matches help. Abstract qtypes
+        # are left to semantic + rerank (an experiment extending fusion to
+        # 'general' regressed it and was dropped).
         if (self.cfg.enable_hybrid_search
-                and plan.qtype in hybrid_qtypes):
+                and plan.qtype in ("lookup", "temporal_knowledge")):
             keyword_hits = self.store.keyword_search(plan.question, pool_n,
                                                      plan.scope)
             hits = _rrf_fuse(hits, keyword_hits)  # also dedupes on chunk_id
@@ -464,19 +426,13 @@ class Retriever:
         def beats_of(meta_json: str | None) -> list[str]:
             return json.loads(meta_json).get("emotional_beats", []) if meta_json else []
 
-        # Scoring-doc text for the cross-encoder (SENTIMENT_RERANK_DOCS=
-        # beats+quotes): the beat summary plus its verbatim manuscript quote —
-        # distilled signal plus literal prose the question's content words can
-        # match. Tie-tier detection above always uses the bare summaries.
+        # Scoring-doc text for the cross-encoder: the bare emotional-beat
+        # summaries (the shipped, held-out-verified choice; beats+quotes and
+        # full-prose variants were tried and dropped).
         def beat_docs_of(meta_json: str | None) -> list[str]:
             if not meta_json:
                 return []
-            meta = json.loads(meta_json)
-            beats = meta.get("emotional_beats", [])
-            if os.environ.get("SENTIMENT_RERANK_DOCS") == "beats+quotes":
-                return [with_quote(b, q) for b, q in
-                        pair_quotes(beats, meta.get("emotional_beat_quotes"))]
-            return beats
+            return json.loads(meta_json).get("emotional_beats", [])
 
         # a chunk's beats "tie" the characters when they mention at least two
         # of the named characters (or the single one, on one-name questions)
@@ -533,13 +489,8 @@ class Retriever:
             return (pool + [e for e in semantic
                             if e["chunk_id"] not in pool_ids])[:top_k]
 
-        # Scoring-doc shape for the cross-encoder (SENTIMENT_RERANK_DOCS):
-        #   beats        — beat summaries only (legacy; tuned for MiniLM)
-        #   beats+quotes — summary plus its verbatim manuscript quote: keeps
-        #                  the distilled signal but adds literal prose the
-        #                  question's content words can match
-        #   prose        — the full chunk text (no beat expansion)
-        doc_mode = os.environ.get("SENTIMENT_RERANK_DOCS", "beats")
+        # Score the cross-encoder on the chunk's emotional-beat summaries (the
+        # shipped choice); fall back to the chunk itself when it has no beats.
         docs = []
         for e in union:
             cid = e["chunk_id"]
@@ -549,7 +500,7 @@ class Retriever:
                     (cid,)).fetchone()
                 beats_by_id[cid] = beat_docs_of(row[0]) if row else []
             beats = beats_by_id[cid]
-            if doc_mode == "prose" or not beats:
+            if not beats:
                 docs.append(e)
             else:
                 docs.extend({**e, "text": b} for b in beats)
