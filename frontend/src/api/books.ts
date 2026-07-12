@@ -160,3 +160,32 @@ export async function fetchSeriesSummary(): Promise<SeriesSummary> {
   if (!res.ok) throw new Error(`Failed to fetch series summary: ${res.statusText}`);
   return res.json();
 }
+
+// ── Loom drift detection ──────────────────────────────────────────
+// Loom writes a manifest sidecar on every canon export; the backend
+// compares it against the index. `behind` books have chapters in Loom
+// that the index hasn't ingested (or stale numbering after an insertion).
+
+export interface SyncBookStatus {
+  book: number;
+  title: string;
+  manifest_found: boolean;
+  exported_at?: string | null;
+  manifest_chapters?: number;
+  indexed_chapters?: number;
+  missing_chapters?: number[];
+  extra_chapters?: number[];
+  behind?: boolean;
+}
+
+export interface SyncStatus {
+  books: SyncBookStatus[];
+  stale_count: number;
+  last_synced: string | null;
+}
+
+export async function fetchSyncStatus(): Promise<SyncStatus> {
+  const res = await fetch("/api/sync/status");
+  if (!res.ok) throw new Error(`Failed to fetch sync status: ${res.statusText}`);
+  return (await res.json()) as SyncStatus;
+}

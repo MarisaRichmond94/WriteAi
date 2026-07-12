@@ -20,6 +20,20 @@ chapter 0. Loom's canon walk produces exactly these labels (numbered
 chapters render as bare numbers; unnumbered chapters render their title).
 Unnumbered chapters other than "Prologue" are not addressable in WriteAI.
 
+Alongside the `.pages`, every canon export also writes three machine
+sidecars to the same folder:
+
+- `<Book Title>.txt` — deterministic plain text (one line per paragraph,
+  hard breaks as newlines, footnote bodies excluded). **This is the file
+  WriteAI actually ingests** (format preference `.txt > .docx > .pages`) —
+  fully headless, no Pages.app round-trip.
+- `<Book Title>.docx` — the same manuscript in Word format.
+- `<Book Title>.manifest.json` — per-chapter identity for drift detection:
+  `{ id, number, label, pov, date, wordCount, contentHash }` plus
+  `exportedAt` and a whole-book `contentHash`. WriteAI's
+  `GET /api/sync/status` compares it against the index; the Status pane
+  shows a drift banner (with per-book Resync) when the index is behind.
+
 ### 2. Jump links
 
 - **WriteAI → Loom:** `GET <LOOM_URL>/author/by-title/<series title>`
@@ -51,6 +65,23 @@ opens:
   earlier form, retired in favor of draft mode.)
 
 WriteAI applies these once and strips them from the URL.
+
+### 4. Event outbox (Loom → any subscriber)
+
+Loom appends events to `data/events/events.jsonl` (append-only JSONL,
+monotonic `seq`) and serves them at `GET <LOOM_URL>/api/events?since=<seq>`
+— cursor pull; the response carries the cursor to store for the next poll.
+Event types: `export.completed` (a consistent canon snapshot is on disk —
+the signal consumers ingest on), `chapter.created`, `chapter.deleted`,
+`book.renamed`. Events are hints, not truth: consumers reconcile against
+the manifests for anything missed.
+
+WriteAI's server polls this endpoint every 2 minutes
+(`server/loom_events.py`; cursor in `writer_data/loom_event_cursor.json`;
+`LOOM_URL` env var, default `http://localhost:3000`) and triggers an
+incremental ingest of a book once its exports have been quiet for 10
+minutes. The nightly scheduler (Settings → Sync) remains the
+reconciliation safety net when either app was closed.
 
 ## Identity caveat
 

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
-import { Library, RefreshCw, Info, ChevronRight, FileDown } from "lucide-react";
+import { Library, RefreshCw, Info, ChevronRight, FileDown, AlertTriangle } from "lucide-react";
 import { clsx } from "clsx";
 import type { BookResponse, BookSummary } from "../../types";
 import { useAppStore } from "../../store/useAppStore";
 import ConfirmModal from "../ui/ConfirmModal";
 import BookDrawer from "./BookDrawer";
-import { fetchBookSummary, triggerRebuild, triggerBookUpdate, downloadStoryBible } from "../../api/books";
+import { fetchBookSummary, fetchSyncStatus, triggerRebuild, triggerBookUpdate, downloadStoryBible, type SyncStatus } from "../../api/books";
 import { bookSlug } from "../../api/settings";
 
 function BookListSkeleton() {
@@ -150,12 +150,63 @@ function BookCard({ book, active, condensed, lastSynced, onClick, onRebuild }: {
   );
 }
 
+// Loom-drift banner: shown when a manifest lists chapters the index hasn't
+// ingested. Missing manifests (pre-manifest exports) stay silent — unknown
+// is not the same as stale.
+function DriftBanner({ status, onResync }: { status: SyncStatus; onResync: (title: string) => void }) {
+  const behind = status.books.filter((b) => b.behind);
+  if (!behind.length) return null;
+  return (
+    <div className="mx-6 mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+      <div className="flex items-center gap-2">
+        <AlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-500" />
+        <p className="text-xs font-semibold text-ink-primary">
+          The index is behind Loom
+        </p>
+      </div>
+      <div className="mt-1.5 flex flex-col gap-1">
+        {behind.map((b) => (
+          <div key={b.book} className="flex items-center justify-between gap-3">
+            <p className="min-w-0 truncate text-[11px] text-ink-muted">
+              <span className="text-ink-secondary">{b.title}</span>
+              {" — "}
+              {b.missing_chapters?.length
+                ? `${b.missing_chapters.length} chapter(s) not yet indexed (${b.missing_chapters.slice(0, 6).join(", ")}${b.missing_chapters.length > 6 ? "…" : ""})`
+                : `${b.extra_chapters?.length ?? 0} indexed chapter(s) no longer in Loom`}
+            </p>
+            <button
+              onClick={() => onResync(b.title)}
+              className="flex-shrink-0 rounded border border-amber-500/40 px-2 py-0.5 text-[11px] text-amber-600 transition-colors hover:bg-amber-500/20"
+            >
+              Resync
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function StatusPane() {
   const { books, booksLoading, indexStatus, showToast } = useAppStore();
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildBook, setRebuildBook] = useState<string | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+
+  useEffect(() => {
+    fetchSyncStatus().then(setSyncStatus).catch(() => {});
+  }, [books]);
+
+  const handleDriftResync = async (title: string) => {
+    try {
+      await triggerBookUpdate(title);
+      showToast(`Re-indexing "${title}" — this may take a minute.`);
+    } catch {
+      showToast(`Failed to start re-index for "${title}".`);
+    }
+  };
 
   const handleBookRebuild = async () => {
     const name = rebuildBook;
@@ -213,6 +264,8 @@ export default function StatusPane() {
         </div>
         <div className="mt-3 border-t border-surface-border" />
       </div>
+
+      {syncStatus && <DriftBanner status={syncStatus} onResync={handleDriftResync} />}
 
       {/* Body row — book list + drawer */}
       <div className="flex flex-1 overflow-hidden">

@@ -23,7 +23,12 @@ from .parser import SUPPORTED_SUFFIXES
 log = logging.getLogger(__name__)
 
 # Preference order when a book has the same title in multiple formats.
-_FORMAT_PREFERENCE = [".pages", ".docx", ".txt", ".md", ".pdf"]
+# .txt first: Loom's canon export writes a deterministic "<Title>.txt"
+# sidecar (one line per paragraph, footnotes excluded) precisely so
+# ingestion can read it headlessly — no Pages.app, no conversion cache.
+# .pages remains the author's format; it is only parsed when no sidecar
+# exists.
+_FORMAT_PREFERENCE = [".txt", ".docx", ".pages", ".md", ".pdf"]
 
 
 @dataclass

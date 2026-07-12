@@ -17,10 +17,10 @@ from fastapi.staticfiles import StaticFiles
 
 from config import REPO_ROOT
 
-from . import scheduler
+from . import loom_events, scheduler
 from .routers import (books, characters, chat, events, locations,
                       notifications, plan, review, sessions, settings,
-                      writer_events)
+                      sync, writer_events)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
@@ -29,9 +29,11 @@ logging.basicConfig(level=logging.INFO,
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(scheduler.run_forever())
+    nightly = asyncio.create_task(scheduler.run_forever())
+    loom = asyncio.create_task(loom_events.run_forever())
     yield
-    task.cancel()
+    nightly.cancel()
+    loom.cancel()
 
 app = FastAPI(title="Series RAG", docs_url="/api/docs", openapi_url="/api/openapi.json",
               lifespan=lifespan)
@@ -41,7 +43,7 @@ app.add_middleware(  # dev server on :5173 talks to us directly
     allow_methods=["*"], allow_headers=["*"])
 
 for r in (books, chat, review, characters, events, locations,
-          notifications, plan, sessions, settings, writer_events):
+          notifications, plan, sessions, settings, sync, writer_events):
     app.include_router(r.router)
 
 dist = REPO_ROOT / "frontend" / "dist"
