@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 
@@ -97,6 +98,29 @@ def _rrf_fuse(semantic_hits: list[dict], keyword_hits: list[dict],
     return [best[cid] for cid in sorted(scores, key=lambda c: (-scores[c], c))]
 
 
+# Interrogative templates the query types are phrased with (see query_router).
+# Stripping them leaves the content words that actually appear in prose.
+_QUERY_BOILERPLATE = re.compile(
+    r"^(?:what|how|why|when|where|who)\s+(?:does|do|did|is|was|are|were|has|have)\s+"
+    r"|^what\s+(?:happens|happened)\s+(?:when|to|in)\s+"
+    r"|\b(?:know|learn|reveal|feel|think)s?\s+about\b"
+    r"|\bin\s+this\s+(?:chapter|passage|scene)\b"
+    r"|\bthis\s+(?:chapter|passage)\s+reveal(?:s)?\s+about\b",
+    re.I)
+
+
+def _strip_question_boilerplate(question: str) -> str:
+    """Remove interrogative scaffolding, keep the content words. Applied
+    repeatedly so stacked templates all fall away; returns "" when nothing
+    but scaffolding is left (caller then skips the variant)."""
+    prev = None
+    text = question.strip().rstrip("?.! ")
+    while text != prev:
+        prev = text
+        text = _QUERY_BOILERPLATE.sub(" ", text).strip()
+    return " ".join(text.split())
+
+
 def _header(meta: dict) -> str:
     ch = meta.get("chapter_number")
     parts = [f"Book {meta.get('book_number')} \"{meta.get('book_title')}\"",
@@ -160,11 +184,27 @@ class Retriever:
         embedding = self.embedder.embed_query(plan.question)
         hits = self.store.semantic_search(embedding, pool_n,
                                           where=_scope_chroma(plan.scope))
-        # Keyword fusion only pays off on entity-bearing queries (eval: lookup
-        # and temporal_knowledge improve; continuity/general regress because
-        # BM25's literal matches dilute the semantic list on abstract wording).
+        # MULTI_QUERY=strip: also search with the question's template
+        # boilerplate removed ("What does X know about …" -> the topic words).
+        # Interrogative framing pushes the query vector away from narrative
+        # prose; the stripped variant recovers chunks the full question misses,
+        # and the cross-encoder re-sorts the union.
+        if os.environ.get("MULTI_QUERY") == "strip":
+            alt = _strip_question_boilerplate(plan.question)
+            if alt and alt.lower() != plan.question.lower():
+                alt_hits = self.store.semantic_search(
+                    self.embedder.embed_query(alt), pool_n,
+                    where=_scope_chroma(plan.scope))
+                hits = _rrf_fuse(hits, alt_hits)
+        # Keyword fusion pays off on entity-bearing queries (eval: lookup and
+        # temporal_knowledge improve). HYBRID_QTYPES extends it (e.g. general):
+        # BM25's literal matches dilute the pool on abstract wording, which
+        # only a strong reranker can afford to clean up.
+        hybrid_qtypes = tuple(
+            s.strip() for s in os.environ.get(
+                "HYBRID_QTYPES", "lookup,temporal_knowledge").split(","))
         if (self.cfg.enable_hybrid_search
-                and plan.qtype in ("lookup", "temporal_knowledge")):
+                and plan.qtype in hybrid_qtypes):
             keyword_hits = self.store.keyword_search(plan.question, pool_n,
                                                      plan.scope)
             hits = _rrf_fuse(hits, keyword_hits)  # also dedupes on chunk_id
@@ -424,6 +464,20 @@ class Retriever:
         def beats_of(meta_json: str | None) -> list[str]:
             return json.loads(meta_json).get("emotional_beats", []) if meta_json else []
 
+        # Scoring-doc text for the cross-encoder (SENTIMENT_RERANK_DOCS=
+        # beats+quotes): the beat summary plus its verbatim manuscript quote —
+        # distilled signal plus literal prose the question's content words can
+        # match. Tie-tier detection above always uses the bare summaries.
+        def beat_docs_of(meta_json: str | None) -> list[str]:
+            if not meta_json:
+                return []
+            meta = json.loads(meta_json)
+            beats = meta.get("emotional_beats", [])
+            if os.environ.get("SENTIMENT_RERANK_DOCS") == "beats+quotes":
+                return [with_quote(b, q) for b, q in
+                        pair_quotes(beats, meta.get("emotional_beat_quotes"))]
+            return beats
+
         # a chunk's beats "tie" the characters when they mention at least two
         # of the named characters (or the single one, on one-name questions)
         need = min(2, len(plan.characters))
@@ -434,7 +488,7 @@ class Retriever:
                           if any(a.lower() in text for a in aliases.get(n, [n])))
             return matched >= need
 
-        beats_by_id = {r[0]: beats_of(r[7]) for r in rows}
+        beats_by_id = {r[0]: beat_docs_of(r[7]) for r in rows}
         tie_ids = {r[0] for r in rows if ties(r[7])}
         pool, seen = [], set()
         for keep in (lambda cid: cid in all_ids and cid in tie_ids,
@@ -479,6 +533,13 @@ class Retriever:
             return (pool + [e for e in semantic
                             if e["chunk_id"] not in pool_ids])[:top_k]
 
+        # Scoring-doc shape for the cross-encoder (SENTIMENT_RERANK_DOCS):
+        #   beats        — beat summaries only (legacy; tuned for MiniLM)
+        #   beats+quotes — summary plus its verbatim manuscript quote: keeps
+        #                  the distilled signal but adds literal prose the
+        #                  question's content words can match
+        #   prose        — the full chunk text (no beat expansion)
+        doc_mode = os.environ.get("SENTIMENT_RERANK_DOCS", "beats")
         docs = []
         for e in union:
             cid = e["chunk_id"]
@@ -486,12 +547,12 @@ class Retriever:
                 row = self.db.execute(
                     "SELECT metadata_json FROM chunks WHERE chunk_id = ?",
                     (cid,)).fetchone()
-                beats_by_id[cid] = beats_of(row[0]) if row else []
+                beats_by_id[cid] = beat_docs_of(row[0]) if row else []
             beats = beats_by_id[cid]
-            if beats:
-                docs.extend({**e, "text": b} for b in beats)
-            else:
+            if doc_mode == "prose" or not beats:
                 docs.append(e)
+            else:
+                docs.extend({**e, "text": b} for b in beats)
         t0 = time.perf_counter()
         ranked = self.reranker.rerank(plan.question, docs, len(docs))
         log.debug("sentiment_v2 rerank: %d beat docs over %d chunks in %.1f ms",
@@ -510,7 +571,10 @@ class Retriever:
         if self.cfg.enable_note_ranking and self.cfg.continuity_notes_cap > 0:
             notes = self._ranked_continuity_notes(plan)
             if notes is not None:
-                return self._semantic(plan, top_k=5), notes
+                # full top_k, not the legacy 5: capped notes leave prompt room,
+                # and "this chapter" questions need the chapter's own prose in
+                # context to anchor which thread the question is about
+                return self._semantic(plan), notes
         where, params = _scope_sql(plan.scope)
         notes = []
         for table, column, kind in NOTE_TABLES:
@@ -526,11 +590,16 @@ class Retriever:
         return self._semantic(plan, top_k=5), notes
 
     def _ranked_continuity_notes(self, plan: QueryPlan) -> list[str] | None:
-        """Top continuity_notes_cap notes by semantic similarity to the
-        question, re-sorted into chronological order (same line format as the
-        unranked path — the notes collection stores the rendered lines).
-        Returns None when the collection is empty so the caller falls back
-        to the exact legacy behavior."""
+        """Top continuity_notes_cap notes by relevance to the question (same
+        line format as the unranked path — the notes collection stores the
+        rendered lines). Returns None when the collection is empty so the
+        caller falls back to the exact legacy behavior.
+
+        With the reranker enabled, the bi-encoder shortlist is rescored by the
+        cross-encoder and emitted MOST RELEVANT FIRST under a header saying so:
+        similar threads recur across five books, and chronological order gives
+        the answerer no way to tell which note the question is actually about.
+        Reranker off -> bi-encoder ranking, chronological order (legacy)."""
         if self.store.notes_count() == 0:
             log.warning("ENABLE_NOTE_RANKING is on but the notes collection is "
                         "empty — run scripts/backfill_note_embeddings.py; "
@@ -547,12 +616,24 @@ class Retriever:
                 continue
             kept.append((meta.get("book_number", 0),
                          meta.get("chapter_number", 0), text))
-            if len(kept) >= cap:
-                break
-        kept.sort()  # (book, chapter, text): chronological, deterministic ties
-        return [text for _, _, text in kept]
+        if not self.cfg.enable_reranker:
+            kept = kept[:cap]
+            kept.sort()  # (book, chapter, text): chronological, deterministic
+            return [text for _, _, text in kept]
+        docs = [{"chunk_id": str(i), "header": "", "text": text}
+                for i, (_, _, text) in enumerate(kept)]
+        t0 = time.perf_counter()
+        ranked = self.reranker.rerank(plan.question, docs, cap)
+        log.debug("continuity note rerank: %d notes -> top %d in %.1f ms",
+                  len(docs), cap, (time.perf_counter() - t0) * 1000)
+        return ["== NOTES RANKED BY RELEVANCE TO THE QUESTION, MOST RELEVANT "
+                "FIRST =="] + [d["text"] for d in ranked]
 
     def _lookup(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
+        if re.search(r"\bmention", plan.question, re.I) and plan.characters:
+            result = self._mention_scan(plan)
+            if result is not None:
+                return result
         where, params = _scope_sql(plan.scope)
         aliases = self._alias_map(plan.characters)
         notes = []
@@ -571,6 +652,54 @@ class Retriever:
         if len(notes) > 500:
             notes = notes[:500]
         return self._semantic(plan, top_k=8), notes
+
+    # Enumeration questions can name a character with a large tag footprint;
+    # past this many literal-mention chunks the exhaustive-excerpt promise
+    # gets too expensive and the legacy tag-notes path handles it instead.
+    _MENTION_SCAN_CAP = 24
+
+    def _mention_scan(self, plan: QueryPlan) -> tuple[list[dict], list[str]] | None:
+        """"List every scene where X is mentioned": a mention is the name
+        appearing in prose, which the corpus answers exactly with a text scan —
+        semantic sampling can only approximate it (it under-enumerates, and the
+        alias-expanded tag notes over-enumerate chapters where the name never
+        appears on the page). Matches the literal asked-for name only, word-
+        bounded ("Bri" must not match "Brielle"), chronological. Returns None
+        (legacy path) when nothing matches or the footprint exceeds the cap."""
+        where, params = _scope_sql(plan.scope)
+        matched, seen = [], set()
+        for name in plan.characters:
+            name_re = re.compile(r"(?<!\w)" + re.escape(name) + r"(?!\w)")
+            rows = self.db.execute(
+                f"""SELECT c.chunk_id, c.book_number, c.book_title,
+                           c.chapter_number, c.pov_character, c.date_line, c.text
+                    FROM chunks c WHERE c.text LIKE ? AND {where}
+                    ORDER BY c.book_number, c.chapter_number, c.chunk_index""",
+                [f"%{name}%", *params]).fetchall()
+            for cid, bn, bt, ch, pov, dl, text in rows:
+                if cid in seen or not name_re.search(text):
+                    continue
+                seen.add(cid)
+                matched.append({"chunk_id": cid,
+                                "header": _header({"book_number": bn,
+                                                   "book_title": bt,
+                                                   "chapter_number": ch,
+                                                   "pov_character": pov,
+                                                   "date_line": dl}),
+                                "text": text,
+                                "book_number": bn, "book_title": bt,
+                                "chapter_number": ch, "pov_character": pov,
+                                "distance": None})
+        if not matched or len(matched) > self._MENTION_SCAN_CAP:
+            return None
+        matched.sort(key=lambda e: (e["book_number"], e["chapter_number"],
+                                    e["chunk_id"]))
+        names = " / ".join(plan.characters)
+        notes = [f"The {len(matched)} excerpts below are EVERY passage in "
+                 f"{plan.scope.describe()} where \"{names}\" appears verbatim "
+                 f"— the list is exhaustive; enumerate each excerpt as its own "
+                 f"scene and do not add scenes from memory."]
+        return matched, notes
 
     # ── export-mode dossiers ─────────────────────────────────────────────────
 

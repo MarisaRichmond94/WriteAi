@@ -191,6 +191,11 @@ def classify(question: str, scope_str: str | None = None,
         chapters = [int(m) for m in _CHAPTER_RE.findall(question)]
         if chapters and scope.book_max is not None:
             scope.chapter_max = max(chapters)
+        # Enumerations are locative, not cumulative: "in book 4, list every
+        # scene…" means book 4 exactly, unlike temporal questions where a book
+        # mention is an upper bound on accumulated knowledge.
+        if qtype == "lookup" and scope.book_max is not None and scope.book_min is None:
+            scope.book_min = scope.book_max
 
     if first_occurrence:
         # Character = the X in the first-occurrence pattern. This fixes the
