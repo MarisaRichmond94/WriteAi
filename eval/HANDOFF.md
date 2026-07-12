@@ -1,7 +1,7 @@
 # RAG Optimization Handoff — WriteAi (Dark Horse Series)
 
 **Date:** 2026-07-11, session paused ~11:59 PM PT. Prepared for continuation by another Claude session (Opus).
-**Commit:** `<HASH>` on `master` — code + this file committed together; working tree and this doc agree.
+**Commit:** `138ff5b` on `master` — code + this file committed together (this hash line added in a follow-up docs commit); working tree and this doc agree.
 
 **Task:** Raise judged answer correctness from 0.484 toward ≥0.70 on `eval/golden_textgrounded.jsonl` (92 items, "training set") without touching chunking, embeddings, or extraction (Haiku-locked). Continuity was ruled **diagnostic-only** by the user mid-session (its "this chapter" questions have no identifiable referent; several are structurally unanswerable — do not optimize for it or gate on it). Verdicts use the four core qtypes — temporal_knowledge, sentiment, lookup, general — and every kept change must improve-or-hold on BOTH the training set and the held-out set (`eval/golden_holdout.jsonl`, 79 items, never tuned against).
 
@@ -21,7 +21,7 @@ export CONTINUITY_NOTES_CAP=200                 # was 0 (which made note-ranking
 
 All other flags stay as in `.env` (all ENABLE_* already true, TOP_K_RESULTS=15, EXTRACTION_MODEL=claude-haiku-4-5, QUERY_MODEL=claude-sonnet-4-6).
 
-**Code changes (committed in `<HASH>`):**
+**Code changes (committed in `138ff5b`):**
 
 - `src/retriever.py`
   - `_lookup()` → new `_mention_scan()`: "…where X is *mentioned*" enumerations are answered by a literal word-bounded text scan (≤24 chunks), matched chunks returned as the excerpts plus one "this list is exhaustive" note; falls back to the legacy tag-notes path when nothing matches or footprint exceeds cap.
