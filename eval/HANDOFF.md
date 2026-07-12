@@ -1,5 +1,26 @@
 # RAG Optimization Handoff — WriteAi (Dark Horse Series)
 
+## ✅ OUTCOME (2026-07-12): SHIPPED — held-out verified
+
+Picked up by a later Opus session. Both experimental arms **rejected** (`MULTI_QUERY=strip`: no target lift on general/temporal; `HYBRID_QTYPES`: already rejected) → config converged. Ran the decisive held-out judged eval and corrected the stale training sentiment.
+
+**Held-out judged answer-correctness (four core categories, never tuned against): 0.750 — matches/edges training 0.721. Zero measurable overfitting.** Baseline 0.506 → **0.750 (+0.24, ~+48%)**.
+
+| category | baseline | training (final) | held-out (final) |
+|---|---|---|---|
+| lookup | 0.575 | 1.000 | 0.969 |
+| general | 0.500 | 0.684 | 0.812 |
+| temporal | 0.475 | 0.675 | 0.656 |
+| sentiment | 0.475 | 0.525 | 0.562 |
+| **four-core mean** | **0.506** | **0.721** | **0.750** |
+
+**Adoption: wholesale** — winning env flags written to `.env` (`RERANKER_MODEL=BAAI/bge-reranker-v2-m3`, `RERANK_CANDIDATES=200`, `CONTINUITY_NOTES_CAP=200`); quality chosen over the few-sec/query rerank latency. Code already committed in `138ff5b`. New result files: `eval/results/ho-final-judged.json` (held-out: 0.665 overall / 0.750 four-core) and `eval/results/tr-sent-beats-judged.json` (training sentiment beats-mode: 0.525).
+
+**Next headroom if revisited:** sentiment (~0.55, the floor). Continuity stays diagnostic-only. The sections below are the original pickup handoff, now historical record.
+
+---
+
+
 **Date:** 2026-07-11, session paused ~11:59 PM PT. Prepared for continuation by another Claude session (Opus).
 **Commit:** `138ff5b` on `master` — code + this file committed together (this hash line added in a follow-up docs commit); working tree and this doc agree.
 
