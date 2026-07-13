@@ -23,6 +23,27 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 
+def book_sync_state(s, book_number: int) -> tuple[bool, dict[int, str]]:
+    """(index matches the manifest?, manifest chapter number -> Loom chapter
+    id) for one book. (False, {}) when no manifest is readable — callers must
+    treat that as "unknown", not as drift."""
+    for b in discover_books(s.cfg):
+        if b.number != book_number:
+            continue
+        manifest_path = b.folder / f"{b.title}.manifest.json"
+        try:
+            m = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return (False, {})
+        num_to_id = {c["number"]: c["id"] for c in m.get("chapters", [])
+                     if c.get("number") is not None and c.get("id")}
+        index_ch = {r[0] for r in s.db.execute(
+            "SELECT DISTINCT chapter_number FROM chunks WHERE book_number = ?",
+            (book_number,))}
+        return (set(num_to_id) == index_ch, num_to_id)
+    return (False, {})
+
+
 @router.get("/sync/status")
 def sync_status():
     """Per-book freshness of the index vs Loom's canon-export manifests.

@@ -72,6 +72,82 @@ def _bullets_html(bullets: list[str]) -> str:
     return f"<ul>{items}</ul>" if items else ""
 
 
+def _auto_reconcile(book: int, cards: list[dict]) -> bool:
+    """Fold newly written / renumbered chapters into the outline without ever
+    touching writer-authored content. Runs only when the index matches Loom's
+    manifest ("no drift") — under drift the numbering is about to change
+    again, so reconciling would churn cards twice; the manual Sync flow
+    remains for conflicts. Cards are matched by the manifest's stable Loom
+    chapter id once stamped (so a mid-book insertion renumbers cards instead
+    of cross-wiring their content); plain number match is the first-time
+    fallback. Returns True when cards changed."""
+    from .sync import book_sync_state
+
+    s = get_state()
+    in_sync, num_to_loom = book_sync_state(s, book)
+    if not in_sync or not num_to_loom:
+        return False
+    extracted = _extracted_chapters(book)
+    if set(extracted) != set(num_to_loom):  # ingest raced the check — skip
+        return False
+
+    by_loom = {c["loom_id"]: c for c in cards if c.get("loom_id")}
+    by_num = {c["chapter"]: c for c in cards
+              if c.get("chapter") is not None and not c.get("loom_id")}
+    changed = False
+    for num in sorted(extracted):
+        loom_id = num_to_loom[num]
+        ext = extracted[num]
+        card = by_loom.get(loom_id) or by_num.get(num)
+        if card is None:  # newly written chapter — a card can only be added
+            cards.append({
+                "id": f"ch-{book}-{num}-{uuid.uuid4().hex[:6]}",
+                "book": book, "chapter": num, "position": float(num),
+                "status": "synced", "heading": ext["heading"],
+                "pov": ext["pov"] or "", "date": ext["date"],
+                "writer_summary": "", "extracted_bullets": ext["bullets"],
+                "notes": None, "loom_id": loom_id,
+            })
+            changed = True
+            continue
+        touched = False
+        if card.get("loom_id") != loom_id:
+            card["loom_id"] = loom_id
+            touched = True
+        old_num = card.get("chapter")
+        if old_num != num:
+            card["chapter"] = num
+            card["position"] = float(num)
+            if card.get("heading") == f"Chapter {old_num}":
+                card["heading"] = f"Chapter {num}"
+            touched = True
+        if card.get("extracted_bullets") != ext["bullets"]:
+            # A summary the machine wrote (provenance match, or the exact
+            # auto-backfill of the old bullets) is cleared so the backfill in
+            # get_outline refills it from this chapter's current prose
+            # summary. Writer words never match and are kept.
+            ws = (card.get("writer_summary") or "").strip()
+            if ws and (ws == (card.get("summary_source") or "").strip()
+                       or ws == _bullets_html(card.get("extracted_bullets") or [])):
+                card["writer_summary"] = ""
+                card["summary_source"] = None
+            card["extracted_bullets"] = ext["bullets"]
+            touched = True
+        # pov/date mirror the manuscript for a written chapter — the walk is
+        # authoritative for both. Authorial intent lives on planned cards
+        # (chapter=None), which this loop never visits.
+        if (card.get("pov") or "") != (ext["pov"] or ""):
+            card["pov"] = ext["pov"] or ""
+            touched = True
+        if card.get("date") != ext["date"]:
+            card["date"] = ext["date"]
+            touched = True
+        if touched:
+            card["status"] = "synced"
+            changed = True
+    return changed
+
+
 @router.get("/outline/{book}")
 def get_outline(book: int):
     outlines = writer_store.plan_outline()
@@ -79,10 +155,14 @@ def get_outline(book: int):
     if key not in outlines:
         outlines[key] = _seed_outline(book)
         writer_store.save_plan_outline(outlines)
+    if _auto_reconcile(book, outlines[key]):
+        writer_store.save_plan_outline(outlines)
     # Backfill: cards display writer_summary; where the writer hasn't written
-    # one yet, show the enriched prose chapter summary (falling back to key
-    # events as bullets). Only ever fills EMPTY summaries — never overwrites
-    # the writer's words.
+    # one, show the enriched prose chapter summary (falling back to key
+    # events as bullets). `summary_source` records exactly what the machine
+    # wrote, so machine content keeps refreshing itself when enrichment (or
+    # chapter numbering) changes, while anything the writer edited — even by
+    # one character — stops matching and is never overwritten again.
     import html as _html
     s = get_state()
     try:
@@ -94,15 +174,23 @@ def get_outline(book: int):
     changed = False
     for c in outlines[key]:
         ws = (c.get("writer_summary") or "").strip()
-        # untouched bullet auto-backfill upgrades itself once prose exists;
-        # anything the writer edited (even one character) never matches
-        if ws and ws != _bullets_html(c.get("extracted_bullets") or []):
+        machine = (not ws
+                   or ws == (c.get("summary_source") or "").strip()
+                   or ws == _bullets_html(c.get("extracted_bullets") or []))
+        if not machine:
             continue
         if c.get("chapter") in prose:
-            c["writer_summary"] = f"<p>{_html.escape(prose[c['chapter']])}</p>"
-            changed = True
+            new = f"<p>{_html.escape(prose[c['chapter']])}</p>"
         elif c.get("extracted_bullets"):
-            c["writer_summary"] = _bullets_html(c["extracted_bullets"])
+            new = _bullets_html(c["extracted_bullets"])
+        else:
+            continue
+        if ws != new:
+            c["writer_summary"] = new
+            c["summary_source"] = new
+            changed = True
+        elif c.get("summary_source") != new:
+            c["summary_source"] = new  # adopt provenance for legacy backfills
             changed = True
     if changed:
         writer_store.save_plan_outline(outlines)
