@@ -25,8 +25,10 @@ class AppState:
         # dedicated connection for the canonicalizer: its build phase runs
         # many queries and must never interleave with request queries
         import sqlite3
-        self.canon = Canonicalizer(
-            sqlite3.connect(self.cfg.sqlite_path, check_same_thread=False))
+        canon_conn = sqlite3.connect(self.cfg.sqlite_path, check_same_thread=False)
+        canon_conn.execute("PRAGMA journal_mode = WAL")
+        canon_conn.execute("PRAGMA busy_timeout = 5000")
+        self.canon = Canonicalizer(canon_conn)
         self._embedder = None
         self._retriever = None
         self._local = threading.local()
@@ -45,6 +47,8 @@ class AppState:
         if conn is None:
             conn = sqlite3.connect(self.cfg.sqlite_path, check_same_thread=False)
             conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = WAL")
+            conn.execute("PRAGMA busy_timeout = 5000")
             self._local.conn = conn
         return conn
 

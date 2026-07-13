@@ -178,7 +178,7 @@ class Retriever:
             if h["chunk_id"] in seen:
                 continue
             seen.add(h["chunk_id"])
-            m = h["metadata"]
+            m = h["metadata"] or {}  # orphaned vectors (deleted/renumbered chunks) can lack metadata
             excerpts.append({"chunk_id": h["chunk_id"],
                              "header": _header(m),
                              "text": h["text"],

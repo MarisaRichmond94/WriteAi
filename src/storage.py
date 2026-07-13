@@ -177,6 +177,8 @@ class SeriesStore:
         if conn is None:
             conn = sqlite3.connect(self._cfg_path, check_same_thread=False)
             conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA journal_mode = WAL")   # concurrent reads + 1 writer; survives DB rebuilds
+            conn.execute("PRAGMA busy_timeout = 5000")  # wait on contention instead of erroring immediately
             self._local.conn = conn
         return conn
 
