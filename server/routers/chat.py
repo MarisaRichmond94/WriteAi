@@ -40,6 +40,7 @@ class ChatRequest(BaseModel):
     book_filter: list[str | int] = []
     pov_filter: list[str] = []
     conversation_history: list[dict] = []
+    model: str | None = None          # per-request model (None = settings default)
 
 
 @router.post("/chat/stream")
@@ -74,7 +75,7 @@ def chat_stream(req: ChatRequest):
             if filtered:  # don't starve the model if the filter is too tight
                 excerpts = filtered
 
-        answerer = s.new_answerer()
+        answerer = s.new_answerer(model=req.model)
         history = [{"role": m["role"], "content": m["content"]}
                    for m in req.conversation_history[-8:]
                    if m.get("role") in ("user", "assistant") and m.get("content")]
