@@ -39,15 +39,6 @@ class Answerer:
         # -> request payloads are byte-identical to the legacy shape.
         self.enable_prompt_cache_v2 = getattr(cfg, "enable_prompt_cache_v2",
                                               False)
-        # ENABLE_DIRECT_QUOTES: append a verbatim-quoting instruction to the
-        # system prompt. Flag off -> build_request output is byte-identical
-        # to the legacy shape.
-        self.enable_direct_quotes = getattr(cfg, "enable_direct_quotes", False)
-        # ENABLE_FIRST_OCCURRENCE: first-occurrence plans swap the temporal
-        # instruction for FIRST_OCCURRENCE_INSTRUCTION. Flag off -> requests
-        # are byte-identical to the legacy shape.
-        self.enable_first_occurrence = getattr(cfg, "enable_first_occurrence",
-                                               False)
         self.usage = {"input_tokens": 0, "output_tokens": 0,
                       "cache_write_tokens": 0, "cache_read_tokens": 0}
 
@@ -95,8 +86,7 @@ class Answerer:
         if plan.qtype == "temporal_knowledge":
             # first_occurrence wins over the plain temporal instruction (same
             # condition the retriever's first-occurrence branch gates on)
-            if (self.enable_first_occurrence
-                    and getattr(plan, "first_occurrence", False)
+            if (getattr(plan, "first_occurrence", False)
                     and getattr(plan, "topic", None)):
                 parts.append(FIRST_OCCURRENCE_INSTRUCTION)
             else:
@@ -114,12 +104,11 @@ class Answerer:
         if self.enable_prompt_cache_v2 and messages:
             messages = self._mark_history_breakpoint(messages)
         messages.append({"role": "user", "content": "\n".join(parts)})
-        # ENABLE_DIRECT_QUOTES: the quoting instruction is appended in a fixed
-        # position (right after the base prompt, before system_extra) so the
-        # system string stays byte-stable across turns and the prompt-cache
-        # prefix is preserved. Flag off -> identical to the legacy string.
+        # The quoting instruction is appended in a fixed position (right after
+        # the base prompt, before system_extra) so the system string stays
+        # byte-stable across turns and the prompt-cache prefix is preserved.
         system = ((system_base or SYSTEM_PROMPT)
-                  + (f"\n\n{QUOTE_INSTRUCTION}" if self.enable_direct_quotes else "")
+                  + f"\n\n{QUOTE_INSTRUCTION}"
                   + (f"\n\n{system_extra}" if system_extra else ""))
         # Cache the system block (base prompt + injected reference material,
         # e.g. Explore's story bibles). Messages come after the breakpoint, so

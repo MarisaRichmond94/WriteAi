@@ -67,8 +67,6 @@ class Config:
     max_chunk_tokens: int
     top_k_results: int
     confirm_before_ingest: bool
-    enable_hybrid_search: bool
-    enable_alias_resolution: bool
     enable_reranker: bool
     reranker_model: str
     rerank_candidates: int
@@ -79,8 +77,6 @@ class Config:
     enable_note_ranking: bool = False
     continuity_notes_cap: int = 0
     enable_sentiment_v2: bool = False
-    enable_direct_quotes: bool = False
-    enable_first_occurrence: bool = False
     enable_story_order: bool = False
     enable_location_v2: bool = False
     # Model for the relationship-nature enrichment pass only. Direction
@@ -156,8 +152,6 @@ def load_config(env_file: Path | None = None) -> Config:
         max_chunk_tokens=_get_int("MAX_CHUNK_TOKENS", 800),
         top_k_results=_get_int("TOP_K_RESULTS", 15),
         confirm_before_ingest=_get_bool("CONFIRM_BEFORE_INGEST", True),
-        enable_hybrid_search=_get_bool("ENABLE_HYBRID_SEARCH", False),
-        enable_alias_resolution=_get_bool("ENABLE_ALIAS_RESOLUTION", False),
         enable_reranker=_get_bool("ENABLE_RERANKER", False),
         # `or`, not a .get() default: a blank RERANKER_MODEL= line means
         # "use the default" (same convention as EMBEDDING_MODEL).
@@ -172,8 +166,6 @@ def load_config(env_file: Path | None = None) -> Config:
         enable_note_ranking=_get_bool("ENABLE_NOTE_RANKING", False),
         continuity_notes_cap=_get_int("CONTINUITY_NOTES_CAP", 200),
         enable_sentiment_v2=_get_bool("ENABLE_SENTIMENT_V2", False),
-        enable_direct_quotes=_get_bool("ENABLE_DIRECT_QUOTES", False),
-        enable_first_occurrence=_get_bool("ENABLE_FIRST_OCCURRENCE", False),
         enable_story_order=_get_bool("ENABLE_STORY_ORDER", False),
         enable_location_v2=_get_bool("ENABLE_LOCATION_V2", False),
         enrich_rel_model=os.environ.get("ENRICH_REL_MODEL", "").strip(),

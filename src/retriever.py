@@ -130,10 +130,9 @@ class Retriever:
         return self._reranker
 
     def _alias_map(self, names: list[str]) -> dict[str, list[str]]:
-        """name -> grounded alias list; identity mapping unless
-        ENABLE_ALIAS_RESOLUTION is on. Only the SQL LIKE filters consume
+        """name -> grounded alias list. Only the SQL LIKE filters consume
         this — the semantic query text is never rewritten."""
-        if self.cfg.enable_alias_resolution and names:
+        if names:
             return expand_characters(self.db, names)
         return {n: [n] for n in names}
 
@@ -165,8 +164,7 @@ class Retriever:
         # temporal_knowledge, where literal name matches help. Abstract qtypes
         # are left to semantic + rerank (an experiment extending fusion to
         # 'general' regressed it and was dropped).
-        if (self.cfg.enable_hybrid_search
-                and plan.qtype in ("lookup", "temporal_knowledge")):
+        if plan.qtype in ("lookup", "temporal_knowledge"):
             keyword_hits = self.store.keyword_search(plan.question, pool_n,
                                                      plan.scope)
             hits = _rrf_fuse(hits, keyword_hits)  # also dedupes on chunk_id
@@ -202,8 +200,7 @@ class Retriever:
         return self._semantic(plan), []
 
     def _temporal(self, plan: QueryPlan) -> tuple[list[dict], list[str]]:
-        if (getattr(self.cfg, "enable_first_occurrence", False)
-                and getattr(plan, "first_occurrence", False)
+        if (getattr(plan, "first_occurrence", False)
                 and getattr(plan, "topic", None)):
             return self._first_occurrence(plan)
         where, params = _scope_sql(plan.scope)
