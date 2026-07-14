@@ -618,7 +618,7 @@ class EnrichmentRunner:
         try:
             db = sqlite3.connect(db_path)  # thread-local connection
             db.execute("PRAGMA journal_mode = WAL")
-            db.execute("PRAGMA busy_timeout = 5000")
+            db.execute("PRAGMA busy_timeout = 30000")
             canon = canon_factory(db)
             ensure_tables(db)
             removed = gc_orphans(db)

@@ -27,7 +27,7 @@ class AppState:
         import sqlite3
         canon_conn = sqlite3.connect(self.cfg.sqlite_path, check_same_thread=False)
         canon_conn.execute("PRAGMA journal_mode = WAL")
-        canon_conn.execute("PRAGMA busy_timeout = 5000")
+        canon_conn.execute("PRAGMA busy_timeout = 30000")
         self.canon = Canonicalizer(canon_conn)
         self._embedder = None
         self._retriever = None
@@ -48,7 +48,7 @@ class AppState:
             conn = sqlite3.connect(self.cfg.sqlite_path, check_same_thread=False)
             conn.execute("PRAGMA foreign_keys = ON")
             conn.execute("PRAGMA journal_mode = WAL")
-            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute("PRAGMA busy_timeout = 30000")
             self._local.conn = conn
         return conn
 

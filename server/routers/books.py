@@ -22,7 +22,8 @@ from ..deps import get_state
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
-_ingest = {"proc": None, "log_path": None, "started_at": None}
+_ingest = {"proc": None, "log_path": None, "started_at": None,
+           "post_processing": False}
 _ingest_lock = threading.Lock()
 
 
@@ -529,7 +530,12 @@ def ingest_preview(book: int | None = None):
 @router.post("/ingest/run")
 def ingest_run(book: int | None = None):
     with _ingest_lock:
-        if _ingest["proc"] is not None and _ingest["proc"].poll() is None:
+        running = _ingest["proc"] is not None and _ingest["proc"].poll() is None
+        # Also refuse while the previous run's post-ingest writes (orphan GC +
+        # index reload) are still in flight: those run in _watch after the
+        # subprocess exits and write to the same SQLite DB, so starting a new
+        # ingest subprocess now would put two writers in contention.
+        if running or _ingest["post_processing"]:
             audit.log_event("ingest_refused", "an ingestion run is already in progress",
                             book=book, started_at=_ingest["started_at"])
             raise HTTPException(409, "an ingestion run is already in progress")
@@ -562,31 +568,41 @@ def ingest_run(book: int | None = None):
             audit.log_event("ingest_exited", f"re-ingest of {scope} exited",
                             exit_code=code)
             if code == 0:
-                # chapters may have been renumbered or removed by this sync:
-                # purge enrichment rows (events/summaries) stranded at chapter
-                # numbers that no longer exist, or reviews serve the old
-                # numbering back as duplicate "earlier" story material.
-                # get_state().db is thread-local — safe from this thread.
+                # Mark post-processing so a concurrently-due ingest waits: the
+                # GC + index reload below write to the same SQLite DB, and a
+                # second ingest subprocess starting now would contend for the
+                # write lock. Cleared in finally so a failure can't wedge it on.
+                with _ingest_lock:
+                    _ingest["post_processing"] = True
                 try:
-                    from ..enrich import gc_orphans
-                    removed = gc_orphans(get_state().db)
-                    if removed:
-                        audit.log_event(
-                            "enrich_gc",
-                            "purged stale enrichment rows after re-ingest",
-                            rows=removed)
-                except Exception:
-                    log.exception("post-ingest enrichment GC failed")
-                # The subprocess rewrote the Chroma segments under this
-                # process; our cached client/collection is now stale and would
-                # serve broken semantic search (blank review bubbles) until a
-                # restart. Rebuild the search stack against the new segments.
-                try:
-                    get_state().reload_index()
-                    audit.log_event("index_reloaded",
-                                    "rebuilt search stack after re-ingest")
-                except Exception:
-                    log.exception("post-ingest index reload failed")
+                    # chapters may have been renumbered or removed by this sync:
+                    # purge enrichment rows (events/summaries) stranded at chapter
+                    # numbers that no longer exist, or reviews serve the old
+                    # numbering back as duplicate "earlier" story material.
+                    # get_state().db is thread-local — safe from this thread.
+                    try:
+                        from ..enrich import gc_orphans
+                        removed = gc_orphans(get_state().db)
+                        if removed:
+                            audit.log_event(
+                                "enrich_gc",
+                                "purged stale enrichment rows after re-ingest",
+                                rows=removed)
+                    except Exception:
+                        log.exception("post-ingest enrichment GC failed")
+                    # The subprocess rewrote the Chroma segments under this
+                    # process; our cached client/collection is now stale and would
+                    # serve broken semantic search (blank review bubbles) until a
+                    # restart. Rebuild the search stack against the new segments.
+                    try:
+                        get_state().reload_index()
+                        audit.log_event("index_reloaded",
+                                        "rebuilt search stack after re-ingest")
+                    except Exception:
+                        log.exception("post-ingest index reload failed")
+                finally:
+                    with _ingest_lock:
+                        _ingest["post_processing"] = False
             if code != 0:
                 from .. import notify
                 notify.add("error", "Sync failed",

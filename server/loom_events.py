@@ -105,17 +105,29 @@ async def _tick() -> None:
     if not due:
         return
     numbers = {b.title: b.number for b in discover_books(get_state().cfg)}
+    resolved = []
     for title in due:
         number = numbers.get(title)
         if number is None:
             log.warning("loom-events: no folder matches exported book %r — dropping", title)
             _pending.pop(title, None)
             continue
-        try:
-            ingest_run(book=number)
-        except HTTPException:
-            # an ingest is already running — keep pending, retry next tick
-            return
+        resolved.append((title, number))
+    if not resolved:
+        return
+    # Coalesce a burst that spans multiple books into a single incremental
+    # all-books run: one subprocess and one post-ingest write pass instead of
+    # one per book (previously spread one-per-tick), which minimises how often
+    # an ingest writer overlaps a concurrent DB writer. A lone due book still
+    # runs scoped, since its diff is cheaper.
+    scope_book = resolved[0][1] if len(resolved) == 1 else None
+    try:
+        ingest_run(book=scope_book)
+    except HTTPException:
+        # an ingest (or its post-processing) is in progress — keep every due
+        # book pending and retry on the next tick.
+        return
+    for title, number in resolved:
         _pending.pop(title, None)
         audit.log_event("loom_event_sync",
                         f"auto-ingest of '{title}' after Loom canon export",

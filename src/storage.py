@@ -17,6 +17,7 @@ import json
 import logging
 import re
 import sqlite3
+import time
 
 from .notes import pair_quotes
 
@@ -177,10 +178,37 @@ class SeriesStore:
         if conn is None:
             conn = sqlite3.connect(self._cfg_path, check_same_thread=False)
             conn.execute("PRAGMA foreign_keys = ON")
-            conn.execute("PRAGMA journal_mode = WAL")   # concurrent reads + 1 writer; survives DB rebuilds
-            conn.execute("PRAGMA busy_timeout = 5000")  # wait on contention instead of erroring immediately
+            conn.execute("PRAGMA journal_mode = WAL")    # concurrent reads + 1 writer; survives DB rebuilds
+            conn.execute("PRAGMA busy_timeout = 30000")  # wait up to 30s on contention instead of erroring
             self._local.conn = conn
         return conn
+
+    def _write_with_retry(self, write) -> None:
+        """Run a SQLite write, retrying on transient 'database is locked'.
+
+        busy_timeout already makes each statement wait out a competing writer,
+        but the ingest subprocess and the always-on server write to this DB from
+        separate processes (e.g. a prior book's post-ingest GC / index reload
+        racing the next book's ingest), and a long or bursty writer can still
+        exceed the timeout. Left unhandled, the OperationalError aborts the
+        whole run — and because ingest.py only records chunk hashes on success,
+        the book stays permanently 'behind' and is re-triggered on every Loom
+        export (the failure loop). Retrying after rolling back the partial
+        transaction keeps a transient lock from stranding a book. The writes
+        here are idempotent (delete-then-insert by chunk_id), so a full retry
+        is safe."""
+        attempts, delay = 4, 0.5
+        for attempt in range(1, attempts + 1):
+            try:
+                write()
+                return
+            except sqlite3.OperationalError as e:
+                if "locked" not in str(e).lower() or attempt == attempts:
+                    raise
+                self.db.rollback()  # discard the partial txn before retrying
+                log.warning("SQLite write locked (attempt %d/%d); retrying in %.1fs",
+                            attempt, attempts, delay * attempt)
+                time.sleep(delay * attempt)
 
     # ── writes ──────────────────────────────────────────────────────────────
 
@@ -192,21 +220,24 @@ class SeriesStore:
         if not records:
             return
         self._upsert_chroma(records)
-        self._upsert_sqlite(records)
+        self._write_with_retry(lambda: self._upsert_sqlite(records))
 
     def delete_chunks(self, chunk_ids: list[str]) -> None:
         if not chunk_ids:
             return
         self.collection.delete(ids=chunk_ids)
-        # External-content FTS rows must be removed via the special 'delete'
-        # insert form, with the old rowid+text, BEFORE the source row goes.
-        self.db.executemany(
-            """INSERT INTO chunks_fts(chunks_fts, rowid, text)
-               SELECT 'delete', rowid, text FROM chunks WHERE chunk_id = ?""",
-            [(cid,) for cid in chunk_ids])
-        self.db.executemany("DELETE FROM chunks WHERE chunk_id = ?",
-                            [(cid,) for cid in chunk_ids])
-        self.db.commit()
+
+        def _write():
+            # External-content FTS rows must be removed via the special 'delete'
+            # insert form, with the old rowid+text, BEFORE the source row goes.
+            self.db.executemany(
+                """INSERT INTO chunks_fts(chunks_fts, rowid, text)
+                   SELECT 'delete', rowid, text FROM chunks WHERE chunk_id = ?""",
+                [(cid,) for cid in chunk_ids])
+            self.db.executemany("DELETE FROM chunks WHERE chunk_id = ?",
+                                [(cid,) for cid in chunk_ids])
+            self.db.commit()
+        self._write_with_retry(_write)
 
     def delete_book(self, book_number: int) -> list[str]:
         """Remove every chunk of a book (used when re-ingesting). Returns ids."""
