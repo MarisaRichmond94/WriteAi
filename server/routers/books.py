@@ -561,7 +561,7 @@ def ingest_run(book: int | None = None):
         audit.log_event("ingest_started", f"re-ingest of {scope} started",
                         book=book, log=str(log_path))
 
-        def _watch(proc=proc, scope=scope, title=title):
+        def _watch(proc=proc, scope=scope, title=title, log_path=log_path):
             # success and no-op runs self-report from ingest.py with a full
             # summary; the watcher only covers crashes that never got there
             code = proc.wait()
@@ -605,9 +605,24 @@ def ingest_run(book: int | None = None):
                         _ingest["post_processing"] = False
             if code != 0:
                 from .. import notify
+                # ingest_ui.log is truncated ('w') at the start of the next
+                # run, which clobbers this run's traceback before anyone reads
+                # it. Preserve failed runs under a timestamped name (keeping the
+                # last 5) and point the notification at the saved copy.
+                ref = "logs/ingest_ui.log"
+                try:
+                    import shutil
+                    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+                    saved = log_path.with_name(f"ingest_fail_{stamp}.log")
+                    shutil.copyfile(log_path, saved)
+                    ref = f"logs/{saved.name}"
+                    for old in sorted(log_path.parent.glob("ingest_fail_*.log"))[:-5]:
+                        old.unlink()
+                except Exception:
+                    log.exception("failed to preserve failed ingest log")
                 notify.add("error", "Sync failed",
                            f"Re-ingest of {scope} exited with code {code}. "
-                           "See logs/ingest_ui.log.",
+                           f"See {ref}.",
                            book=title, action_url="/?pane=status")
 
         threading.Thread(target=_watch, daemon=True).start()
