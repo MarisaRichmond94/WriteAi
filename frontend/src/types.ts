@@ -455,9 +455,14 @@ export interface OutlineChapter {
   notes: string | null;
 }
 
+export type OutlineSyncState = "synced" | "behind" | "unknown";
+
 export interface OutlineBook {
   book: string;
   chapters: OutlineChapter[];
+  // "unknown" = no readable Loom manifest, so the backend cannot auto-correct
+  // chapter numbering; surfaced in the UI so the silent no-op is visible.
+  syncState: OutlineSyncState;
 }
 
 export interface ChapterNumberAssignment {

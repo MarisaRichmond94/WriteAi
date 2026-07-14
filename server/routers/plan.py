@@ -72,7 +72,20 @@ def _bullets_html(bullets: list[str]) -> str:
     return f"<ul>{items}</ul>" if items else ""
 
 
-def _auto_reconcile(book: int, cards: list[dict]) -> bool:
+def _sync_state(in_sync: bool, num_to_loom: dict[int, str]) -> str:
+    """Classify a book's index-vs-manifest state for the outline response.
+
+    "unknown" means no readable Loom manifest, so `_auto_reconcile` is inert —
+    the outline's chapter numbering will NOT self-correct after edits. Callers
+    surface this so the silent no-op is visible instead of looking like drift.
+    """
+    if not num_to_loom:
+        return "unknown"
+    return "synced" if in_sync else "behind"
+
+
+def _auto_reconcile(book: int, cards: list[dict],
+                    in_sync: bool, num_to_loom: dict[int, str]) -> bool:
     """Fold newly written / renumbered chapters into the outline without ever
     touching writer-authored content. Runs only when the index matches Loom's
     manifest ("no drift") — under drift the numbering is about to change
@@ -81,10 +94,6 @@ def _auto_reconcile(book: int, cards: list[dict]) -> bool:
     chapter id once stamped (so a mid-book insertion renumbers cards instead
     of cross-wiring their content); plain number match is the first-time
     fallback. Returns True when cards changed."""
-    from .sync import book_sync_state
-
-    s = get_state()
-    in_sync, num_to_loom = book_sync_state(s, book)
     if not in_sync or not num_to_loom:
         return False
     extracted = _extracted_chapters(book)
@@ -150,12 +159,20 @@ def _auto_reconcile(book: int, cards: list[dict]) -> bool:
 
 @router.get("/outline/{book}")
 def get_outline(book: int):
+    from .sync import book_sync_state
+
     outlines = writer_store.plan_outline()
     key = str(book)
     if key not in outlines:
         outlines[key] = _seed_outline(book)
         writer_store.save_plan_outline(outlines)
-    if _auto_reconcile(book, outlines[key]):
+    in_sync, num_to_loom = book_sync_state(get_state(), book)
+    sync_state = _sync_state(in_sync, num_to_loom)
+    if sync_state == "unknown":
+        log.warning(
+            "outline book %d: no readable Loom manifest — auto-reconcile is "
+            "inert, so chapter numbering will not self-correct after edits", book)
+    if _auto_reconcile(book, outlines[key], in_sync, num_to_loom):
         writer_store.save_plan_outline(outlines)
     # Backfill: cards display writer_summary; where the writer hasn't written
     # one, show the enriched prose chapter summary (falling back to key
@@ -194,8 +211,8 @@ def get_outline(book: int):
             changed = True
     if changed:
         writer_store.save_plan_outline(outlines)
-    return {"book": book, "chapters": sorted(outlines[key],
-                                             key=lambda c: c["position"])}
+    return {"book": book, "sync_state": sync_state,
+            "chapters": sorted(outlines[key], key=lambda c: c["position"])}
 
 
 class OutlinePut(BaseModel):

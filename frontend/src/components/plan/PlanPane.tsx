@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Info, Kanban, RefreshCw, Loader2, Plus, Download, MessageSquare } from "lucide-react";
+import { Info, Kanban, RefreshCw, Loader2, Plus, Download, MessageSquare, TriangleAlert } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import { usePlanStore } from "../../store/usePlanStore";
@@ -9,6 +9,7 @@ import OutlineView from "./outline/OutlineView";
 import CharacterView from "./character/CharacterView";
 import ChapterSelectModal from "./outline/ChapterSelectModal";
 import ImportCharactersModal from "./character/ImportCharactersModal";
+import type { OutlineSyncState } from "../../types";
 
 export default function PlanPane() {
   const { books, showToast } = useAppStore();
@@ -44,6 +45,9 @@ export default function PlanPane() {
   };
   const [reviewModalOpen, setReviewModalOpen] = useState(false);
   const [pipelineRunning, setPipelineRunning] = useState(false);
+  // "unknown" = the backend has no Loom manifest for this book, so it can't
+  // auto-correct chapter numbering. Surface it so the silent no-op is visible.
+  const [syncState, setSyncState] = useState<OutlineSyncState | null>(null);
 
   // Read URL params on mount and clear them on unmount (navigate away)
   useEffect(() => {
@@ -108,8 +112,12 @@ export default function PlanPane() {
   // outline so the view leaves its loading skeleton (undefined = not loaded).
   useEffect(() => {
     if (!selectedBook) return;
+    setSyncState(null);
     fetchOutline(selectedBook)
-      .then((data) => setOutlineForBook(selectedBook, data.chapters))
+      .then((data) => {
+        setOutlineForBook(selectedBook, data.chapters);
+        setSyncState(data.syncState);
+      })
       .catch(() => setOutlineForBook(selectedBook, []));
   }, [selectedBook, setOutlineForBook]);
 
@@ -184,6 +192,17 @@ export default function PlanPane() {
 
         {planView === "outline" && (
           <div className="flex items-center flex-shrink-0" style={{ gap: "8px" }}>
+            {syncState === "unknown" && (
+              <div className="relative group/nosync">
+                <span className="flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-xs text-amber-400">
+                  <TriangleAlert className="h-3 w-3" />
+                  Auto-sync off
+                </span>
+                <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 w-64 rounded-md border border-surface-border bg-surface-card px-2.5 py-1.5 text-[10px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity group-hover/nosync:opacity-100">
+                  No Loom manifest was found for this book, so chapter numbering can't be auto-corrected against the manuscript. Your edits are saved, but written chapters won't self-heal until the manifest is available again.
+                </div>
+              </div>
+            )}
             <div className="relative group/planreview">
               <button
                 onClick={() => setReviewModalOpen(true)}

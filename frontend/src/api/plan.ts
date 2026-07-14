@@ -3,6 +3,7 @@ import type {
   Citation,
   OutlineBook,
   OutlineChapter,
+  OutlineSyncState,
   ResyncPreviewResponse,
   WriterCharacter,
 } from "../types";
@@ -54,22 +55,34 @@ async function* _streamSSE(url: string, body: unknown): AsyncGenerator<PlanSSEEv
 
 // ── Outline ──────────────────────────────────────────────────────────────────
 
+type OutlineResponse = {
+  book: number;
+  chapters: OutlineChapter[];
+  sync_state?: OutlineSyncState;
+};
+
 export async function fetchOutline(bookId: string): Promise<OutlineBook> {
-  const data = await jsonFetch<{ book: number; chapters: OutlineChapter[] }>(
-    `/api/plan/outline/${bookId}`,
-  );
-  return { book: String(data.book), chapters: data.chapters };
+  const data = await jsonFetch<OutlineResponse>(`/api/plan/outline/${bookId}`);
+  return {
+    book: String(data.book),
+    chapters: data.chapters,
+    syncState: data.sync_state ?? "unknown",
+  };
 }
 
 export async function saveOutline(
   bookId: string,
   chapters: OutlineChapter[],
 ): Promise<OutlineBook> {
-  const data = await jsonFetch<{ book: number; chapters: OutlineChapter[] }>(
+  const data = await jsonFetch<OutlineResponse>(
     `/api/plan/outline/${bookId}`,
     { method: "PUT", body: JSON.stringify({ chapters }) },
   );
-  return { book: String(data.book), chapters: data.chapters };
+  return {
+    book: String(data.book),
+    chapters: data.chapters,
+    syncState: data.sync_state ?? "unknown",
+  };
 }
 
 export async function deleteChapter(bookId: string, chapterId: string): Promise<void> {
@@ -86,11 +99,15 @@ export async function approveResync(
   bookId: string,
   body: { book: string; approved_diff_ids: string[] },
 ): Promise<OutlineBook> {
-  const data = await jsonFetch<{ book: number; chapters: OutlineChapter[] }>(
+  const data = await jsonFetch<OutlineResponse>(
     `/api/plan/resync/${bookId}/approve`,
     { method: "POST", body: JSON.stringify(body) },
   );
-  return { book: String(data.book), chapters: data.chapters };
+  return {
+    book: String(data.book),
+    chapters: data.chapters,
+    syncState: data.sync_state ?? "unknown",
+  };
 }
 
 // ── Writer characters ────────────────────────────────────────────────────────

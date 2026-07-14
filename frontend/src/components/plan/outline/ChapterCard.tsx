@@ -32,7 +32,7 @@ function povColorClass(pov: string): string {
 
 interface ChapterCardProps {
   chapter: OutlineChapter;
-  sortedIndex: number;
+  displayNumber: number;
   hasDiff: boolean;
   diffCount: number;
   povSuggestions: string[];
@@ -50,7 +50,7 @@ interface ChapterCardProps {
 
 export default function ChapterCard({
   chapter,
-  sortedIndex,
+  displayNumber,
   hasDiff,
   diffCount,
   povSuggestions,
@@ -141,7 +141,7 @@ export default function ChapterCard({
         {/* Chapter name + inline POV combobox */}
         <div className="flex items-center gap-2 min-w-0 mt-3 leading-none">
           <span className="text-sm font-bold text-ink-primary flex-shrink-0 leading-none">
-            {chapter.chapter != null ? chapterLabel(chapter.chapter) : `Chapter ${sortedIndex + 1}`}
+            {chapterLabel(chapter.chapter ?? displayNumber)}
           </span>
           <div data-no-dnd="true" className="relative flex-shrink-0">
             <input

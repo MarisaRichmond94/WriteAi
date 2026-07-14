@@ -52,7 +52,7 @@ class NoDndPointerSensor extends PointerSensor {
 
 function SortableChapterCard(props: {
   chapter: OutlineChapter;
-  sortedIndex: number;
+  displayNumber: number;
   hasDiff: boolean;
   diffCount: number;
   povSuggestions: string[];
@@ -182,12 +182,11 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
     setEditModal({ open: false, chapter: null });
   };
 
-  // Assign sequential chapter numbers (1, 2, 3…) based on sorted position
-  const renumberChapters = (chs: OutlineChapter[]): OutlineChapter[] =>
-    [...chs]
-      .sort((a, b) => a.position - b.position)
-      .map((ch, i) => ({ ...ch, chapter: i + 1 }));
-
+  // A written chapter's number is authoritative — it belongs to the manuscript
+  // (and the backend re-derives it from Loom's manifest). The client must never
+  // reassign it: doing so shifted every card off by one whenever a prologue
+  // (chapter 0) or planned card was present. Structural edits move cards by
+  // `position` only; planned cards keep `chapter: null`.
   const handleInsertChapter = async (position: number, date: string) => {
     const newCh: OutlineChapter = {
       id: crypto.randomUUID(),
@@ -202,13 +201,13 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
       extracted_bullets: [],
       notes: null,
     };
-    const renumbered = renumberChapters([...chapters, newCh]);
+    const next = [...chapters, newCh];
     if (isMock) {
-      setOutlineForBook(bookId, renumbered);
+      setOutlineForBook(bookId, next);
       return;
     }
     try {
-      const result = await saveOutline(bookId, renumbered);
+      const result = await saveOutline(bookId, next);
       setOutlineForBook(bookId, result.chapters);
     } catch {
       showToast("Failed to add chapter.");
@@ -217,13 +216,12 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
 
   const handleDelete = async (chapterId: string) => {
     const remaining = chapters.filter((c) => c.id !== chapterId);
-    const renumbered = renumberChapters(remaining);
     if (isMock) {
-      setOutlineForBook(bookId, renumbered);
+      setOutlineForBook(bookId, remaining);
       return;
     }
     try {
-      const result = await saveOutline(bookId, renumbered);
+      const result = await saveOutline(bookId, remaining);
       setOutlineForBook(bookId, result.chapters);
     } catch {
       showToast("Failed to delete chapter.");
@@ -256,7 +254,6 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
     const reordered = arrayMove(sorted, oldIndex, newIndex).map((c, i) => ({
       ...c,
       position: i + 1,
-      chapter: i + 1,
     }));
 
     // Optimistic update
@@ -292,6 +289,19 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
   };
 
   const sorted = [...chapters].sort((a, b) => a.position - b.position);
+  // Label per card: a written chapter shows its own manuscript number (prologue
+  // = 0 → "Prologue"); a planned card (chapter == null) continues the sequence
+  // from the preceding chapter, so a placeholder reads sensibly without ever
+  // renumbering the written chapters. Prologue-aware, unlike a raw array index.
+  let runningNumber = 0;
+  const displayNumbers = sorted.map((ch) => {
+    if (ch.chapter != null) {
+      runningNumber = ch.chapter;
+      return ch.chapter;
+    }
+    runningNumber += 1;
+    return runningNumber;
+  });
   const povSuggestions = [...new Set(chapters.map((c) => c.pov).filter(Boolean))] as string[];
 
   return (
@@ -345,7 +355,7 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
                   <div key={ch.id} className="relative group/insert">
                     <SortableChapterCard
                       chapter={ch}
-                      sortedIndex={i}
+                      displayNumber={displayNumbers[i]}
                       hasDiff={ch.id in diffCountById}
                       diffCount={diffCountById[ch.id] ?? 0}
                       onDiffClick={() => setResyncModalOpen(true)}
@@ -376,7 +386,7 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
                   <div className="rotate-1 scale-105 opacity-95 shadow-2xl">
                     <ChapterCard
                       chapter={ch}
-                      sortedIndex={sorted.indexOf(ch)}
+                      displayNumber={displayNumbers[sorted.indexOf(ch)]}
                       hasDiff={false}
                       diffCount={0}
                       onDiffClick={() => {}}
@@ -428,8 +438,8 @@ export default function OutlineView({ bookId, bookName }: OutlineViewProps) {
         message={(() => {
           const ch = chapters.find((c) => c.id === pendingDeleteId);
           return ch?.chapter != null
-            ? `${chapterLabel(ch.chapter)} will be permanently deleted and all subsequent chapters will be renumbered. This cannot be undone.`
-            : "This chapter will be permanently deleted and all subsequent chapters will be renumbered. This cannot be undone.";
+            ? `${chapterLabel(ch.chapter)} will be removed from your outline. This cannot be undone.`
+            : "This planned chapter will be permanently deleted. This cannot be undone.";
         })()}
         confirmLabel="Delete"
         cancelLabel="Keep"
