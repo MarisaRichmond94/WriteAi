@@ -5,7 +5,7 @@ interface BackendSettings {
   fields: { key: string; value: string }[];
   profile: { writer_name: string; site_name: string; writer_photo_url?: string | null;
              book_order?: string[]; sync_time?: string; auto_sync_enabled?: boolean;
-             backup_retention_days?: number };
+             backup_retention_days?: number; viewer_light_mode?: boolean };
   discovered_books?: string[];
 }
 
@@ -35,7 +35,7 @@ export async function fetchSettings(): Promise<AppSettings> {
     openai_api_key_preview: f("OPENAI_API_KEY"),
     writer_name: data.profile.writer_name || "Writer",
     writer_photo_url: data.profile.writer_photo_url ?? null,
-    viewer_light_mode: true,
+    viewer_light_mode: data.profile.viewer_light_mode ?? true,
   };
 }
 
@@ -59,6 +59,7 @@ export async function saveSettings(
   if (updates.sync_time !== undefined) profile.sync_time = updates.sync_time;
   if (updates.auto_sync_enabled !== undefined) profile.auto_sync_enabled = updates.auto_sync_enabled;
   if (updates.backup_retention_days !== undefined) profile.backup_retention_days = updates.backup_retention_days;
+  if (updates.viewer_light_mode !== undefined) profile.viewer_light_mode = updates.viewer_light_mode;
 
   const res = await fetch("/api/settings", {
     method: "PUT",
