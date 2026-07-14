@@ -13,8 +13,6 @@ import {
   hideCharacter,
   unhideCharacter,
   uploadCharacterPhoto,
-  patchCharacterGender,
-  deleteCharacterGender,
 } from "../../api/characters";
 
 function toCharId(name: string): string {
@@ -126,7 +124,6 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
 
   // ── Hide pending state ────────────────────────────────────────────────────
   const [pendingHidden, setPendingHidden] = useState<boolean | null>(null);
-  const [pendingGender, setPendingGender] = useState<string | null>(null);
 
   // ── Merge sub-flow (still immediate — it's destructive and closes the modal) ─
   const [mergeOpen, setMergeOpen] = useState(false);
@@ -206,8 +203,7 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
     relRemovals.size > 0 ||
     Object.keys(relOverrides).length > 0 ||
     relAdditions.length > 0 ||
-    pendingHidden !== null ||
-    pendingGender !== null;
+    pendingHidden !== null;
 
   // ── Alias helpers ─────────────────────────────────────────────────────────
 
@@ -279,8 +275,6 @@ export default function CharacterEditModal({ character, allCharacters, onClose, 
 
       if (pendingHidden === true) calls.push(() => hideCharacter(character.name));
       if (pendingHidden === false) calls.push(() => unhideCharacter(character.name));
-      if (pendingGender === "") calls.push(() => deleteCharacterGender(character.name));
-      else if (pendingGender !== null) calls.push(() => patchCharacterGender(character.name, pendingGender));
 
       for (const call of calls) await call();
       onSaved();

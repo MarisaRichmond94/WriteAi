@@ -159,19 +159,3 @@ export async function unhideCharacter(character: string): Promise<void> {
   if (!res.ok) throw new Error('Failed to unhide character');
 }
 
-export async function patchCharacterGender(character: string, gender: string): Promise<void> {
-  const res = await fetch('/api/characters/corrections/gender', {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ character, gender }),
-  });
-  if (!res.ok) throw new Error('Failed to update gender');
-}
-
-export async function deleteCharacterGender(character: string): Promise<void> {
-  const res = await fetch(`/api/characters/corrections/gender/${encodeURIComponent(character)}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) throw new Error('Failed to remove gender override');
-}
-

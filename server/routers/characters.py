@@ -362,27 +362,6 @@ def unhide(character: str):
     return {"ok": True}
 
 
-class GenderBody(BaseModel):
-    character: str
-    gender: str
-
-
-@router.patch("/characters/corrections/gender")
-def set_gender(body: GenderBody):
-    cmap = _cmap()
-    cmap["gender"][body.character] = body.gender
-    _save(cmap)
-    return {"ok": True}
-
-
-@router.delete("/characters/corrections/gender/{character}")
-def delete_gender(character: str):
-    cmap = _cmap()
-    cmap["gender"].pop(character, None)
-    _save(cmap)
-    return {"ok": True}
-
-
 @router.post("/characters/cache/invalidate")
 def invalidate_cache():
     get_state().canon._map_state = ""
