@@ -889,7 +889,7 @@ function Section({ title, children, prominent, grow, className }: { title: strin
 
 // ── Main pane ─────────────────────────────────────────────────────────────────
 export default function CharactersPane() {
-  const { showToast, setActivePane, setPendingPipelineBook, books } = useAppStore();
+  const { showToast, setActivePane, books } = useAppStore();
   const pendingCharacterName = useAppStore((s) => s.pendingCharacterName);
   const setPendingCharacterName = useAppStore((s) => s.setPendingCharacterName);
   const bookOrder = books.map((b) => b.name);
@@ -1273,10 +1273,10 @@ export default function CharactersPane() {
                   <p className="text-sm font-medium text-ink-secondary">{bookFilterLabel} Has No Character Data</p>
                   <p className="mt-0.5 text-[11px] text-ink-muted">Run the pipeline to extract insights</p>
                   <button
-                    onClick={() => { setPendingPipelineBook(bookFilter); setActivePane("pipeline"); }}
+                    onClick={() => setActivePane("status")}
                     className="mt-3 rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover transition-colors"
                   >
-                    Run Pipeline
+                    Go to Index Status
                   </button>
                 </div>
               </div>

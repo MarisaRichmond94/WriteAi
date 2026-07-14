@@ -24,18 +24,22 @@ function formatRelative(isoString: string): string {
 }
 
 const TYPE_LABEL: Record<string, string> = {
-  extraction_ready: "Needs Review",
   extraction_complete: "Complete",
   sync_complete: "Sync",
   error: "Error",
 };
 
 const TYPE_COLOR: Record<string, string> = {
-  extraction_ready: "text-amber-400",
   extraction_complete: "text-emerald-400",
   sync_complete: "text-sky-400",
   error: "text-red-400",
 };
+
+// Panes the app can actually render (AppShell). Guards stale action_urls.
+const NAV_PANES = new Set([
+  "explore", "timeline", "writer-timeline", "locations", "plan",
+  "review", "status", "characters", "settings",
+]);
 
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -108,19 +112,13 @@ export default function NotificationBell() {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   }
 
-  function handleRunExtraction(bookSlug: string | null) {
-    setOpen(false);
-    setActivePane("import");
-    // Navigation to the specific book is handled by the ImportPane
-  }
-
   function handleActionUrl(n: Notification) {
     if (!n.action_url) return;
     setOpen(false);
     if (!n.read) handleMarkRead(n.id);
     const params = new URLSearchParams(new URL(n.action_url, window.location.href).search);
     const pane = params.get("pane");
-    if (pane) {
+    if (pane && NAV_PANES.has(pane)) {
       setActivePane(pane as Parameters<typeof setActivePane>[0]);
       window.history.pushState(null, "", n.action_url);
     }
@@ -218,18 +216,7 @@ export default function NotificationBell() {
                         <span className="text-[10px] text-ink-muted">
                           {formatRelative(n.created_at)}
                         </span>
-                        {n.type === "extraction_ready" && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRunExtraction(n.book);
-                            }}
-                            className="text-[10px] font-semibold text-accent hover:underline"
-                          >
-                            Open Import
-                          </button>
-                        )}
-                        {n.action_url && n.type !== "extraction_ready" && (
+                        {n.action_url && (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();

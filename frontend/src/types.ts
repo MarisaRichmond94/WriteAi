@@ -242,7 +242,6 @@ export interface AppSettings {
 }
 
 export type NotificationType =
-  | "extraction_ready"
   | "extraction_complete"
   | "sync_complete"
   | "error";
