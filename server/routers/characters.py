@@ -99,7 +99,20 @@ def _relationships(s, canon, name: str, cmap: dict) -> list[dict]:
 
 
 def _photo_url(cmap: dict, name: str) -> str | None:
-    return cmap["photos"].get(name)
+    url = cmap["photos"].get(name)
+    if not url:
+        return url
+    # Photos are stored under a stable filename and overwritten in place on
+    # re-upload, so the URL is byte-identical every time and the browser keeps
+    # showing the old portrait until a full reload. Stamp the file's mtime onto
+    # the URL: it changes the instant the photo is replaced, so the re-fetched
+    # character list carries a new <img> src and the new picture appears
+    # immediately — no reload needed.
+    path = writer_store.WRITER_DATA_DIR / "photos" / url.rsplit("/", 1)[-1]
+    try:
+        return f"{url}?v={path.stat().st_mtime_ns}"
+    except OSError:
+        return url
 
 
 def _entity_summary(s, canon, entity, cmap: dict) -> dict:
@@ -393,4 +406,4 @@ async def upload_photo(name: str, file: UploadFile, book: str | None = None):
     cmap = _cmap()
     cmap["photos"][name] = f"/api/plan/photos/{dest.name}"
     _save(cmap)
-    return {"photo_url": cmap["photos"][name]}
+    return {"photo_url": _photo_url(cmap, name)}

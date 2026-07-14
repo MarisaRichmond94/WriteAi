@@ -503,7 +503,15 @@ def get_character_photo(filename: str):
     path = (writer_store.WRITER_DATA_DIR / "photos" / Path(filename).name)
     if not path.exists():
         raise HTTPException(404, "no photo")
-    return FileResponse(path)
+    # A character's photo is stored under a stable filename (e.g.
+    # extracted-jared-gatlin.jpg) and overwritten in place when the writer
+    # uploads a new one. Without this header the browser heuristically caches
+    # the old bytes and — since the URL never changes — keeps showing the
+    # previous portrait after an upload ("Photo uploaded" but nothing visibly
+    # changes). "no-cache" lets the browser keep a copy but forces it to
+    # revalidate with the server before reusing it, so a re-uploaded photo is
+    # fetched fresh and the new portrait actually appears.
+    return FileResponse(path, headers={"Cache-Control": "no-cache"})
 
 
 @router.delete("/characters/{char_id}")
