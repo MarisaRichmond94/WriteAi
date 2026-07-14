@@ -462,9 +462,31 @@ def story_bible(book: int):
                  f'attachment; filename="story-bible-{book:02d}-{slug}.md"'})
 
 
+# A user-uploaded cover lives here and overrides the auto-detected dust jacket.
+# writer_data/ is the user's own decisions — never touched by AI or ingest.
+COVERS_DIR = writer_store.WRITER_DATA_DIR / "covers"
+
+
+def book_slug(title: str) -> str:
+    """Slugify a book title the same way the frontend's bookSlug() does."""
+    s = "".join(ch if ch.isalnum() else "-" for ch in title.lower())
+    return "-".join(part for part in s.split("-") if part)
+
+
+def manual_cover_path(slug: str) -> Path | None:
+    """The user's uploaded override for a book, if any (by slug)."""
+    if not COVERS_DIR.exists():
+        return None
+    for path in sorted(COVERS_DIR.glob(f"{slug}.*")):
+        if path.is_file():
+            return path
+    return None
+
+
 @router.get("/books/{book}/cover")
 def book_cover(book: int):
-    """Serve the dust-jacket front cover (read-only) if the book has one."""
+    """Serve a book's cover: the user's manual upload if present, else the
+    auto-detected dust-jacket cover (read-only)."""
     from fastapi.responses import FileResponse
 
     from src.discovery import discover_books
@@ -472,6 +494,10 @@ def book_cover(book: int):
     match = next((b for b in discover_books(s.cfg) if b.number == book), None)
     if match is None:
         raise HTTPException(404, "unknown book")
+    manual = manual_cover_path(book_slug(match.title))
+    if manual is not None:
+        # user-editable, so don't let the browser pin a stale copy
+        return FileResponse(manual, headers={"Cache-Control": "no-cache"})
     for candidate in ("Dust Jacket/Front Cover.png", "Dust Jacket/Front Cover.jpg",
                       "cover.png", "cover.jpg"):
         path = match.folder / candidate

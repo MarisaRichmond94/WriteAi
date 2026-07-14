@@ -90,12 +90,23 @@ export function bookSlug(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
-export async function uploadBookCover(_slug: string, _file: File): Promise<string> {
-  throw new Error("Book covers come from your Dust Jacket folders and are read-only here.");
+// A manual upload overrides the auto-detected Dust Jacket cover for that book.
+export async function uploadBookCover(slug: string, file: File): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/settings/book-cover/${encodeURIComponent(slug)}`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) throw new Error(`Failed to upload cover: ${res.statusText}`);
 }
 
-export async function deleteBookCover(_slug: string): Promise<void> {
-  throw new Error("Book covers come from your Dust Jacket folders and are read-only here.");
+// Removing the manual override reverts to the auto-detected cover.
+export async function deleteBookCover(slug: string): Promise<void> {
+  const res = await fetch(`/api/settings/book-cover/${encodeURIComponent(slug)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Failed to remove cover: ${res.statusText}`);
 }
 
 export async function pickFolder(current?: string): Promise<string | null> {

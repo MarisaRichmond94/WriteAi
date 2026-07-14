@@ -93,19 +93,59 @@ def delete_writer_photo():
     return {"ok": True}
 
 
+def _safe_slug(slug: str) -> str:
+    """Reject anything that isn't a plain slug so file ops can't escape the dir."""
+    if not slug or any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789-" for ch in slug):
+        raise HTTPException(400, "invalid slug")
+    return slug
+
+
 @router.get("/settings/book-cover/{slug}")
 def book_cover_by_slug(slug: str):
-    """The status pane requests covers by slugified book name."""
+    """The status/settings panes request covers by slugified book name.
+    A manual upload overrides the auto-detected dust-jacket cover."""
+    from fastapi.responses import FileResponse
+
     from src.discovery import discover_books
 
-    from .books import book_cover
+    from .books import book_cover, book_slug, manual_cover_path
+    manual = manual_cover_path(slug)
+    if manual is not None:
+        return FileResponse(manual, headers={"Cache-Control": "no-cache"})
     s = get_state()
     for b in discover_books(s.cfg):
-        b_slug = "".join(ch if ch.isalnum() else "-" for ch in b.title.lower())
-        b_slug = "-".join(part for part in b_slug.split("-") if part)
-        if b_slug == slug or b.title.lower() == slug.lower():
+        if book_slug(b.title) == slug or b.title.lower() == slug.lower():
             return book_cover(b.number)
     raise HTTPException(404, "unknown book")
+
+
+@router.post("/settings/book-cover/{slug}")
+async def upload_book_cover(slug: str, file: UploadFile):
+    """Store a manual cover override; it wins over the dust-jacket cover."""
+    from pathlib import Path
+
+    from .books import COVERS_DIR
+    slug = _safe_slug(slug)
+    suffix = Path(file.filename or "cover.png").suffix.lower() or ".png"
+    if suffix not in (".png", ".jpg", ".jpeg", ".webp"):
+        raise HTTPException(400, "unsupported image type")
+    COVERS_DIR.mkdir(parents=True, exist_ok=True)
+    for old in COVERS_DIR.glob(f"{slug}.*"):
+        old.unlink()
+    dest = COVERS_DIR / f"{slug}{suffix}"
+    dest.write_bytes(await file.read())
+    return {"ok": True}
+
+
+@router.delete("/settings/book-cover/{slug}")
+def delete_book_cover(slug: str):
+    """Drop the manual override, reverting to the auto-detected cover."""
+    from .books import COVERS_DIR
+    slug = _safe_slug(slug)
+    if COVERS_DIR.exists():
+        for old in COVERS_DIR.glob(f"{slug}.*"):
+            old.unlink()
+    return {"ok": True}
 
 
 @router.post("/settings/validate")
