@@ -180,8 +180,10 @@ def main() -> int:
     if not args.no_backup:
         try:
             from scripts.backup_index import prune, snapshot
+            from server import writer_store
             dest = snapshot(cfg, "pre-ingest", quiet=True)
-            prune(cfg, quiet=True)
+            retention = writer_store.ui_settings().get("backup_retention_days")
+            prune(cfg, max_age_days=retention, quiet=True)
             print(f"\nIndex backed up before reindex -> {dest.name}\n"
                   f"  roll back with: python scripts/backup_index.py restore {dest.name}")
         except Exception as e:

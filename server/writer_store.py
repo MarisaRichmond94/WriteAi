@@ -76,7 +76,8 @@ def save_writer_characters(value: list) -> None:
 
 def ui_settings() -> dict:
     defaults = {"writer_name": "Writer", "site_name": "The Archive",
-                "sync_time": "02:30", "auto_sync_enabled": True}
+                "sync_time": "02:30", "auto_sync_enabled": True,
+                "backup_retention_days": 30}
     return {**defaults, **load("ui_settings.json", {})}
 
 

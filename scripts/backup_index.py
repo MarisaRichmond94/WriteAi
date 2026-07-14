@@ -159,20 +159,38 @@ def list_snapshots(cfg) -> int:
     return 0
 
 
-def prune(cfg, keep: int = MAX_BACKUPS, protect: tuple[Path, ...] = (),
-          *, quiet: bool = False) -> list[Path]:
-    """Delete the oldest snapshots beyond `keep`. Returns the dirs removed.
+def _age_days(p: Path) -> float:
+    """Age in days from a snapshot dir's timestamp prefix (UTC). Unparseable
+    names are treated as brand new so they're never age-pruned."""
+    try:
+        ts = datetime.strptime(p.name[:15], "%Y%m%d-%H%M%S").replace(
+            tzinfo=timezone.utc)
+    except ValueError:
+        return 0.0
+    return (datetime.now(timezone.utc) - ts).total_seconds() / 86400
 
-    Snapshot dir names are timestamp-prefixed, so lexical order == chronological.
-    Anything in `protect` is never deleted (used by restore to shield the very
-    snapshot it is restoring from), and stays even if that leaves > keep.
+
+def prune(cfg, keep: int = MAX_BACKUPS, protect: tuple[Path, ...] = (),
+          *, max_age_days: int | None = None, quiet: bool = False) -> list[Path]:
+    """Delete old snapshots. Returns the dirs removed.
+
+    The newest `keep` snapshots are always retained as a rollback floor. Beyond
+    that floor, a snapshot is removed if `max_age_days` is None (pure count
+    prune — the historical behavior) or if it is older than `max_age_days`
+    (the Settings "Backup Retention (days)" preference). Snapshot dir names are
+    timestamp-prefixed, so lexical order == chronological. Anything in `protect`
+    is never deleted (used by restore to shield the snapshot it is restoring
+    from), and stays even if that leaves > keep.
     """
     protected = {p.resolve() for p in protect}
     snaps = _snapshots(cfg)  # oldest -> newest
-    removable = [p for p in snaps if p.resolve() not in protected]
-    excess = max(0, len(snaps) - keep)
+    floor = {p.resolve() for p in snaps[-keep:]} if keep > 0 else set()
     removed: list[Path] = []
-    for p in removable[:excess]:
+    for p in snaps:
+        if p.resolve() in protected or p.resolve() in floor:
+            continue
+        if max_age_days is not None and _age_days(p) <= max_age_days:
+            continue  # within the retention window — keep it
         shutil.rmtree(p)
         removed.append(p)
         if not quiet:
