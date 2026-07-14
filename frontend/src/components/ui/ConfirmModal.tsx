@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 interface Props {
@@ -9,6 +9,9 @@ interface Props {
   cancelLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
+  // optional extra content (e.g. a toggle) rendered between the message and
+  // the action buttons
+  children?: ReactNode;
 }
 
 export default function ConfirmModal({
@@ -19,6 +22,7 @@ export default function ConfirmModal({
   cancelLabel = "Cancel",
   onConfirm,
   onCancel,
+  children,
 }: Props) {
   useEffect(() => {
     if (!open) return;
@@ -41,7 +45,8 @@ export default function ConfirmModal({
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="mb-2 text-sm font-semibold text-ink-primary">{title}</h2>
-        <p className="mb-6 text-xs leading-relaxed text-ink-secondary">{message}</p>
+        <p className={`text-xs leading-relaxed text-ink-secondary ${children ? "mb-4" : "mb-6"}`}>{message}</p>
+        {children && <div className="mb-6">{children}</div>}
         <div className="flex justify-end gap-2">
           <button
             onClick={onCancel}

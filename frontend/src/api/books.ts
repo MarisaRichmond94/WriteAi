@@ -79,14 +79,20 @@ export async function downloadStoryBible(bookId: string | number): Promise<void>
   URL.revokeObjectURL(url);
 }
 
-export async function triggerRebuild(): Promise<void> {
-  const res = await fetch("/api/ingest/run", { method: "POST" });
+// full=false (default) syncs only changed chapters; full=true re-embeds and
+// re-extracts every chapter from scratch (slower, full AI cost).
+export async function triggerRebuild(full = false): Promise<void> {
+  const res = await fetch(`/api/ingest/run${full ? "?full=true" : ""}`, { method: "POST" });
   if (!res.ok) throw new Error(`Failed to trigger rebuild: ${res.statusText}`);
 }
 
-export async function triggerBookUpdate(bookName: string): Promise<void> {
+export async function triggerBookUpdate(bookName: string, full = false): Promise<void> {
   const n = await bookNumber(bookName);
-  const res = await fetch(`/api/ingest/run${n != null ? `?book=${n}` : ""}`, { method: "POST" });
+  const params = new URLSearchParams();
+  if (n != null) params.set("book", String(n));
+  if (full) params.set("full", "true");
+  const qs = params.toString();
+  const res = await fetch(`/api/ingest/run${qs ? `?${qs}` : ""}`, { method: "POST" });
   if (!res.ok) throw new Error(`Failed to update book: ${res.statusText}`);
 }
 

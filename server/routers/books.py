@@ -554,7 +554,7 @@ def ingest_preview(book: int | None = None):
 
 
 @router.post("/ingest/run")
-def ingest_run(book: int | None = None):
+def ingest_run(book: int | None = None, full: bool = False):
     with _ingest_lock:
         running = _ingest["proc"] is not None and _ingest["proc"].poll() is None
         # Also refuse while the previous run's post-ingest writes (orphan GC +
@@ -570,6 +570,11 @@ def ingest_run(book: int | None = None):
         cmd = [sys.executable, str(REPO_ROOT / "ingest.py"), "--yes"]
         if book is not None:
             cmd += ["--book", str(book)]
+        # --full ignores the stored chunk hashes so every chapter is re-embedded
+        # and re-extracted, not just what changed. Composes with --book (full
+        # re-ingest of a single book); ingest.py only forbids --full + --re-extract.
+        if full:
+            cmd.append("--full")
         with open(log_path, "w") as out:
             _ingest["proc"] = subprocess.Popen(
                 cmd, cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT)
@@ -584,8 +589,9 @@ def ingest_run(book: int | None = None):
             if book is not None else None)
         scope = title or "all books"
 
-        audit.log_event("ingest_started", f"re-ingest of {scope} started",
-                        book=book, log=str(log_path))
+        audit.log_event("ingest_started",
+                        f"{'full re-ingest' if full else 're-ingest'} of {scope} started",
+                        book=book, full=full, log=str(log_path))
 
         def _watch(proc=proc, scope=scope, title=title, log_path=log_path):
             # success and no-op runs self-report from ingest.py with a full

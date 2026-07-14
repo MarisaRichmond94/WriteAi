@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { useAppStore } from "../../store/useAppStore";
 import { triggerBookUpdate } from "../../api/books";
 import ConfirmModal from "../ui/ConfirmModal";
+import FullIngestToggle from "../ui/FullIngestToggle";
 import type { BookResponse } from "../../types";
 
 interface Props {
@@ -13,6 +14,7 @@ export default function BookItem({ book }: Props) {
   const { showToast } = useAppStore();
   const [expanded, setExpanded] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [full, setFull] = useState(false);
 
   const handleUpdateClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -20,12 +22,16 @@ export default function BookItem({ book }: Props) {
   };
 
   const handleConfirm = async () => {
+    const isFull = full;
     setConfirmOpen(false);
+    setFull(false);
     try {
-      await triggerBookUpdate(book.name);
-      showToast(`Re-indexing "${book.name}" started.`);
+      await triggerBookUpdate(book.name, isFull);
+      showToast(isFull
+        ? `Fully re-indexing "${book.name}" started.`
+        : `Syncing "${book.name}" started.`);
     } catch {
-      showToast(`Failed to update "${book.name}".`);
+      showToast(`Failed to ${isFull ? "re-index" : "sync"} "${book.name}".`);
     }
   };
 
@@ -53,7 +59,7 @@ export default function BookItem({ book }: Props) {
         {/* Update button */}
         <button
           onClick={handleUpdateClick}
-          title={`Re-index "${book.name}"`}
+          title={`Sync "${book.name}"`}
           className="flex h-5 w-5 items-center justify-center rounded text-ink-muted hover:text-accent"
         >
           <RefreshCw className="h-3 w-3" />
@@ -79,12 +85,16 @@ export default function BookItem({ book }: Props) {
 
       <ConfirmModal
         open={confirmOpen}
-        title={`Re-index "${book.name}"?`}
-        message="This scans the book's chapters and rebuilds its search index. It may take a minute and will temporarily affect search results for this book."
-        confirmLabel="Re-index"
+        title={full ? `Fully re-index "${book.name}"?` : `Sync "${book.name}"?`}
+        message={full
+          ? `This re-reads every chapter in "${book.name}" and re-extracts all data from scratch — even unchanged chapters. It incurs the full AI extraction cost and may take a few minutes. Search results for this book may be incomplete while it runs.`
+          : `This scans "${book.name}" and updates the index for only what's changed since the last sync. Unchanged chapters are skipped, so it's usually quick. Search results for this book may be incomplete while it runs.`}
+        confirmLabel={full ? "Re-index everything" : "Sync"}
         onConfirm={handleConfirm}
-        onCancel={() => setConfirmOpen(false)}
-      />
+        onCancel={() => { setConfirmOpen(false); setFull(false); }}
+      >
+        <FullIngestToggle checked={full} onChange={setFull} scope={`"${book.name}"`} />
+      </ConfirmModal>
     </li>
   );
 }

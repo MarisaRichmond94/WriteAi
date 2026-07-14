@@ -4,6 +4,7 @@ import { clsx } from "clsx";
 import type { BookResponse, BookSummary } from "../../types";
 import { useAppStore } from "../../store/useAppStore";
 import ConfirmModal from "../ui/ConfirmModal";
+import FullIngestToggle from "../ui/FullIngestToggle";
 import BookDrawer from "./BookDrawer";
 import { fetchBookSummary, fetchSyncStatus, triggerRebuild, triggerBookUpdate, downloadStoryBible, type SyncStatus } from "../../api/books";
 import { bookSlug } from "../../api/settings";
@@ -127,7 +128,7 @@ function BookCard({ book, active, condensed, lastSynced, onClick, onRebuild }: {
             </span>
             <span
               role="button"
-              title={`Re-index "${book.name}"`}
+              title={`Sync "${book.name}"`}
               onClick={(e) => { e.stopPropagation(); onRebuild(); }}
               className="rounded p-1 text-ink-muted transition-colors hover:bg-surface-hover hover:text-accent"
             >
@@ -194,6 +195,10 @@ export default function StatusPane() {
   const [rebuilding, setRebuilding] = useState(false);
   const [rebuildBook, setRebuildBook] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  // opt-in "full" ingest: re-embed and re-extract every chapter from scratch
+  // rather than syncing only what changed. One flag per modal.
+  const [fullRebuild, setFullRebuild] = useState(false);
+  const [fullBook, setFullBook] = useState(false);
 
   useEffect(() => {
     fetchSyncStatus().then(setSyncStatus).catch(() => {});
@@ -202,21 +207,25 @@ export default function StatusPane() {
   const handleDriftResync = async (title: string) => {
     try {
       await triggerBookUpdate(title);
-      showToast(`Re-indexing "${title}" — this may take a minute.`);
+      showToast(`Syncing "${title}" — this may take a minute.`);
     } catch {
-      showToast(`Failed to start re-index for "${title}".`);
+      showToast(`Failed to start sync for "${title}".`);
     }
   };
 
   const handleBookRebuild = async () => {
     const name = rebuildBook;
+    const full = fullBook;
     setRebuildBook(null);
+    setFullBook(false);
     if (!name) return;
     try {
-      await triggerBookUpdate(name);
-      showToast(`Re-indexing "${name}" — this may take a minute.`);
+      await triggerBookUpdate(name, full);
+      showToast(full
+        ? `Fully re-indexing "${name}" — this may take a few minutes.`
+        : `Syncing "${name}" — this may take a minute.`);
     } catch {
-      showToast(`Failed to start re-index for "${name}".`);
+      showToast(`Failed to start ${full ? "re-index" : "sync"} for "${name}".`);
     }
   };
 
@@ -227,12 +236,14 @@ export default function StatusPane() {
   };
 
   const handleConfirm = async () => {
+    const full = fullRebuild;
     setConfirmOpen(false);
+    setFullRebuild(false);
     setRebuilding(true);
     try {
-      await triggerRebuild();
+      await triggerRebuild(full);
     } catch {
-      showToast("Failed to start rebuild.");
+      showToast(full ? "Failed to start rebuild." : "Failed to start sync.");
     } finally {
       setRebuilding(false);
     }
@@ -303,7 +314,7 @@ export default function StatusPane() {
               className="flex w-full items-center justify-center gap-2 rounded-md border border-surface-border bg-surface px-3 py-[6.5px] text-xs text-ink-secondary hover:border-accent hover:text-accent transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <RefreshCw className={clsx("h-3 w-3", rebuilding && "animate-spin")} />
-              {rebuilding ? "Rebuilding Index..." : "Rebuild Index"}
+              {rebuilding ? "Syncing Index..." : "Sync Index"}
             </button>
           </div>
         </div>
@@ -318,21 +329,29 @@ export default function StatusPane() {
 
       <ConfirmModal
         open={rebuildBook !== null}
-        title={`Re-index "${rebuildBook}"?`}
-        message={`This will re-read every chapter in "${rebuildBook}", extract fresh data, and update its entries in the search index. It typically takes 1-2 minutes. Search results for this book may be incomplete while the update runs.`}
-        confirmLabel="Re-index"
+        title={fullBook ? `Fully re-index "${rebuildBook}"?` : `Sync "${rebuildBook}"?`}
+        message={fullBook
+          ? `This re-reads every chapter in "${rebuildBook}" and re-extracts all data from scratch — even chapters that haven't changed. It incurs the full AI extraction cost for this book and can take a few minutes. Search results for this book may be incomplete while it runs.`
+          : `This checks every chapter in "${rebuildBook}" and updates the index for only what's changed since the last sync. Unchanged chapters are skipped, so it's usually quick. Search results for this book may be incomplete while it runs.`}
+        confirmLabel={fullBook ? "Re-index everything" : "Sync"}
         onConfirm={handleBookRebuild}
-        onCancel={() => setRebuildBook(null)}
-      />
+        onCancel={() => { setRebuildBook(null); setFullBook(false); }}
+      >
+        <FullIngestToggle checked={fullBook} onChange={setFullBook} scope={`"${rebuildBook}"`} />
+      </ConfirmModal>
 
       <ConfirmModal
         open={confirmOpen}
-        title="Rebuild the full index?"
-        message="This re-processes every chapter across all of your books and rebuilds the entire search index from scratch. It will take several minutes to complete and search results may be unavailable during that time."
-        confirmLabel="Rebuild"
+        title={fullRebuild ? "Rebuild the full index?" : "Sync the index?"}
+        message={fullRebuild
+          ? "This re-processes every chapter across all of your books from scratch — re-embedding and re-extracting even unchanged content. It incurs the full AI extraction cost and will take several minutes; search results may be incomplete while it runs."
+          : "This checks every chapter across all of your books and re-indexes only what's changed since the last sync. Unchanged chapters are skipped, so it's usually quick and low-cost."}
+        confirmLabel={fullRebuild ? "Rebuild everything" : "Sync"}
         onConfirm={handleConfirm}
-        onCancel={() => setConfirmOpen(false)}
-      />
+        onCancel={() => { setConfirmOpen(false); setFullRebuild(false); }}
+      >
+        <FullIngestToggle checked={fullRebuild} onChange={setFullRebuild} scope="all books" />
+      </ConfirmModal>
     </div>
   );
 }
