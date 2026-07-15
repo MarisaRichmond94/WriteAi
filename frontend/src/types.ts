@@ -229,6 +229,7 @@ export interface AppSettings {
   backup_retention_days: number;
   sync_time: string;
   auto_sync_enabled: boolean;
+  auto_enrich_enabled: boolean;
   book_order: string[];
   query_model: string;
   extraction_model: string;

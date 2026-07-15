@@ -586,6 +586,7 @@ export default function SettingsPane() {
   const [backupDays, setBackupDays] = useState(30);
   const [syncTime, setSyncTime] = useState("02:00");
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
+  const [autoEnrichEnabled, setAutoEnrichEnabled] = useState(true);
   const [bookOrder, setBookOrder] = useState<string[]>([]);
   const [discoveredBooks, setDiscoveredBooks] = useState<string[]>([]);
   const [queryModel, setQueryModel] = useState(VALID_MODELS[0]);
@@ -610,6 +611,7 @@ export default function SettingsPane() {
         setBackupDays(s.backup_retention_days);
         setSyncTime(s.sync_time);
         setAutoSyncEnabled(s.auto_sync_enabled ?? true);
+        setAutoEnrichEnabled(s.auto_enrich_enabled ?? true);
         // Merge discovered books with configured order
         const configured = s.book_order.length > 0 ? s.book_order : s.discovered_books;
         setBookOrder(configured);
@@ -639,6 +641,7 @@ export default function SettingsPane() {
       setBackupDays(s.backup_retention_days);
       setSyncTime(s.sync_time);
       setAutoSyncEnabled(s.auto_sync_enabled ?? true);
+      setAutoEnrichEnabled(s.auto_enrich_enabled ?? true);
       setBookOrder(s.book_order.length > 0 ? s.book_order : s.discovered_books);
       setDiscoveredBooks(s.discovered_books);
       setQueryModel(s.query_model);
@@ -669,6 +672,7 @@ export default function SettingsPane() {
         backup_retention_days: backupDays,
         sync_time: syncTime,
         auto_sync_enabled: autoSyncEnabled,
+        auto_enrich_enabled: autoEnrichEnabled,
         book_order: bookOrder,
         query_model: queryModel,
         extraction_model: extractionModel,
@@ -867,6 +871,23 @@ export default function SettingsPane() {
                   disabled={!autoSyncEnabled}
                   className="w-full rounded border border-surface-border bg-surface px-3 py-1.5 text-sm text-ink-primary [color-scheme:dark] focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-40 disabled:cursor-not-allowed"
                 />
+              </Field>
+              <Field
+                label="Auto-Enrich After Sync"
+                description="When enabled, every successful sync (manual or nightly) automatically re-runs enrichment — chapter summaries, events, and profiles — for whatever changed."
+                infoTooltip="Without this, chapter summaries only refresh when you run enrichment manually from the Timeline pane, so inserting or renumbering chapters leaves outline cards showing the previous chapter's summary. Enrichment is cached per chapter: unchanged chapters are never reprocessed or billed."
+              >
+                <button
+                  type="button"
+                  onClick={() => setAutoEnrichEnabled((v) => !v)}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${autoEnrichEnabled ? "bg-accent" : "bg-surface-hover"}`}
+                  role="switch"
+                  aria-checked={autoEnrichEnabled}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${autoEnrichEnabled ? "translate-x-5" : "translate-x-0"}`}
+                  />
+                </button>
               </Field>
             </Section>
           )}

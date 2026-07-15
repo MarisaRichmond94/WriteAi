@@ -553,6 +553,38 @@ def ingest_preview(book: int | None = None):
             "model": s.cfg.extraction_model}
 
 
+def _auto_enrich() -> None:
+    """Start an enrichment run after a successful ingest, so summaries and
+    events track the manuscript without a manual Timeline-pane run. Skipped
+    when the writer disabled it (Settings -> Sync), when a run is already in
+    flight, or when nothing is pending — a no-op nightly sync must not emit
+    an empty "Enrichment complete" notification. Runs on the ingest watcher
+    thread; get_state().db is thread-local, so the preview read is safe."""
+    from ..canonical import Canonicalizer
+    from .. import enrich
+
+    if not writer_store.ui_settings().get("auto_enrich_enabled"):
+        return
+    if enrich.runner.running:
+        log.info("auto-enrich: skipped, an enrichment run is already in progress")
+        return
+    s = get_state()
+    try:
+        pending = enrich.preview(s.db, s.cfg, s.canon)
+    except Exception:
+        log.exception("auto-enrich: pending-work preview failed")
+        return
+    if not any(pending[k] for k in ("chapters_to_process", "profiles_to_process",
+                                    "relationships_to_process",
+                                    "location_batches_to_process")):
+        return
+    if enrich.runner.start(s.cfg.sqlite_path, s.cfg, lambda db: Canonicalizer(db)):
+        audit.log_event("enrich_started",
+                        "enrichment auto-started after re-ingest",
+                        auto=True, chapters=pending["chapters_to_process"],
+                        estimated_cost_usd=pending["estimated_cost_usd"])
+
+
 @router.post("/ingest/run")
 def ingest_run(book: int | None = None, full: bool = False):
     with _ingest_lock:
@@ -635,6 +667,13 @@ def ingest_run(book: int | None = None, full: bool = False):
                 finally:
                     with _ingest_lock:
                         _ingest["post_processing"] = False
+                # Enrichment tables (chapter summaries, events, profiles) are
+                # not rewritten by ingest, so after a mid-book insertion the
+                # renumbered chapters keep serving the previous chapter's
+                # summary — the numbers all still exist, so the GC above
+                # can't catch it. Kick off enrichment now; it is hash-gated
+                # per chapter, so only what actually changed is billed.
+                _auto_enrich()
             if code != 0:
                 from .. import notify
                 # ingest_ui.log is truncated ('w') at the start of the next

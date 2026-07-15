@@ -5,6 +5,7 @@ interface BackendSettings {
   fields: { key: string; value: string }[];
   profile: { writer_name: string; site_name: string; writer_photo_url?: string | null;
              book_order?: string[]; sync_time?: string; auto_sync_enabled?: boolean;
+             auto_enrich_enabled?: boolean;
              backup_retention_days?: number; viewer_light_mode?: boolean };
   discovered_books?: string[];
 }
@@ -26,6 +27,7 @@ export async function fetchSettings(): Promise<AppSettings> {
     backup_retention_days: data.profile.backup_retention_days ?? 30,
     sync_time: data.profile.sync_time ?? "02:30",
     auto_sync_enabled: data.profile.auto_sync_enabled ?? true,
+    auto_enrich_enabled: data.profile.auto_enrich_enabled ?? true,
     book_order: data.profile.book_order ?? [],
     query_model: f("QUERY_MODEL"),
     extraction_model: f("EXTRACTION_MODEL"),
@@ -58,6 +60,7 @@ export async function saveSettings(
   if (updates.writer_photo_url !== undefined) profile.writer_photo_url = updates.writer_photo_url;
   if (updates.sync_time !== undefined) profile.sync_time = updates.sync_time;
   if (updates.auto_sync_enabled !== undefined) profile.auto_sync_enabled = updates.auto_sync_enabled;
+  if (updates.auto_enrich_enabled !== undefined) profile.auto_enrich_enabled = updates.auto_enrich_enabled;
   if (updates.backup_retention_days !== undefined) profile.backup_retention_days = updates.backup_retention_days;
   if (updates.viewer_light_mode !== undefined) profile.viewer_light_mode = updates.viewer_light_mode;
 
