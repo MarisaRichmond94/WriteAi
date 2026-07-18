@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Check } from "lucide-react";
+import { ChevronDown, Check, GitBranch } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 
@@ -65,6 +65,8 @@ export default function FilterBar() {
     selectedPovs,
     setPovFilter,
     clearPovFilter,
+    queryMode,
+    setQueryMode,
     saveChatAndClear,
     setLiveChatSessionId,
     closeExploreViewer,
@@ -248,6 +250,35 @@ export default function FilterBar() {
           </div>
         )}
       </Dropdown>
+
+      {/* What-if toggle: let the model reason about hypothetical/alternate
+          timelines, separating cited canon from labelled speculation.
+          Switch styling mirrors the header's light/dark toggle. */}
+      <button
+        role="switch"
+        aria-checked={queryMode === "alternate"}
+        onClick={() => {
+          clearChat();
+          setQueryMode(queryMode === "alternate" ? "general" : "alternate");
+        }}
+        title="What-if mode: explore hypothetical scenarios (e.g. 'how would the story change if…'), grounded in canon but free to speculate"
+        className={clsx(
+          "ml-1 flex items-center gap-1.5 text-xs font-medium transition-colors",
+          queryMode === "alternate" ? "text-accent" : "text-ink-secondary hover:text-ink-primary"
+        )}
+      >
+        <GitBranch className="h-3 w-3" />
+        <span>What-if</span>
+        <span className={clsx(
+          "relative inline-flex w-9 h-5 rounded-full transition-colors duration-200",
+          queryMode === "alternate" ? "bg-accent" : "bg-surface-hover"
+        )}>
+          <span className={clsx(
+            "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-200",
+            queryMode === "alternate" ? "left-4" : "left-0.5"
+          )} />
+        </span>
+      </button>
 
     </div>
   );

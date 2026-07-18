@@ -16,7 +16,7 @@ interface Props {
 }
 
 export default function ChatInput({ value, onChange }: Props) {
-  const { isStreaming, appSettings } = useAppStore();
+  const { isStreaming, appSettings, queryMode } = useAppStore();
   const { sendMessage } = useStreamChat();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -58,8 +58,9 @@ export default function ChatInput({ value, onChange }: Props) {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
-    // always "general": the backend's query router classifies each question
-    await sendMessage(text, "general", model);
+    // queryMode is "general" (backend auto-classifies) or "alternate" (what-if
+    // toggle in the filter bar); other qtypes are auto-detected server-side.
+    await sendMessage(text, queryMode, model);
   };
 
   const selectedLabel = MODELS.find((m) => m.id === model)?.label ?? model;

@@ -8,6 +8,7 @@ import time
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from src.answerer import ALTERNATE_SYSTEM
 from src.costlog import log_cost, usage_diff
 from src.query_router import Scope, classify
 
@@ -26,13 +27,6 @@ MODE_MAP = {
     "alternate": "general",
     "general": None,  # let the router auto-classify
 }
-
-ALTERNATE_EXTRA = (
-    "The author is exploring an alternate scenario ('what if...'). Ground your "
-    "reasoning in what the excerpts establish about the characters and world, "
-    "clearly separating canon facts (cited) from speculation."
-)
-
 
 class ChatRequest(BaseModel):
     message: str
@@ -96,12 +90,14 @@ def chat_stream(req: ChatRequest):
                 "cross-book questions; the retrieved excerpts remain the "
                 "source of truth for verbatim detail.\n\n"
                 + "\n\n---\n\n".join(bible_parts))
-        if req.mode == "alternate":
-            extra_parts.append(ALTERNATE_EXTRA)
         extra = "\n\n".join(extra_parts)
+        # "what-if" mode swaps in a speculation-friendly base prompt instead of
+        # the default "answer only from the text" one; None keeps the default.
+        system_base = ALTERNATE_SYSTEM if req.mode == "alternate" else None
         u0, c0, t0 = dict(answerer.usage), answerer.actual_cost_usd, time.monotonic()
         for delta in answerer.answer_stream(plan, excerpts, notes,
-                                            history=history, system_extra=extra):
+                                            history=history, system_extra=extra,
+                                            system_base=system_base):
             yield {"type": "chunk", "content": delta}
         log_cost(s.cfg, surface="chat", model=answerer.model, qtype=plan.qtype,
                  usage=usage_diff(answerer.usage, u0),

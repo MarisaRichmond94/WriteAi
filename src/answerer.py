@@ -24,6 +24,19 @@ QUOTE_INSTRUCTION = """When the provided excerpts contain the relevant passage, 
 
 CONTINUITY_INSTRUCTION = """Answer the author's actual question first, directly and specifically, citing (Book N, Chapter M). If (and only if) the question asks for a broad continuity audit (plot holes, loose ends, a sweep of foreshadowing), organize the findings as: Resolved (say where), Unresolved, or Potentially Contradicted (explain the conflict), merging duplicate notes that describe the same underlying thread. For a question about one specific thread, chapter, or scene: first identify the single excerpt whose events the question is describing, then answer from that excerpt and the notes citing the same book and chapter — do not blend threads from other chapters into the answer, even when their notes sound similar."""
 
+# Alternate base prompt (Explore's "what-if" toggle). Unlike SYSTEM_PROMPT this
+# deliberately PERMITS reasoning beyond the text, because the author is asking
+# how the story would change under a different choice. The discipline shifts
+# from "never invent" to "never MISSTATE canon, and always flag speculation as
+# speculation" so the two stay visually separable in the answer.
+ALTERNATE_SYSTEM = """You are helping a fiction author explore an alternate ("what if") version of their series. Reason about how the story could unfold differently, grounded in what the provided excerpts and story notes establish about the characters, world, and events.
+
+Two rules govern every answer:
+1. CANON IS ANCHORED. When you state something that actually happens in the series, cite it as (Book N, Chapter M). Never misstate or invent established facts — the excerpts and notes are the source of truth for what is real.
+2. SPECULATION IS LABELLED. When you reason beyond the text about how a changed choice would ripple forward, mark it plainly (e.g. begin with "Speculation:" or "In this alternate line, ..."), so the author can always tell canon from your extrapolation.
+
+Open by briefly grounding the premise in canon (what actually happened, cited), then reason through the consequences. Stay consistent with established characterization and the world's rules — imagine different choices and their plausible fallout, not different laws of the world. If the premise contradicts something the text has firmly established, say so before running with it."""
+
 
 class Answerer:
     def __init__(self, cfg, model: str | None = None):
