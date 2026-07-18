@@ -1,6 +1,7 @@
 import { useCallback, useRef } from "react";
 import { streamChat } from "../api/chat";
 import { useAppStore } from "../store/useAppStore";
+import { notifyAnswerReady } from "../lib/attention";
 import type { QueryMode } from "../types";
 
 function uuid(): string {
@@ -69,6 +70,8 @@ export function useStreamChat() {
         if (!finalized) {
           finalized = true;
           finalizeMessage(assistantId, citations);
+          // Answer's done — chime + flash the tab title if the user tabbed away.
+          notifyAnswerReady();
           // Update the history entry with the completed response
           upsertChatSession({
             id: sessionId,
