@@ -68,7 +68,8 @@ class Config:
     top_k_results: int
     confirm_before_ingest: bool
     enable_reranker: bool
-    reranker_model: str
+    reranker_model: str            # fast default (Explore "Fast" mode + CLI/eval)
+    reranker_model_thorough: str   # Explore "Thorough" mode — higher quality, slower
     rerank_candidates: int
     extraction_use_batches: bool
     log_level: str
@@ -155,8 +156,12 @@ def load_config(env_file: Path | None = None) -> Config:
         enable_reranker=_get_bool("ENABLE_RERANKER", False),
         # `or`, not a .get() default: a blank RERANKER_MODEL= line means
         # "use the default" (same convention as EMBEDDING_MODEL).
-        # Default is the shipped, held-out-verified config (2026-07-12).
+        # Fast default (2026-07-18): MiniLM-L-6 reranks ~31x faster than
+        # bge-v2-m3 on CPU (~5s vs ~170s) for a -0.046 judged dip; the Explore
+        # "Thorough" toggle swaps in bge-v2-m3 per-query for full quality.
         reranker_model=(os.environ.get("RERANKER_MODEL")
+                        or "cross-encoder/ms-marco-MiniLM-L-6-v2"),
+        reranker_model_thorough=(os.environ.get("RERANKER_MODEL_THOROUGH")
                         or "BAAI/bge-reranker-v2-m3"),
         rerank_candidates=_get_int("RERANK_CANDIDATES", 200),
         extraction_use_batches=_get_bool("EXTRACTION_USE_BATCHES", False),

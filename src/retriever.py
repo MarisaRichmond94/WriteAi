@@ -114,20 +114,32 @@ class Retriever:
         self.cfg = cfg
         self.store = store
         self.embedder = embedder
-        self._reranker = None
+        self._rerankers = {}  # model_name -> Reranker (each lazy-loads its model)
 
     @property
     def db(self):
         return self.store.db
 
+    def _reranker_for(self, model_name: str):
+        """Lazy per-model reranker, cached (mirrors server/deps.py): CLI queries
+        that never rerank must not pay the cross-encoder model load, and each
+        model (Explore fast vs thorough) loads at most once."""
+        rr = self._rerankers.get(model_name)
+        if rr is None:
+            from .reranker import Reranker
+            rr = self._rerankers[model_name] = Reranker(self.cfg, model_name=model_name)
+        return rr
+
+    def _rr(self, plan: QueryPlan):
+        """Reranker for this query: plan.reranker_model (Explore toggle) or the
+        configured fast default."""
+        return self._reranker_for(getattr(plan, "reranker_model", None)
+                                  or self.cfg.reranker_model)
+
     @property
     def reranker(self):
-        """Lazy (mirrors server/deps.py): CLI queries that never rerank must
-        not pay the cross-encoder model load."""
-        if self._reranker is None:
-            from .reranker import Reranker
-            self._reranker = Reranker(self.cfg)
-        return self._reranker
+        """Default reranker (back-compat for callers without a plan)."""
+        return self._reranker_for(self.cfg.reranker_model)
 
     def _alias_map(self, names: list[str]) -> dict[str, list[str]]:
         """name -> grounded alias list. Only the SQL LIKE filters consume
@@ -191,7 +203,7 @@ class Retriever:
         if self.cfg.enable_reranker and len(excerpts) > 1:
             t0 = time.perf_counter()
             n_candidates = len(excerpts)
-            excerpts = self.reranker.rerank(plan.question, excerpts, top_k)
+            excerpts = self._rr(plan).rerank(plan.question, excerpts, top_k)
             log.debug("rerank: %d candidates -> top %d in %.1f ms",
                       n_candidates, top_k, (time.perf_counter() - t0) * 1000)
         return excerpts[:top_k]
@@ -502,7 +514,7 @@ class Retriever:
             else:
                 docs.extend({**e, "text": b} for b in beats)
         t0 = time.perf_counter()
-        ranked = self.reranker.rerank(plan.question, docs, len(docs))
+        ranked = self._rr(plan).rerank(plan.question, docs, len(docs))
         log.debug("sentiment_v2 rerank: %d beat docs over %d chunks in %.1f ms",
                   len(docs), len(union), (time.perf_counter() - t0) * 1000)
         by_id = {e["chunk_id"]: e for e in union}
@@ -571,7 +583,7 @@ class Retriever:
         docs = [{"chunk_id": str(i), "header": "", "text": text}
                 for i, (_, _, text) in enumerate(kept)]
         t0 = time.perf_counter()
-        ranked = self.reranker.rerank(plan.question, docs, cap)
+        ranked = self._rr(plan).rerank(plan.question, docs, cap)
         log.debug("continuity note rerank: %d notes -> top %d in %.1f ms",
                   len(docs), cap, (time.perf_counter() - t0) * 1000)
         return ["== NOTES RANKED BY RELEVANCE TO THE QUESTION, MOST RELEVANT "

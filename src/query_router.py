@@ -118,6 +118,7 @@ class QueryPlan:
     # answerer only when ENABLE_FIRST_OCCURRENCE is on (harmless otherwise).
     first_occurrence: bool = False
     topic: str | None = None        # the about-object Y ("The Black Hand")
+    reranker_model: str | None = None  # per-query override (Explore fast/thorough); None -> fast default
 
 
 def parse_scope(scope_str: str) -> Scope:

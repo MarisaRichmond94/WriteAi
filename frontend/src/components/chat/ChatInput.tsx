@@ -16,6 +16,7 @@ export default function ChatInput({ value, onChange }: Props) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [thorough, setThorough] = useState(false);  // false = fast reranker (default)
 
   const defaultModel = resolveModel(appSettings?.query_model);
   const [model, setModel] = useState<string>(
@@ -55,7 +56,7 @@ export default function ChatInput({ value, onChange }: Props) {
     }
     // queryMode is "general" (backend auto-classifies) or "alternate" (what-if
     // toggle in the filter bar); other qtypes are auto-detected server-side.
-    await sendMessage(text, queryMode, model);
+    await sendMessage(text, queryMode, model, thorough);
   };
 
   const selectedLabel = MODELS.find((m) => m.id === model)?.label ?? model;
@@ -115,6 +116,22 @@ export default function ChatInput({ value, onChange }: Props) {
           {isStreaming ? "Claude is thinking…" : "Press Enter to send"}
         </p>
 
+        <div className="flex items-center gap-2">
+        {/* Fast / Thorough reranker toggle (default fast) */}
+        <button
+          type="button"
+          onClick={() => setThorough((v) => !v)}
+          title={thorough
+            ? "Thorough: higher-quality search, slower (~2 min)"
+            : "Fast: quick answers (~15s)"}
+          className={clsx(
+            "flex items-center gap-1 rounded px-2 py-0.5 text-[10px] transition-colors hover:bg-surface-hover",
+            thorough ? "text-accent" : "text-ink-muted hover:text-ink-secondary"
+          )}
+        >
+          {thorough ? "🎯 Thorough" : "⚡ Fast"}
+        </button>
+
         {/* Model selector */}
         <div ref={dropdownRef} className="relative">
           <button
@@ -140,6 +157,7 @@ export default function ChatInput({ value, onChange }: Props) {
               ))}
             </div>
           )}
+        </div>
         </div>
       </div>
     </div>

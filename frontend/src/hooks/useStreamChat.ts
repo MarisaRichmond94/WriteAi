@@ -30,7 +30,7 @@ export function useStreamChat() {
   liveChatSessionIdRef.current = liveChatSessionId;
 
   const sendMessage = useCallback(
-    async (text: string, mode: QueryMode, model?: string) => {
+    async (text: string, mode: QueryMode, model?: string, thorough?: boolean) => {
       if (!text.trim()) return;
 
       const bookFilter = selectedBooks.size > 0
@@ -93,6 +93,7 @@ export function useStreamChat() {
           pov_filter: povFilter,
           conversation_history: history,
           ...(model ? { model } : {}),
+          ...(thorough ? { thorough: true } : {}),
         })) {
           if (event.type === "chunk") {
             appendChunk(assistantId, event.content);

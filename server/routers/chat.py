@@ -35,6 +35,7 @@ class ChatRequest(BaseModel):
     pov_filter: list[str] = []
     conversation_history: list[dict] = []
     model: str | None = None          # per-request model (None = settings default)
+    thorough: bool = False            # True -> full-quality (slower) reranker; default fast
 
 
 @router.post("/chat/stream")
@@ -58,6 +59,8 @@ def chat_stream(req: ChatRequest):
                         forced_type=MODE_MAP.get(req.mode) or None)
         if books:
             plan.scope = Scope(book_min=min(books), book_max=max(books))
+        if req.thorough:  # Explore "Thorough" toggle -> full-quality reranker
+            plan.reranker_model = s.cfg.reranker_model_thorough
         excerpts, notes = s.retriever.retrieve(plan)
         # exact-set filters the range scope can't express
         if books:

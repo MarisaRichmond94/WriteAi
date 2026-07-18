@@ -23,8 +23,10 @@ log = logging.getLogger(__name__)
 
 
 class Reranker:
-    def __init__(self, cfg):
-        self.model_name = cfg.reranker_model
+    def __init__(self, cfg, model_name: str | None = None):
+        # model_name lets the caller pick a specific model (e.g. Explore's
+        # fast/thorough toggle); falls back to the configured default.
+        self.model_name = model_name or cfg.reranker_model
         self._model = None
 
     @property

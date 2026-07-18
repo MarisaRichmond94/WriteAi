@@ -10,6 +10,7 @@ export interface ChatRequest {
   conversation_history: ChatMessage[];
   n_results?: number;
   model?: string;
+  thorough?: boolean;   // true -> full-quality (slower) reranker; default fast
 }
 
 export type SSEEvent =
