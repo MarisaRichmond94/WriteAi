@@ -1,6 +1,8 @@
 import { useMemo } from "react";
 import { clsx } from "clsx";
+import { ExternalLink } from "lucide-react";
 import type { Citation } from "../../types";
+import { useAppStore } from "../../store/useAppStore";
 import {
   expandToSentenceWindow,
   findQuoteRanges,
@@ -34,8 +36,18 @@ function povColor(pov: string) {
 }
 
 export default function CitationCard({ citation, index, isSelected, onClick, answerQuotes }: Props) {
+  const siteName = useAppStore((s) => s.siteName);
   const relevance = Math.max(0, Math.min(100, Math.round((1 - citation.distance) * 100)));
   const pov = citation.pov ? povColor(citation.pov) : null;
+
+  // Deep-link into Loom's reader at this exact chapter. Loom resolves the
+  // series (our site name) + book title + chapter *number* (prologue = 0) to
+  // the chapter's cuid the same way the export manifest does — WriteAI has no
+  // Loom ids to send. Only shown once we know the series name to build with.
+  const loomUrl = import.meta.env.VITE_LOOM_URL ?? "http://localhost:3000";
+  const loomHref = siteName
+    ? `${loomUrl}/read/by-title/${encodeURIComponent(siteName)}/${encodeURIComponent(citation.book)}/${citation.chapter}`
+    : null;
 
   // Prefer the full chunk text (new payloads) over the legacy 220-char
   // snippet so quotes deep in the chunk can still match.
@@ -73,13 +85,25 @@ export default function CitationCard({ citation, index, isSelected, onClick, ans
   return (
     <div
       className={clsx(
-        "rounded-md border bg-surface overflow-hidden transition-colors",
+        "relative rounded-md border bg-surface overflow-hidden transition-colors",
         isSelected ? "border-white/50" : "border-surface-border"
       )}
     >
+      {loomHref && (
+        <a
+          href={loomHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open this chapter in Loom"
+          aria-label="Open this chapter in Loom"
+          className="absolute right-1.5 top-1.5 z-10 flex h-6 w-6 items-center justify-center rounded-md text-ink-muted transition-colors hover:bg-surface-hover hover:text-accent"
+        >
+          <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.5} />
+        </a>
+      )}
       <button
         onClick={onClick}
-        className="flex w-full items-start gap-3 px-3 py-2.5 text-left hover:bg-surface-hover transition-colors"
+        className="flex w-full items-start gap-3 py-2.5 pl-3 pr-9 text-left hover:bg-surface-hover transition-colors"
       >
         {/* Rank badge */}
         <span className="mt-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md bg-accent-subtle text-sm font-bold text-accent">
