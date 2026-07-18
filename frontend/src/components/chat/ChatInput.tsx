@@ -3,12 +3,7 @@ import { Send, ChevronDown } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import { useStreamChat } from "../../hooks/useStreamChat";
-
-const MODELS = [
-  { id: "claude-sonnet-4-6",       label: "Sonnet 4.6" },
-  { id: "claude-opus-4-6",         label: "Opus 4.6"   },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-];
+import { CHAT_MODELS as MODELS, resolveModel } from "../../lib/models";
 
 interface Props {
   value: string;
@@ -22,9 +17,9 @@ export default function ChatInput({ value, onChange }: Props) {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
-  const defaultModel = appSettings?.query_model ?? "claude-sonnet-4-6";
+  const defaultModel = resolveModel(appSettings?.query_model);
   const [model, setModel] = useState<string>(
-    () => new URLSearchParams(window.location.search).get("model") ?? defaultModel
+    () => resolveModel(new URLSearchParams(window.location.search).get("model") ?? defaultModel)
   );
 
   // Sync model to URL; clear on unmount (tab switch)

@@ -13,14 +13,9 @@ import { createNotification, logAudit } from "../../api/notifications";
 import CitationCard from "../chat/CitationCard";
 import StreamingIndicator from "../chat/StreamingIndicator";
 import ChapterViewer from "../chat/ChapterViewer";
+import { CHAT_MODELS as MODELS, resolveModel, DEFAULT_EXTRACTION_MODEL } from "../../lib/models";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const MODELS = [
-  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { id: "claude-opus-4-6", label: "Opus 4.6" },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
-];
 
 const FOCUS_OPTIONS: { value: ReviewFocus; description: string }[] = [
   { value: "Literary Agent", description: "Commercial instincts — the hook, the voice, would they request pages" },
@@ -403,7 +398,7 @@ export default function ReviewPane() {
   const [previewOpen, setPreviewOpen] = useState(false);
 
   // Model selector
-  const defaultModel = appSettings?.query_model ?? "claude-sonnet-4-6";
+  const defaultModel = resolveModel(appSettings?.query_model);
   const [model, setModel] = useState<string>(defaultModel);
   const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
@@ -603,7 +598,7 @@ export default function ReviewPane() {
     if (!autoTunedRef.current && msgs.filter((m) => m.role === "assistant").length === 1) {
       autoTunedRef.current = true;
       setIncludeIdeal(false);
-      setModel("claude-haiku-4-5-20251001");
+      setModel(DEFAULT_EXTRACTION_MODEL);
     }
     if (!activeSessionIdRef.current) activeSessionIdRef.current = uuid();
     const sessionId = activeSessionIdRef.current;

@@ -6,12 +6,7 @@ import { useAppStore } from "../../store/useAppStore";
 import { fetchSettings, saveSettings, pickFolder, uploadWriterPhoto, deleteWriterPhoto, uploadBookCover, deleteBookCover, bookSlug } from "../../api/settings";
 import { createNotification } from "../../api/notifications";
 import type { AppSettings } from "../../types";
-
-const VALID_MODELS = [
-  "claude-sonnet-4-6",
-  "claude-opus-4-6",
-  "claude-haiku-4-5-20251001",
-];
+import { CHAT_MODELS, MODEL_IDS, DEFAULT_QUERY_MODEL, DEFAULT_EXTRACTION_MODEL } from "../../lib/models";
 
 // ── Field components ──────────────────────────────────────────────────────────
 
@@ -125,15 +120,20 @@ function ModelSelect({
   value: string;
   onChange: (v: string) => void;
 }) {
+  // Keep a previously-saved model visible even if it's no longer in the offered
+  // list, so the select never renders blank.
+  const options = MODEL_IDS.includes(value)
+    ? CHAT_MODELS
+    : [...CHAT_MODELS, { id: value, label: `${value} (unlisted)` }];
   return (
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
       className="w-full rounded border border-surface-border bg-surface px-3 py-1.5 pr-10 text-sm text-ink-primary focus:outline-none focus:ring-1 focus:ring-accent"
     >
-      {VALID_MODELS.map((m) => (
-        <option key={m} value={m}>
-          {m}
+      {options.map((m) => (
+        <option key={m.id} value={m.id}>
+          {m.label}
         </option>
       ))}
     </select>
@@ -589,8 +589,8 @@ export default function SettingsPane() {
   const [autoEnrichEnabled, setAutoEnrichEnabled] = useState(true);
   const [bookOrder, setBookOrder] = useState<string[]>([]);
   const [discoveredBooks, setDiscoveredBooks] = useState<string[]>([]);
-  const [queryModel, setQueryModel] = useState(VALID_MODELS[0]);
-  const [extractionModel, setExtractionModel] = useState(VALID_MODELS[2]);
+  const [queryModel, setQueryModel] = useState(DEFAULT_QUERY_MODEL);
+  const [extractionModel, setExtractionModel] = useState(DEFAULT_EXTRACTION_MODEL);
   const [anthropicKey, setAnthropicKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
   const [writerName, setWriterName] = useState("Writer");

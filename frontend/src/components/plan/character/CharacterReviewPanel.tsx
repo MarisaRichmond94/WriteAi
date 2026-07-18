@@ -6,6 +6,7 @@ import { isMockMode } from "../../../mocks/mockData";
 import type { Citation, WriterCharacter } from "../../../types";
 import MessageBubble from "../../chat/MessageBubble";
 import StreamingIndicator from "../../chat/StreamingIndicator";
+import { CHAT_MODELS as MODELS, DEFAULT_QUERY_MODEL } from "../../../lib/models";
 
 interface Message {
   id: string;
@@ -20,17 +21,11 @@ interface CharacterReviewPanelProps {
   onClose: () => void;
 }
 
-const MODELS = [
-  { id: "claude-sonnet-4-6",        label: "Sonnet 4.6" },
-  { id: "claude-opus-4-6",          label: "Opus 4.6"   },
-  { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5"  },
-];
-
 export default function CharacterReviewPanel({ character, onClose }: CharacterReviewPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
-  const [model, setModel] = useState("claude-sonnet-4-6");
+  const [model, setModel] = useState(DEFAULT_QUERY_MODEL);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
