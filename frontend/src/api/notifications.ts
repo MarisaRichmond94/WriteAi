@@ -52,3 +52,7 @@ export async function markAllRead(): Promise<void> {
 export async function deleteNotification(id: string): Promise<void> {
   await fetch(`/api/notifications/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+export async function clearAllNotifications(): Promise<void> {
+  await fetch("/api/notifications", { method: "DELETE" });
+}

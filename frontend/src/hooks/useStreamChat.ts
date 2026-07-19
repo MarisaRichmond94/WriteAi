@@ -19,7 +19,6 @@ export function useStreamChat() {
     appendChunk,
     finalizeMessage,
     showToast,
-    saveChatAndClear,
     upsertChatSession,
     liveChatSessionId,
     setLiveChatSessionId,
@@ -39,23 +38,31 @@ export function useStreamChat() {
       const povFilter = selectedPovs.size > 0 ? [...selectedPovs] : [];
       const history = messages.slice(-6).map((m) => ({ role: m.role, content: m.content }));
 
-      // Clear previous conversation from the live view and close any open viewer
-      saveChatAndClear();
-      closeExploreViewer();
-      liveChatSessionIdRef.current = null;
-
-      // Create a new session ID for this conversation
-      const sessionId = uuid();
-      liveChatSessionIdRef.current = sessionId;
-      setLiveChatSessionId(sessionId);
+      // Continue the active thread if one is live; otherwise begin a fresh chat.
+      // The "+ New chat" button clears the live session, which is what starts a
+      // new thread — every submit while a thread is open appends to it.
+      let sessionId = liveChatSessionIdRef.current;
+      if (!sessionId) {
+        closeExploreViewer();
+        sessionId = uuid();
+        liveChatSessionIdRef.current = sessionId;
+        setLiveChatSessionId(sessionId);
+      }
+      const activeSessionId = sessionId;
 
       addUserMessage(text, mode);
       const assistantId = startAssistantMessage(mode);
 
-      // Immediately create the history entry so it appears in the sidebar right away
+      // The sidebar label stays the thread's first question.
+      const priorQuestion = useAppStore
+        .getState()
+        .chatSessions.find((s) => s.id === activeSessionId)?.question;
+      const sessionLabel = priorQuestion ?? text;
+
+      // Immediately upsert the history entry so the thread appears/updates in the sidebar right away
       upsertChatSession({
-        id: sessionId,
-        question: text,
+        id: activeSessionId,
+        question: sessionLabel,
         messages: useAppStore.getState().messages.map((m) => ({ ...m, isStreaming: false })),
         timestamp: new Date(),
         mode,
@@ -74,8 +81,8 @@ export function useStreamChat() {
           notifyAnswerReady();
           // Update the history entry with the completed response
           upsertChatSession({
-            id: sessionId,
-            question: text,
+            id: activeSessionId,
+            question: sessionLabel,
             messages: useAppStore.getState().messages.map((m) => ({ ...m, isStreaming: false })),
             timestamp: new Date(),
             mode,
@@ -113,7 +120,7 @@ export function useStreamChat() {
         finish(pendingCitations);
       }
     },
-    [selectedBooks, selectedPovs, books, messages, addUserMessage, startAssistantMessage, appendChunk, finalizeMessage, showToast, saveChatAndClear, upsertChatSession, setLiveChatSessionId, closeExploreViewer]
+    [selectedBooks, selectedPovs, books, messages, addUserMessage, startAssistantMessage, appendChunk, finalizeMessage, showToast, upsertChatSession, setLiveChatSessionId, closeExploreViewer]
   );
 
   return { sendMessage };

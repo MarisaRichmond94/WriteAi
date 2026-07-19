@@ -230,6 +230,9 @@ export const useAppStore = create<AppState>((set) => ({
       return {
         messages: session.messages,
         viewingSessionId: id,
+        // Re-opening a chat makes it the live thread, so follow-up questions
+        // append to it instead of spawning a new chat.
+        liveChatSessionId: id,
         ...(session.mode ? { queryMode: session.mode } : {}),
         ...(session.selectedBooks ? { selectedBooks: new Set(session.selectedBooks) } : {}),
         ...(session.selectedPovs ? { selectedPovs: new Set(session.selectedPovs) } : {}),

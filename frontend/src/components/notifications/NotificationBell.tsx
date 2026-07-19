@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bell, X, CheckCheck } from "lucide-react";
+import { Bell, X, Trash2 } from "lucide-react";
 import { clsx } from "clsx";
 import type { Notification } from "../../types";
 import {
@@ -7,6 +7,7 @@ import {
   markOneRead,
   markAllRead,
   deleteNotification,
+  clearAllNotifications,
 } from "../../api/notifications";
 import { useAppStore } from "../../store/useAppStore";
 
@@ -47,10 +48,14 @@ export default function NotificationBell() {
   const [prevUnread, setPrevUnread] = useState(0);
   const [pulse, setPulse] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  // IDs that were unread when the panel was opened — kept highlighted for the
+  // current viewing session even though opening marks them read on the server.
+  const [highlightIds, setHighlightIds] = useState<Set<string>>(new Set());
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { setActivePane, bellRefreshSignal } = useAppStore();
 
   const unreadCount = notifications.filter((n) => !n.read).length;
+  const isNew = (n: Notification) => !n.read || highlightIds.has(n.id);
 
   async function load() {
     try {
@@ -83,6 +88,21 @@ export default function NotificationBell() {
     setPrevUnread(unreadCount);
   }, [unreadCount]);
 
+  // Opening the bell counts everything as read — no explicit acknowledgment
+  // needed. The just-unread rows stay highlighted until the panel closes.
+  useEffect(() => {
+    if (!open) {
+      setHighlightIds(new Set());
+      return;
+    }
+    const unread = notifications.filter((n) => !n.read);
+    if (unread.length > 0) {
+      setHighlightIds(new Set(unread.map((n) => n.id)));
+      handleMarkAll();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
   // Close on outside click
   useEffect(() => {
     if (!open) return;
@@ -110,6 +130,12 @@ export default function NotificationBell() {
   async function handleMarkAll() {
     await markAllRead();
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  }
+
+  async function handleClearAll() {
+    await clearAllNotifications();
+    setNotifications([]);
+    setHighlightIds(new Set());
   }
 
   function handleActionUrl(n: Notification) {
@@ -148,14 +174,14 @@ export default function NotificationBell() {
           {/* Header */}
           <div className="flex items-center justify-between border-b border-surface-border px-3 py-2">
             <span className="text-xs font-semibold text-ink-primary">Notifications</span>
-            {unreadCount > 0 && (
+            {notifications.length > 0 && (
               <button
-                onClick={handleMarkAll}
+                onClick={handleClearAll}
                 className="flex items-center gap-1 text-[11px] text-ink-muted hover:text-ink-secondary transition-colors"
-                title="Mark all read"
+                title="Clear all"
               >
-                <CheckCheck className="h-3 w-3" />
-                Mark all read
+                <Trash2 className="h-3 w-3" />
+                Clear all
               </button>
             )}
           </div>
@@ -172,7 +198,7 @@ export default function NotificationBell() {
                   key={n.id}
                   className={clsx(
                     "group relative border-b border-surface-border/50 px-3 py-2.5 last:border-0",
-                    !n.read && "bg-accent/5"
+                    isNew(n) && "bg-accent/5"
                   )}
                   onClick={() => !n.read && handleMarkRead(n.id)}
                 >
@@ -187,7 +213,7 @@ export default function NotificationBell() {
                         >
                           {TYPE_LABEL[n.type] ?? n.type}
                         </span>
-                        {!n.read && (
+                        {isNew(n) && (
                           <span className="h-1.5 w-1.5 rounded-full bg-accent" />
                         )}
                       </div>

@@ -70,6 +70,13 @@ def mark_read(nid: str):
     return {"ok": True}
 
 
+@router.delete("/notifications")
+def clear_all_notifications():
+    """Empty the inbox — backs the bell's 'Clear all' button."""
+    writer_store.save("notifications.json", [])
+    return {"ok": True}
+
+
 @router.delete("/notifications/{nid}")
 def delete_notification(nid: str):
     items = writer_store.load("notifications.json", [])
