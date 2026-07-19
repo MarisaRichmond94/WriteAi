@@ -81,8 +81,8 @@ interface AppState {
   clearToast: () => void;
 
   // Pane navigation
-  activePane: "explore" | "timeline" | "writer-timeline" | "locations" | "plan" | "review" | "status" | "characters" | "settings";
-  setActivePane: (pane: "explore" | "timeline" | "writer-timeline" | "locations" | "plan" | "review" | "status" | "characters" | "settings") => void;
+  activePane: "explore" | "timeline" | "writer-timeline" | "locations" | "plan" | "review" | "status" | "characters" | "spend" | "settings";
+  setActivePane: (pane: "explore" | "timeline" | "writer-timeline" | "locations" | "plan" | "review" | "status" | "characters" | "spend" | "settings") => void;
   // Cross-pane handoff: name of a character to select on the Characters pane
   pendingCharacterName: string | null;
   setPendingCharacterName: (name: string | null) => void;
@@ -270,7 +270,7 @@ export const useAppStore = create<AppState>((set) => ({
 
   activePane: ((): AppState["activePane"] => {
     const p = new URLSearchParams(window.location.search).get("pane");
-    const valid = ["explore", "timeline", "writer-timeline", "locations", "plan", "review", "status", "characters", "settings"];
+    const valid = ["explore", "timeline", "writer-timeline", "locations", "plan", "review", "status", "characters", "spend", "settings"];
     return (valid.includes(p ?? "") ? p : "explore") as AppState["activePane"];
   })(),
   setActivePane: (pane) => set({ activePane: pane }),

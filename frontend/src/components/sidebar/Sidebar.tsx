@@ -1,4 +1,4 @@
-import { Compass, Clock, Library, MapPin, Users, Info, Kanban, PenLine, ScanText, FlaskConical } from "lucide-react";
+import { Compass, Clock, Library, MapPin, Users, Info, Kanban, PenLine, ScanText, FlaskConical, DollarSign } from "lucide-react";
 import { FaTimeline } from "react-icons/fa6";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
@@ -25,6 +25,7 @@ const NAV_GROUPS = [
       { pane: "characters", label: "Characters", icon: Users },
       { pane: "timeline", label: "Events", icon: Clock },
       { pane: "locations", label: "Locations", icon: MapPin },
+      { pane: "spend", label: "Spend", icon: DollarSign },
     ],
   },
 ] as const;

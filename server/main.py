@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from config import REPO_ROOT
 
 from . import loom_events, scheduler
-from .routers import (books, characters, chat, events, locations,
+from .routers import (books, characters, chat, events, locations, metrics,
                       notifications, plan, review, sessions, settings,
                       sync, writer_events)
 
@@ -42,7 +42,7 @@ app.add_middleware(  # dev server on :5173 talks to us directly
     CORSMiddleware, allow_origins=["http://localhost:5173"],
     allow_methods=["*"], allow_headers=["*"])
 
-for r in (books, chat, review, characters, events, locations,
+for r in (books, chat, review, characters, events, locations, metrics,
           notifications, plan, sessions, settings, sync, writer_events):
     app.include_router(r.router)
 

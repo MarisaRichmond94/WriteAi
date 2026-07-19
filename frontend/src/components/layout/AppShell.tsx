@@ -12,6 +12,7 @@ import TimelinePane from "../timeline/TimelinePane";
 import WriterTimelinePane from "../timeline/WriterTimelinePane";
 import LocationsPane from "../locations/LocationsPane";
 import StatusPane from "../status/StatusPane";
+import MetricsPane from "../metrics/MetricsPane";
 import CharactersPane from "../characters/CharactersPane";
 import PlanPane from "../plan/PlanPane";
 import SettingsPane from "../settings/SettingsPane";
@@ -231,6 +232,7 @@ export default function AppShell() {
         {activePane === "plan" && <PlanPane />}
         {activePane === "review" && <ReviewPane />}
         {activePane === "status" && <StatusPane />}
+        {activePane === "spend" && <MetricsPane />}
         {activePane === "characters" && <CharactersPane />}
         {activePane === "settings" && <SettingsPane />}
       </main>
