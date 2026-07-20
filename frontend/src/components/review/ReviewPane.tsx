@@ -7,6 +7,7 @@ import { useAppStore } from "../../store/useAppStore";
 import type { ChapterSummary, Citation, PipelineCostEstimate, ReviewFocus, ReviewMessage, ReviewSession } from "../../types";
 import { streamReview, fetchChapterText, bookNameToId } from "../../api/review";
 import { chapterLabel } from "../../lib/format";
+import { notifyAnswerReady } from "../../lib/attention";
 import { runPipeline, fetchCostEstimate, fetchIngestStatus, fetchEnrichStatus, runEnrichment } from "../../api/pipeline";
 import { fetchBooks, fetchChapterDraft, type ChapterDraft } from "../../api/books";
 import { createNotification, logAudit } from "../../api/notifications";
@@ -589,6 +590,8 @@ export default function ReviewPane() {
     const was = prevStreamingRef.current;
     prevStreamingRef.current = isStreaming;
     if (!was || isStreaming) return;
+    // Review's done — chime + flash the tab title if the user tabbed away.
+    notifyAnswerReady();
     const msgs = messagesRef.current;
     if (msgs.length === 0) return;
     // After the FIRST review of a conversation, downshift for the iteration
