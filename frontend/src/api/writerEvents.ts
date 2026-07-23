@@ -10,6 +10,7 @@ export interface WriterEvent {
   id: string;
   title: string;
   date: string | null;
+  time: string | null;
   description: string;
   characters: string[];
   location: string | null;
@@ -21,6 +22,7 @@ export interface WriterEvent {
 export interface WriterEventInput {
   title: string;
   date: string | null;
+  time: string | null;
   description: string;
   characters: string[];
   location: string | null;

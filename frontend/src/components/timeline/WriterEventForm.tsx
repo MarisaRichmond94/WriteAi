@@ -6,6 +6,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Clock,
   MapPin,
   Pencil,
   Plus,
@@ -16,6 +17,7 @@ import {
 import { clsx } from "clsx";
 import type { BookResponse, WriterCharacter } from "../../types";
 import type { WriterEvent, WriterEventInput, WriterEventTag } from "../../api/writerEvents";
+import { formatTime12h } from "../../lib/format";
 import StoryDatePicker from "../plan/outline/StoryDatePicker";
 
 // ── Avatar helpers (matches TimelinePane pattern) ────────────────────────────
@@ -88,6 +90,7 @@ function SectionHeader({ label, count }: { label: string; count?: number }) {
 
 interface WriterEventDrawerProps {
   event: WriterEvent | null;
+  defaultDate: string | null;
   characters: WriterCharacter[];
   books: BookResponse[];
   locations: string[];
@@ -151,6 +154,13 @@ function ViewMode({
               <span className="mt-2 flex items-center gap-1 text-[11px] text-ink-muted">
                 <Calendar className="h-3 w-3 flex-shrink-0" />
                 {event.date}
+                {event.time && (
+                  <>
+                    <span className="text-ink-muted/50">·</span>
+                    <Clock className="h-3 w-3 flex-shrink-0" />
+                    {formatTime12h(event.time)}
+                  </>
+                )}
               </span>
             )}
           </div>
@@ -288,6 +298,7 @@ function ViewMode({
 
 function EditMode({
   event,
+  defaultDate,
   characters,
   books,
   locations,
@@ -297,6 +308,7 @@ function EditMode({
   onCancel,
 }: {
   event: WriterEvent | null;
+  defaultDate: string | null;
   characters: WriterCharacter[];
   books: BookResponse[];
   locations: string[];
@@ -305,8 +317,11 @@ function EditMode({
   onDelete: () => void;
   onCancel: () => void;
 }) {
+  // New events default to the last event's date rather than starting blank
+  // (today's date isn't relevant to where the writer is in the story).
   const [title, setTitle] = useState(event?.title ?? "");
-  const [date, setDate] = useState(event?.date ?? "");
+  const [date, setDate] = useState(event ? event.date ?? "" : defaultDate ?? "");
+  const [time, setTime] = useState(event?.time ?? "");
   const [description, setDescription] = useState(event?.description ?? "");
   const [selectedChars, setSelectedChars] = useState<string[]>(
     event?.characters ?? [],
@@ -334,7 +349,8 @@ function EditMode({
   // Sync form state when event prop changes (e.g. nav prev/next in edit mode).
   useEffect(() => {
     setTitle(event?.title ?? "");
-    setDate(event?.date ?? "");
+    setDate(event ? event.date ?? "" : defaultDate ?? "");
+    setTime(event?.time ?? "");
     setDescription(event?.description ?? "");
     setSelectedChars(event?.characters ?? []);
     setLocation(event?.location ?? "");
@@ -343,7 +359,7 @@ function EditMode({
     setLocOpen(false);
     setCharOpen(false);
     setCharSearch("");
-  }, [event]);
+  }, [event, defaultDate]);
 
   useEffect(() => {
     if (!datePickerOpen) return;
@@ -430,6 +446,7 @@ function EditMode({
     onSave({
       title: title.trim(),
       date: date.trim() || null,
+      time: date.trim() ? time.trim() || null : null,
       description,
       characters: selectedChars,
       location: location.trim() || null,
@@ -481,48 +498,62 @@ function EditMode({
             />
           </div>
 
-          {/* Date */}
-          <div>
-            <button
-              ref={dateBtnRef}
-              onClick={() => {
-                if (datePickerOpen) { setDatePickerOpen(false); return; }
-                const rect = dateBtnRef.current?.getBoundingClientRect();
-                if (rect) setDatePos({ top: rect.bottom + 6, left: rect.left });
-                setDatePickerOpen(true);
-              }}
-              className={clsx(
-                "flex items-center gap-2 rounded-md border border-surface-border bg-surface px-3 py-2 text-xs transition-colors hover:border-accent/50",
-                datePickerOpen
-                  ? "border-accent/50 text-accent"
-                  : "text-ink-secondary",
-              )}
-            >
-              <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
-              {date || <span className="text-ink-muted">Pick a date</span>}
-              {date && (
-                <span
-                  role="button"
-                  tabIndex={-1}
-                  onClick={(e) => { e.stopPropagation(); setDate(""); }}
-                  className="ml-1 text-ink-muted hover:text-ink-primary"
-                >
-                  <X className="h-3 w-3" />
-                </span>
-              )}
-            </button>
-            {datePickerOpen &&
-              datePos &&
-              createPortal(
-                <div
-                  ref={datePopRef}
-                  className="fixed z-50 rounded-lg border border-surface-border bg-surface-card p-3 shadow-xl"
-                  style={{ top: datePos.top, left: datePos.left }}
-                >
-                  <StoryDatePicker value={date} onChange={setDate} />
-                </div>,
-                document.body,
-              )}
+          {/* Date + time */}
+          <div className="flex items-center gap-2">
+            <div>
+              <button
+                ref={dateBtnRef}
+                onClick={() => {
+                  if (datePickerOpen) { setDatePickerOpen(false); return; }
+                  const rect = dateBtnRef.current?.getBoundingClientRect();
+                  if (rect) setDatePos({ top: rect.bottom + 6, left: rect.left });
+                  setDatePickerOpen(true);
+                }}
+                className={clsx(
+                  "flex items-center gap-2 rounded-md border border-surface-border bg-surface px-3 py-2 text-xs transition-colors hover:border-accent/50",
+                  datePickerOpen
+                    ? "border-accent/50 text-accent"
+                    : "text-ink-secondary",
+                )}
+              >
+                <Calendar className="h-3.5 w-3.5 flex-shrink-0" />
+                {date || <span className="text-ink-muted">Pick a date</span>}
+                {date && (
+                  <span
+                    role="button"
+                    tabIndex={-1}
+                    onClick={(e) => { e.stopPropagation(); setDate(""); setTime(""); }}
+                    className="ml-1 text-ink-muted hover:text-ink-primary"
+                  >
+                    <X className="h-3 w-3" />
+                  </span>
+                )}
+              </button>
+              {datePickerOpen &&
+                datePos &&
+                createPortal(
+                  <div
+                    ref={datePopRef}
+                    className="fixed z-50 rounded-lg border border-surface-border bg-surface-card p-3 shadow-xl"
+                    style={{ top: datePos.top, left: datePos.left }}
+                  >
+                    <StoryDatePicker value={date} onChange={setDate} />
+                  </div>,
+                  document.body,
+                )}
+            </div>
+
+            {date.trim() && (
+              <div className="relative">
+                <Clock className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-muted" />
+                <input
+                  type="time"
+                  value={time}
+                  onChange={(e) => setTime(e.target.value)}
+                  className="rounded-md border border-surface-border bg-surface py-2 pl-8 pr-2 text-xs text-ink-primary focus:border-accent/50 focus:outline-none"
+                />
+              </div>
+            )}
           </div>
 
           {/* Description */}
@@ -772,6 +803,7 @@ function EditMode({
 
 export default function WriterEventDrawer({
   event,
+  defaultDate,
   characters,
   books,
   locations,
@@ -808,6 +840,7 @@ export default function WriterEventDrawer({
       ) : (
         <EditMode
           event={event}
+          defaultDate={defaultDate}
           characters={characters}
           books={books}
           locations={locations}

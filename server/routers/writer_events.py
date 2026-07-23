@@ -34,6 +34,7 @@ class BookChapterTag(BaseModel):
 class WriterEventBody(BaseModel):
     title: str = ""
     date: str | None = None
+    time: str | None = None
     description: str = ""
     characters: list[str] = []
     location: str | None = None
@@ -69,6 +70,7 @@ def create_writer_event(body: WriterEventBody):
         "id": f"we-{uuid.uuid4().hex[:8]}",
         "title": body.title.strip(),
         "date": body.date,
+        "time": body.time,
         "description": body.description,
         "characters": body.characters,
         "location": (body.location or "").strip() or None,
@@ -91,6 +93,7 @@ def update_writer_event(event_id: str, body: WriterEventBody):
     event.update({
         "title": body.title.strip(),
         "date": body.date,
+        "time": body.time,
         "description": body.description,
         "characters": body.characters,
         "location": (body.location or "").strip() or None,

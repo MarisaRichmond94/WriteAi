@@ -3,6 +3,7 @@ import { clsx } from "clsx";
 import { CalendarClock, Info, MapPin, Plus, Search, X } from "lucide-react";
 import { FaTimeline } from "react-icons/fa6";
 import type { BookResponse, WriterCharacter } from "../../types";
+import { formatTime12h } from "../../lib/format";
 import { fetchBooks } from "../../api/books";
 import { fetchWriterCharacters } from "../../api/plan";
 import {
@@ -174,6 +175,7 @@ function WriterChartView({
                   {ev.date && (
                     <p className="truncate text-[10px] text-ink-muted">
                       {ev.date}
+                      {ev.time && ` · ${formatTime12h(ev.time)}`}
                     </p>
                   )}
                   {ev.location && (
@@ -284,7 +286,12 @@ function EventListCard({
             <MapPin className="h-3 w-3" /> {event.location}
           </p>
         )}
-        {event.date && <p>{event.date}</p>}
+        {event.date && (
+          <p>
+            {event.date}
+            {event.time && ` · ${formatTime12h(event.time)}`}
+          </p>
+        )}
         {event.book_chapters.length > 0 && (
           <p>
             {event.book_chapters.length} tag
@@ -336,8 +343,10 @@ export default function WriterTimelinePane() {
 
   // Single source of truth: all events sorted oldest-first.
   // Story dates look like "Saturday, October 31st, 2009" — strip ordinal suffixes to parse.
-  const parseStoryDate = (d: string) =>
-    new Date(d.replace(/(\d+)(st|nd|rd|th)/g, "$1")).getTime();
+  const parseStoryDate = (d: string, time?: string | null) => {
+    const cleaned = d.replace(/(\d+)(st|nd|rd|th)/g, "$1");
+    return new Date(time ? `${cleaned} ${time}` : cleaned).getTime();
+  };
 
   const sortedEvents = useMemo(
     () =>
@@ -345,10 +354,33 @@ export default function WriterTimelinePane() {
         if (!a.date && !b.date) return 0;
         if (!a.date) return 1;
         if (!b.date) return -1;
-        return parseStoryDate(a.date) - parseStoryDate(b.date);
+
+        const dayA = parseStoryDate(a.date);
+        const dayB = parseStoryDate(b.date);
+        if (dayA !== dayB) return dayA - dayB;
+
+        // Same calendar day: order by time of day when both have one.
+        if (a.time && b.time) {
+          return parseStoryDate(a.date, a.time) - parseStoryDate(b.date, b.time);
+        }
+        if (a.time) return -1;
+        if (b.time) return 1;
+        // Neither has a time — fall back to creation order (oldest first),
+        // so the newest card reads as having happened later that day.
+        return a.created_at.localeCompare(b.created_at);
       }),
     [events],
   );
+
+  // New events default to the latest dated event on the timeline, not
+  // today's real-world date — undated events sort last, so walk backward
+  // to find the last one that actually has a date.
+  const lastEventDate = useMemo(() => {
+    for (let i = sortedEvents.length - 1; i >= 0; i--) {
+      if (sortedEvents[i].date) return sortedEvents[i].date;
+    }
+    return null;
+  }, [sortedEvents]);
 
   // List view applies the search filter on top of the sorted base.
   const visible = useMemo(() => {
@@ -406,6 +438,7 @@ export default function WriterTimelinePane() {
   const handleNext = () => { if (selectedIndex < visible.length - 1) openEdit(visible[selectedIndex + 1]); };
 
   const drawerProps = {
+    defaultDate: lastEventDate,
     characters,
     books,
     locations,
