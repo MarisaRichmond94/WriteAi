@@ -398,6 +398,18 @@ export default function WriterTimelinePane() {
   const openEdit = (e: WriterEvent) => { setEditing(e); setOpen(true); };
   const closeDrawer = useCallback(() => { setOpen(false); setEditing(null); }, []);
 
+  // ⌥⇧N opens a new event (title autofocuses via EditMode's own effect).
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.altKey && e.shiftKey && e.code === "KeyN") {
+        e.preventDefault();
+        openCreate();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
   function handleViewChange(v: "list" | "chart") {
     if (v !== view) { setView(v); closeDrawer(); }
   }

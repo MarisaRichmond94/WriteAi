@@ -337,6 +337,8 @@ function EditMode({
     event?.book_chapters ?? [],
   );
 
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
   const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [datePos, setDatePos] = useState<{ top: number; left: number } | null>(
     null,
@@ -366,6 +368,13 @@ function EditMode({
     setCharOpen(false);
     setCharSearch("");
   }, [event, defaultDate, defaultLocation]);
+
+  // Focus the title whenever a fresh edit session starts — covers both the
+  // initial mount and switching straight from one event to another (e.g. via
+  // the ⌥⇧N "new event" hotkey) without an intervening unmount.
+  useEffect(() => {
+    titleInputRef.current?.focus();
+  }, [event]);
 
   useEffect(() => {
     if (!datePickerOpen) return;
@@ -461,6 +470,18 @@ function EditMode({
 
   const canSave = title.trim().length > 0 && !saving;
 
+  // ⌥⇧Enter saves the event, mirroring the Save button.
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.altKey && e.shiftKey && e.code === "Enter") {
+        e.preventDefault();
+        if (canSave) handleSave();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [canSave, handleSave]);
+
   const inputCls =
     "w-full rounded-md border border-surface-border bg-surface px-3 py-2 text-xs text-ink-primary placeholder:text-ink-muted focus:border-accent/50 focus:outline-none";
 
@@ -496,7 +517,7 @@ function EditMode({
           {/* Title */}
           <div>
             <input
-              autoFocus
+              ref={titleInputRef}
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="What happens in this event?"
