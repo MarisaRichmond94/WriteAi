@@ -591,6 +591,7 @@ function EditMode({
                             if (e.key === "Enter" && filteredChars.length > 0) {
                               toggleChar(filteredChars[0].name);
                               setCharSearch("");
+                              charInputRef.current?.focus();
                             }
                           }}
                         />
