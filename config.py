@@ -80,6 +80,7 @@ class Config:
     enable_sentiment_v2: bool = False
     enable_story_order: bool = False
     enable_location_v2: bool = False
+    enable_canon_v2: bool = False
     # Model for the relationship-nature enrichment pass only. Direction
     # inference ("who is X to Y") needs more reasoning than the rest of
     # enrichment; empty string falls back to extraction_model.
@@ -173,6 +174,7 @@ def load_config(env_file: Path | None = None) -> Config:
         enable_sentiment_v2=_get_bool("ENABLE_SENTIMENT_V2", False),
         enable_story_order=_get_bool("ENABLE_STORY_ORDER", False),
         enable_location_v2=_get_bool("ENABLE_LOCATION_V2", False),
+        enable_canon_v2=_get_bool("ENABLE_CANON_V2", False),
         enrich_rel_model=os.environ.get("ENRICH_REL_MODEL", "").strip(),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)

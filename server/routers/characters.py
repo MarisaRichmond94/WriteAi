@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel
 
-from .. import writer_store
+from .. import canonical, writer_store
 from ..deps import get_state
 
 log = logging.getLogger(__name__)
@@ -260,6 +260,10 @@ def character_book_detail(name: str, book: str):
 # ── corrections (writes) ────────────────────────────────────────────────────
 
 def _save(cmap: dict) -> None:
+    if get_state().cfg.enable_canon_v2:
+        # keep the map chain-free: a merge that targets an already-merged
+        # name must not leave A->B->C partial-merge states behind
+        cmap["map"] = canonical.flatten_user_map(cmap.get("map", {}))
     writer_store.save_character_map(cmap)
     get_state().canon._map_state = ""  # rebuild derived view on next read
 

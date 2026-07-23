@@ -35,6 +35,7 @@ import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
+from config import _get_bool
 from server import writer_store
 
 log = logging.getLogger(__name__)
@@ -124,6 +125,58 @@ def _is_generic(name: str) -> bool:
     if all(t in _ROLE_WORDS or t in _DETERMINERS for t in lower):
         return True
     return False
+
+
+# ── v2 identity matching (ENABLE_CANON_V2) ──────────────────────────────────
+# Title-led spellings of one person ("Agent Prichard", "Special Agent Jesse
+# Prichard", bare "Prichard") can never merge under the first-token-anchored
+# rules below, so every new title form the extractor emits becomes a fresh
+# duplicate entity that the user has to map by hand. V2 strips leading title
+# tokens for MATCHING ONLY (display names and alias pills keep their original
+# spelling) and adds a unique-surname attach with the same
+# exactly-one-candidate ambiguity guard as first-token attach.
+#
+# Only PROFESSIONAL titles fold: "Agent Prichard" is how prose refers to
+# Jesse Prichard himself. Courtesy/familial titles (Mr., Mrs., Ms., Sister)
+# stay separate — "Mrs. Park" is usually a relative of Daniel Park, not a
+# spelling of him.
+
+_FOLD_TITLES = {
+    "agent", "agents", "special", "detective", "officer", "deputy",
+    "sheriff", "sergeant", "captain", "lieutenant", "colonel", "general",
+    "major", "chief", "judge", "dr", "professor", "principal", "coach",
+    "reverend", "pastor", "nurse",
+}
+
+
+def _canon_v2_enabled() -> bool:
+    return _get_bool("ENABLE_CANON_V2", False)
+
+
+def _norm(name: str) -> str:
+    """Case/punctuation-insensitive key for map lookups and alias dedup."""
+    return " ".join(re.sub(r"[.,]", "", name).casefold().split())
+
+
+def _strip_titles(tokens: list[str]) -> list[str]:
+    """Drop leading title tokens ("Special Agent Jesse Prichard" ->
+    ["Jesse", "Prichard"]). Always keeps at least one token."""
+    i = 0
+    while i < len(tokens) - 1 and tokens[i].strip(".,").lower() in _FOLD_TITLES:
+        i += 1
+    return tokens[i:]
+
+
+def flatten_user_map(m: dict[str, str]) -> dict[str, str]:
+    """Collapse transitive chains (A->B, B->C becomes A->C) and drop
+    self-mappings, so a name is never both an entity and an alias."""
+    def final(v: str) -> str:
+        seen = set()
+        while v in m and v not in seen:
+            seen.add(v)
+            v = m[v]
+        return v
+    return {k: final(v) for k, v in m.items() if k != final(v)}
 
 
 @dataclass
@@ -252,6 +305,18 @@ class Canonicalizer:
                 grounded_cache[n] = self._grounded(n, pov_names)
             return grounded_cache[n]
 
+        v2 = _canon_v2_enabled()
+        # v2: map lookups tolerate case/punctuation drift, so a re-extracted
+        # "agent prichard," still hits the user's "Agent Prichard" entry
+        user_map_norm = {_norm(k): v for k, v in user_map.items()} if v2 else {}
+
+        def mapped(n: str) -> str | None:
+            if n in user_map:
+                return user_map[n]
+            if v2:
+                return user_map_norm.get(_norm(n))
+            return None
+
         # Pass 1 — normalize each raw variant to a working name (or defer).
         #   normalized: working_name -> set(chunk_ids), merged across raw forms
         #   variant_working: raw variant -> working name (for resolve())
@@ -259,9 +324,10 @@ class Canonicalizer:
         variant_working: dict[str, str] = {}
         deferred: list[tuple[str, set]] = []      # ungrounded, retry in pass 3
         for variant, cids in raw.items():
-            if variant in user_map:               # user decision wins outright
-                normalized[user_map[variant]] |= cids
-                variant_working[variant] = user_map[variant]
+            target = mapped(variant)
+            if target is not None:                # user decision wins outright
+                normalized[target] |= cids
+                variant_working[variant] = target
                 continue
             # candidate simplifications, first grounded one wins:
             candidates = [variant]
@@ -286,8 +352,8 @@ class Canonicalizer:
             # the user's map applies to normalized names too, so variants
             # that RESOLVE to a mapped name ("Brianna (Bri)" -> "Bri")
             # follow the same merge as the name itself
-            if name is not None and name in user_map:
-                name = user_map[name]
+            if name is not None and (t := mapped(name)) is not None:
+                name = t
             if name is not None:
                 normalized[name] |= cids
                 variant_working[variant] = name
@@ -323,6 +389,38 @@ class Canonicalizer:
                         head_canon[k] = keep
                 head_canon[drop] = keep
 
+        # V2: fold title-led heads into the unique real-name head they
+        # abbreviate — "Agent Prichard" and "Special Agent Jesse Prichard"
+        # -> "Jesse Prichard". Only non-title-led heads are fold targets
+        # (prevents two title forms folding into each other in a cycle),
+        # and the real full name always wins as the display name.
+        by_last: dict[str, list[str]] = defaultdict(list)
+        if v2:
+            real = [h for h in multi
+                    if head_canon[h] == h and _strip_titles(h.split()) == h.split()]
+            for h in real:
+                by_last[_norm(h.split()[-1])].append(h)
+            for h in multi:
+                if head_canon[h] != h:
+                    continue
+                toks = h.split()
+                stripped = _strip_titles(toks)
+                if stripped == toks:
+                    continue
+                if len(stripped) > 1:
+                    cands = [o for o in real if o != h
+                             and o.split()[0] == stripped[0]
+                             and _subseq(stripped, o.split())]
+                else:   # bare surname left after stripping: "Agent Prichard"
+                    cands = [o for o in by_last.get(_norm(stripped[0]), [])
+                             if o != h]
+                if len(cands) == 1:
+                    keep = cands[0]
+                    for k, v in list(head_canon.items()):
+                        if v == h:
+                            head_canon[k] = keep
+                    head_canon[h] = keep
+
         head_by_first: dict[str, list[str]] = defaultdict(list)
         for h in multi:
             canon_h = head_canon[h]
@@ -332,6 +430,11 @@ class Canonicalizer:
         entity_of: dict[str, str] = {h: head_canon[h] for h in multi}
         for s in single:
             heads = head_by_first.get(s, [])
+            if not heads and v2 and not _is_generic(s):
+                # unique-surname attach: bare "Prichard" -> "Jesse Prichard";
+                # "Gatlin" (several Gatlins) stays its own entity, and role
+                # words ("nurse") never attach to a name they happen to end
+                heads = by_last.get(_norm(s), [])
             entity_of[s] = heads[0] if len(heads) == 1 else s
         for d in descriptors:
             entity_of[d] = d
@@ -342,8 +445,14 @@ class Canonicalizer:
         for variant, cids in deferred:
             first = variant.split()[0].strip("'s")
             heads = head_by_first.get(first, [])
+            if not heads and v2 and not _is_generic(variant):
+                # title-strip the ungrounded form and try its surname:
+                # "Agents Prichard" -> "Prichard" -> "Jesse Prichard".
+                # Generic phrases ("masked man") must stay quarantined.
+                stripped = _strip_titles(variant.split())
+                heads = by_last.get(_norm(stripped[-1]), [])
             if len(heads) == 1:
-                target = user_map.get(heads[0], heads[0])
+                target = mapped(heads[0]) or heads[0]
                 normalized[target] |= cids
                 variant_working[variant] = target
                 entity_of.setdefault(target, target)
@@ -375,11 +484,19 @@ class Canonicalizer:
                 return "generic"       # "CFO", "Board members", "The man"
             return "character"
 
+        def add_alias(e: Entity, name: str) -> None:
+            if name == e.name or name in e.aliases:
+                return
+            # v2: a case/punctuation twin of an existing pill is not a new alias
+            if v2 and _norm(name) in {_norm(a) for a in (e.aliases + [e.name])}:
+                return
+            e.aliases.append(name)
+
         for name, cids in normalized.items():
             canon = entity_of.get(name, name)
             e = groups.setdefault(canon, Entity(name=canon, kind=classify(canon)))
-            if name != canon and name not in e.aliases:
-                e.aliases.append(name)
+            if name != canon:
+                add_alias(e, name)
             e.chunk_ids |= cids
             self.variant_to_entity[name] = canon
         # every raw variant resolves through its working name
@@ -391,10 +508,9 @@ class Canonicalizer:
         # but junk phrases assigned to a character don't become alias pills
         for variant, target in user_map.items():
             e = groups.get(target)
-            if (e is not None and variant != target
-                    and variant not in e.aliases
-                    and "'s " not in variant and not _is_generic(variant)):
-                e.aliases.append(variant)
+            if (e is not None and "'s " not in variant
+                    and not _is_generic(variant)):
+                add_alias(e, variant)
 
         for e in groups.values():
             names = {e.name, *e.aliases}
