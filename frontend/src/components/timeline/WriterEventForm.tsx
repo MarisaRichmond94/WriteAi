@@ -91,6 +91,7 @@ function SectionHeader({ label, count }: { label: string; count?: number }) {
 interface WriterEventDrawerProps {
   event: WriterEvent | null;
   defaultDate: string | null;
+  defaultLocation: string | null;
   characters: WriterCharacter[];
   books: BookResponse[];
   locations: string[];
@@ -299,6 +300,7 @@ function ViewMode({
 function EditMode({
   event,
   defaultDate,
+  defaultLocation,
   characters,
   books,
   locations,
@@ -309,6 +311,7 @@ function EditMode({
 }: {
   event: WriterEvent | null;
   defaultDate: string | null;
+  defaultLocation: string | null;
   characters: WriterCharacter[];
   books: BookResponse[];
   locations: string[];
@@ -317,8 +320,9 @@ function EditMode({
   onDelete: () => void;
   onCancel: () => void;
 }) {
-  // New events default to the last event's date rather than starting blank
-  // (today's date isn't relevant to where the writer is in the story).
+  // New events default to the last event's date/location rather than
+  // starting blank (today's date isn't relevant to where the writer is in
+  // the story, and consecutive events often share a location).
   const [title, setTitle] = useState(event?.title ?? "");
   const [date, setDate] = useState(event ? event.date ?? "" : defaultDate ?? "");
   const [time, setTime] = useState(event?.time ?? "");
@@ -326,7 +330,9 @@ function EditMode({
   const [selectedChars, setSelectedChars] = useState<string[]>(
     event?.characters ?? [],
   );
-  const [location, setLocation] = useState(event?.location ?? "");
+  const [location, setLocation] = useState(
+    event ? event.location ?? "" : defaultLocation ?? "",
+  );
   const [tags, setTags] = useState<WriterEventTag[]>(
     event?.book_chapters ?? [],
   );
@@ -353,13 +359,13 @@ function EditMode({
     setTime(event?.time ?? "");
     setDescription(event?.description ?? "");
     setSelectedChars(event?.characters ?? []);
-    setLocation(event?.location ?? "");
+    setLocation(event ? event.location ?? "" : defaultLocation ?? "");
     setTags(event?.book_chapters ?? []);
     setDatePickerOpen(false);
     setLocOpen(false);
     setCharOpen(false);
     setCharSearch("");
-  }, [event, defaultDate]);
+  }, [event, defaultDate, defaultLocation]);
 
   useEffect(() => {
     if (!datePickerOpen) return;
@@ -804,6 +810,7 @@ function EditMode({
 export default function WriterEventDrawer({
   event,
   defaultDate,
+  defaultLocation,
   characters,
   books,
   locations,
@@ -841,6 +848,7 @@ export default function WriterEventDrawer({
         <EditMode
           event={event}
           defaultDate={defaultDate}
+          defaultLocation={defaultLocation}
           characters={characters}
           books={books}
           locations={locations}

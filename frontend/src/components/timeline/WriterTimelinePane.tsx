@@ -372,15 +372,17 @@ export default function WriterTimelinePane() {
     [events],
   );
 
-  // New events default to the latest dated event on the timeline, not
+  // New events default to the latest dated event's date/location, not
   // today's real-world date — undated events sort last, so walk backward
   // to find the last one that actually has a date.
-  const lastEventDate = useMemo(() => {
+  const lastDatedEvent = useMemo(() => {
     for (let i = sortedEvents.length - 1; i >= 0; i--) {
-      if (sortedEvents[i].date) return sortedEvents[i].date;
+      if (sortedEvents[i].date) return sortedEvents[i];
     }
     return null;
   }, [sortedEvents]);
+  const lastEventDate = lastDatedEvent?.date ?? null;
+  const lastEventLocation = lastDatedEvent?.location ?? null;
 
   // List view applies the search filter on top of the sorted base.
   const visible = useMemo(() => {
@@ -439,6 +441,7 @@ export default function WriterTimelinePane() {
 
   const drawerProps = {
     defaultDate: lastEventDate,
+    defaultLocation: lastEventLocation,
     characters,
     books,
     locations,
