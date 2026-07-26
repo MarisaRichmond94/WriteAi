@@ -587,6 +587,7 @@ export default function SettingsPane() {
   const [syncTime, setSyncTime] = useState("02:00");
   const [autoSyncEnabled, setAutoSyncEnabled] = useState(true);
   const [autoEnrichEnabled, setAutoEnrichEnabled] = useState(true);
+  const [enrichFrequency, setEnrichFrequency] = useState("daily");
   const [bookOrder, setBookOrder] = useState<string[]>([]);
   const [discoveredBooks, setDiscoveredBooks] = useState<string[]>([]);
   const [queryModel, setQueryModel] = useState(DEFAULT_QUERY_MODEL);
@@ -612,6 +613,7 @@ export default function SettingsPane() {
         setSyncTime(s.sync_time);
         setAutoSyncEnabled(s.auto_sync_enabled ?? true);
         setAutoEnrichEnabled(s.auto_enrich_enabled ?? true);
+        setEnrichFrequency(s.enrich_frequency ?? "daily");
         // Merge discovered books with configured order
         const configured = s.book_order.length > 0 ? s.book_order : s.discovered_books;
         setBookOrder(configured);
@@ -642,6 +644,7 @@ export default function SettingsPane() {
       setSyncTime(s.sync_time);
       setAutoSyncEnabled(s.auto_sync_enabled ?? true);
       setAutoEnrichEnabled(s.auto_enrich_enabled ?? true);
+      setEnrichFrequency(s.enrich_frequency ?? "daily");
       setBookOrder(s.book_order.length > 0 ? s.book_order : s.discovered_books);
       setDiscoveredBooks(s.discovered_books);
       setQueryModel(s.query_model);
@@ -673,6 +676,7 @@ export default function SettingsPane() {
         sync_time: syncTime,
         auto_sync_enabled: autoSyncEnabled,
         auto_enrich_enabled: autoEnrichEnabled,
+        enrich_frequency: enrichFrequency,
         book_order: bookOrder,
         query_model: queryModel,
         extraction_model: extractionModel,
@@ -873,9 +877,9 @@ export default function SettingsPane() {
                 />
               </Field>
               <Field
-                label="Auto-Enrich After Sync"
-                description="When enabled, every successful sync (manual or nightly) automatically re-runs enrichment — chapter summaries, events, and profiles — for whatever changed."
-                infoTooltip="Without this, chapter summaries only refresh when you run enrichment manually from the Timeline pane, so inserting or renumbering chapters leaves outline cards showing the previous chapter's summary. Enrichment is cached per chapter: unchanged chapters are never reprocessed or billed."
+                label="Scheduled Enrichment"
+                description="When enabled, enrichment — chapter summaries, events, and profiles — runs on the schedule below, piggybacking the nightly sync. Incremental syncs during the day no longer enrich, so you're billed once per cycle instead of on every sync."
+                infoTooltip="Without this, chapter summaries only refresh when you run enrichment manually from the Timeline pane, so inserting or renumbering chapters leaves outline cards showing the previous chapter's summary. Enrichment is cached per chapter: unchanged chapters are never reprocessed or billed, so a longer cycle simply batches more accumulated changes into a single run. Weekly and longer cycles run on Sundays after the nightly sync."
               >
                 <button
                   type="button"
@@ -888,6 +892,22 @@ export default function SettingsPane() {
                     className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${autoEnrichEnabled ? "translate-x-5" : "translate-x-0"}`}
                   />
                 </button>
+              </Field>
+              <Field
+                label="Enrichment Frequency"
+                description="How often the scheduled enrichment run fires. Weekly and longer cycles run on Sundays, right after the nightly sync."
+              >
+                <select
+                  value={enrichFrequency}
+                  onChange={(e) => setEnrichFrequency(e.target.value)}
+                  disabled={!autoEnrichEnabled}
+                  className="w-full rounded border border-surface-border bg-surface px-2 py-1.5 pr-8 text-sm text-ink-primary focus:outline-none focus:ring-1 focus:ring-accent disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly (Sundays)</option>
+                  <option value="biweekly">Biweekly (every other Sunday)</option>
+                  <option value="monthly">Monthly (first Sunday)</option>
+                </select>
               </Field>
             </Section>
           )}

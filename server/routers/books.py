@@ -554,12 +554,15 @@ def ingest_preview(book: int | None = None):
 
 
 def _auto_enrich() -> None:
-    """Start an enrichment run after a successful ingest, so summaries and
-    events track the manuscript without a manual Timeline-pane run. Skipped
-    when the writer disabled it (Settings -> Sync), when a run is already in
-    flight, or when nothing is pending — a no-op nightly sync must not emit
-    an empty "Enrichment complete" notification. Runs on the ingest watcher
-    thread; get_state().db is thread-local, so the preview read is safe."""
+    """Start an enrichment run piggybacking the nightly sync, so summaries and
+    events track the manuscript without a manual Timeline-pane run. Only the
+    scheduler passes enrich_after=True to ingest_run, and only on days the
+    writer's cadence is due (Settings -> Sync) — incremental loom-event syncs
+    and manual Resyncs never enrich, so per-sync enrichment cost is not billed.
+    Skipped when the writer disabled it, when a run is already in flight, or
+    when nothing is pending — a no-op nightly sync must not emit an empty
+    "Enrichment complete" notification. Runs on the ingest watcher thread;
+    get_state().db is thread-local, so the preview read is safe."""
     from ..canonical import Canonicalizer
     from .. import enrich
 
@@ -586,7 +589,8 @@ def _auto_enrich() -> None:
 
 
 @router.post("/ingest/run")
-def ingest_run(book: int | None = None, full: bool = False):
+def ingest_run(book: int | None = None, full: bool = False,
+               enrich_after: bool = False):
     with _ingest_lock:
         running = _ingest["proc"] is not None and _ingest["proc"].poll() is None
         # Also refuse while the previous run's post-ingest writes (orphan GC +
@@ -625,7 +629,8 @@ def ingest_run(book: int | None = None, full: bool = False):
                         f"{'full re-ingest' if full else 're-ingest'} of {scope} started",
                         book=book, full=full, log=str(log_path))
 
-        def _watch(proc=proc, scope=scope, title=title, log_path=log_path):
+        def _watch(proc=proc, scope=scope, title=title, log_path=log_path,
+                   enrich_after=enrich_after):
             # success and no-op runs self-report from ingest.py with a full
             # summary; the watcher only covers crashes that never got there
             code = proc.wait()
@@ -671,9 +676,12 @@ def ingest_run(book: int | None = None, full: bool = False):
                 # not rewritten by ingest, so after a mid-book insertion the
                 # renumbered chapters keep serving the previous chapter's
                 # summary — the numbers all still exist, so the GC above
-                # can't catch it. Kick off enrichment now; it is hash-gated
-                # per chapter, so only what actually changed is billed.
-                _auto_enrich()
+                # can't catch it. Only the nightly scheduler asks to enrich,
+                # and only when the writer's cadence is due; it is hash-gated
+                # per chapter, so a full day's accumulated changes are billed
+                # once instead of on every incremental sync.
+                if enrich_after:
+                    _auto_enrich()
             if code != 0:
                 from .. import notify
                 # ingest_ui.log is truncated ('w') at the start of the next

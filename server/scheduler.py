@@ -24,6 +24,24 @@ _CHECK_INTERVAL_SECONDS = 60
 _last_run_date: str | None = None
 
 
+def _enrich_due_today(now: datetime, freq: str) -> bool:
+    """Whether an enrichment run should piggyback tonight's nightly sync,
+    given the writer's cadence (Settings -> Sync). Weekly-and-longer cadences
+    fire on Sundays so the run lands on a predictable day. Derived purely from
+    the date, so it needs no persisted bookkeeping and survives restarts."""
+    if freq == "daily":
+        return True
+    if now.weekday() != 6:  # Monday=0 .. Sunday=6; anchor to Sunday
+        return False
+    if freq == "weekly":
+        return True
+    if freq == "biweekly":
+        return now.isocalendar()[1] % 2 == 0  # every other ISO week
+    if freq == "monthly":
+        return now.day <= 7  # the month's first Sunday
+    return False
+
+
 async def _tick() -> None:
     global _last_run_date
     profile = writer_store.ui_settings()
@@ -39,9 +57,15 @@ async def _tick() -> None:
         return
 
     _last_run_date = today
-    log.info("nightly sync: sync_time=%s UTC reached, starting scheduled re-ingest", sync_time)
+    # Enrichment rides the nightly sync, but only on days the writer's cadence
+    # is due — so daily/weekly/biweekly/monthly all bill one batched run at
+    # most, never per incremental sync.
+    enrich_after = bool(profile.get("auto_enrich_enabled")) and _enrich_due_today(
+        now, profile.get("enrich_frequency", "daily"))
+    log.info("nightly sync: sync_time=%s UTC reached, starting scheduled re-ingest "
+             "(enrich=%s)", sync_time, enrich_after)
     try:
-        ingest_run(book=None)
+        ingest_run(book=None, enrich_after=enrich_after)
     except HTTPException as e:
         # 409: an ingest (manual or scheduled) is already running — fine, skip tonight.
         log.info("nightly sync: skipped (%s)", e.detail)

@@ -230,6 +230,7 @@ export interface AppSettings {
   sync_time: string;
   auto_sync_enabled: boolean;
   auto_enrich_enabled: boolean;
+  enrich_frequency: string;
   book_order: string[];
   query_model: string;
   extraction_model: string;
