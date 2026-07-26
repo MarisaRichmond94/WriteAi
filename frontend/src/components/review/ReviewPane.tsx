@@ -849,7 +849,12 @@ export default function ReviewPane() {
   // Poll a running ingest to completion. Success/failure notifications come
   // from the ingest process itself (it posts to the bell); this side only
   // tracks the syncing state, refreshes stale data, and nudges the bell.
-  const watchIngest = async (runEnrich: boolean) => {
+  // `owned` is false for an ingest this pane merely adopted (the Loom
+  // canon-export auto-sync, another pane's run). Those must NOT drop draft
+  // mode: the writer arrived from Loom's Review button mid-conversation, and
+  // clearing `draft` swaps the Resync follow-up button back to Review —
+  // stranding them with no way to send the revised chapter into the thread.
+  const watchIngest = async (runEnrich: boolean, owned = true) => {
     setResyncing(true);
     try {
       const started = Date.now();
@@ -860,7 +865,9 @@ export default function ReviewPane() {
         if (st.finished && st.exit_code === 0) {
           fetchBooks().then(setBooks).catch(() => {});
           setSyncVersion((v) => v + 1);
-          setDraft(null); // index now matches the file — leave draft mode
+          // index now matches the file — leave draft mode, but only for a
+          // re-index the writer asked for here (see `owned` above)
+          if (owned) setDraft(null);
           if (runEnrich) {
             // not awaited — reviewing can resume as soon as the sync lands
             queueEnrichment().catch(async (e: Error) => {
@@ -885,7 +892,7 @@ export default function ReviewPane() {
   // previous visit) so the Review button and preview reflect it.
   useEffect(() => {
     fetchIngestStatus()
-      .then((st) => { if (st.running) watchIngest(false); })
+      .then((st) => { if (st.running) watchIngest(false, false); })
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
