@@ -96,7 +96,10 @@ def chapter_text(book: int, chapter: int):
             rich = None
     return {"book": book, "chapter": chapter,
             "pov": rows[0][1], "date": rows[0][2],
-            "text": "\n\n".join(r[0] for r in rows),
+            # within a chunk paragraphs are stored "\n"-joined; re-expand so
+            # every paragraph break is a consistent blank line
+            "text": "\n\n".join(p for r in rows
+                                for p in r[0].split("\n") if p.strip()),
             "rich": rich}
 
 
@@ -294,13 +297,18 @@ def _ch_label(n: int) -> str:
     return "Prologue" if n == 0 else f"Chapter {n}"
 
 
-def _build_bible(s, book: int, compact: bool = False) -> tuple[str, str]:
+def _build_bible(s, book: int, compact: bool = False,
+                 characters: bool = True, chapters: bool = True) -> tuple[str, str]:
     """(title, markdown). Assembled entirely from extracted/enriched data —
     deterministic, zero LLM cost, nothing invented.
 
     compact=True produces the trimmed variant injected into Explore chat
     context: no overview, characters capped at the POVs + most frequent
-    (max 10), chapter prose summaries without the per-event bullets."""
+    (max 10), chapter prose summaries without the per-event bullets.
+
+    characters/chapters drop whole sections — the review pane sends several
+    bibles at once and skips the sections that would duplicate each other
+    (character profiles are series-global, so one copy suffices)."""
     db = s.db
     row = db.execute("SELECT DISTINCT book_title FROM chunks WHERE book_number = ?",
                      (book,)).fetchone()
@@ -376,41 +384,45 @@ def _build_bible(s, book: int, compact: bool = False) -> tuple[str, str]:
             out(f"- **Timeline:** {dates[0]} → {dates[-1]}")
         out("")
 
-    out("## Characters")
-    out("")
-    major = [(n, e) for n, e in in_book if n >= 3]
-    if compact:
-        # POVs always make the cut; fill the rest by appearance count
-        major = ([(n, e) for n, e in major if e.name in pov_counts]
-                 + [(n, e) for n, e in major if e.name not in pov_counts])[:10]
-        major.sort(key=lambda t: (-t[0], t[1].name))
-    for n, e in major:
-        out(f"### {e.name}")
-        tags = []
-        if e.aliases:
-            tags.append("aka " + ", ".join(e.aliases))
-        if genders.get(e.name):
-            tags.append(genders[e.name])
-        if tags:
-            out(f"*{' · '.join(tags)}*")
-        tj, rj, aj = profiles.get(e.name, (None, None, None))
-        traits = json.loads(tj) if tj else []
-        if traits:
-            out(f"- **Traits:** {', '.join(traits)}")
-        arcs = json.loads(aj) if aj else {}
-        if arcs.get(str(book)):
-            out(f"- **Arc in this book:** {arcs[str(book)]}")
-        rels = json.loads(rj) if rj else []
-        rel_lines = []
-        for r in rels:
-            other = canon.resolve(r.get("name", "")) or r.get("name", "")
-            if other not in names_in_book or other == e.name:
-                continue
-            nature = rel_overrides.get(e.name, {}).get(other) or r.get("nature")
-            rel_lines.append(f"{other} ({nature})" if nature else other)
-        if rel_lines:
-            out(f"- **Relationships:** {'; '.join(rel_lines)}")
+    if characters:
+        out("## Characters")
         out("")
+        major = [(n, e) for n, e in in_book if n >= 3]
+        if compact:
+            # POVs always make the cut; fill the rest by appearance count
+            major = ([(n, e) for n, e in major if e.name in pov_counts]
+                     + [(n, e) for n, e in major if e.name not in pov_counts])[:10]
+            major.sort(key=lambda t: (-t[0], t[1].name))
+        for n, e in major:
+            out(f"### {e.name}")
+            tags = []
+            if e.aliases:
+                tags.append("aka " + ", ".join(e.aliases))
+            if genders.get(e.name):
+                tags.append(genders[e.name])
+            if tags:
+                out(f"*{' · '.join(tags)}*")
+            tj, rj, aj = profiles.get(e.name, (None, None, None))
+            traits = json.loads(tj) if tj else []
+            if traits:
+                out(f"- **Traits:** {', '.join(traits)}")
+            arcs = json.loads(aj) if aj else {}
+            if arcs.get(str(book)):
+                out(f"- **Arc in this book:** {arcs[str(book)]}")
+            rels = json.loads(rj) if rj else []
+            rel_lines = []
+            for r in rels:
+                other = canon.resolve(r.get("name", "")) or r.get("name", "")
+                if other not in names_in_book or other == e.name:
+                    continue
+                nature = rel_overrides.get(e.name, {}).get(other) or r.get("nature")
+                rel_lines.append(f"{other} ({nature})" if nature else other)
+            if rel_lines:
+                out(f"- **Relationships:** {'; '.join(rel_lines)}")
+            out("")
+
+    if not chapters:
+        return title, "\n".join(md)
 
     try:
         ch_prose = dict(db.execute(
