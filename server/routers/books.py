@@ -565,15 +565,37 @@ def ingest_preview(book: int | None = None):
             "model": s.cfg.extraction_model}
 
 
-def _auto_enrich() -> None:
-    """Start an enrichment run piggybacking the nightly sync, so summaries and
-    events track the manuscript without a manual Timeline-pane run. Only the
-    scheduler passes enrich_after=True to ingest_run, and only on days the
-    writer's cadence is due (Settings -> Sync) — incremental loom-event syncs
-    and manual Resyncs never enrich, so per-sync enrichment cost is not billed.
-    Skipped when the writer disabled it, when a run is already in flight, or
-    when nothing is pending — a no-op nightly sync must not emit an empty
-    "Enrichment complete" notification. Runs on the ingest watcher thread;
+def _chapter_roster(book: int | None) -> set[tuple[int, int]]:
+    """The (book, chapter) pairs currently indexed — the numbering an
+    enrichment run's output is keyed to. Compared across an ingest to detect
+    chapters added or removed; see _watch. Returns an empty set on failure so
+    a read error degrades to "no numbering change detected" rather than
+    billing a spurious enrichment run."""
+    try:
+        db = get_state().db
+        if book is None:
+            rows = db.execute(
+                "SELECT DISTINCT book_number, chapter_number FROM chunks")
+        else:
+            rows = db.execute(
+                "SELECT DISTINCT book_number, chapter_number FROM chunks "
+                "WHERE book_number = ?", (book,))
+        return {(b, c) for b, c in rows}
+    except Exception:
+        log.exception("chapter roster snapshot failed")
+        return set()
+
+
+def _auto_enrich(reason: str = "re-ingest") -> None:
+    """Start an enrichment run piggybacking a sync, so summaries and events
+    track the manuscript without a manual Timeline-pane run. Two triggers:
+    the scheduler passes enrich_after=True on days the writer's cadence is due
+    (Settings -> Sync), and any sync that changes chapter numbering forces a
+    run regardless of cadence. Prose-only edits still wait for the cadence, so
+    incremental loom-event syncs are not billed per sync. Skipped when the
+    writer disabled it, when a run is already in flight, or when nothing is
+    pending — a no-op nightly sync must not emit an empty "Enrichment
+    complete" notification. Runs on the ingest watcher thread;
     get_state().db is thread-local, so the preview read is safe."""
     from ..canonical import Canonicalizer
     from .. import enrich
@@ -595,8 +617,9 @@ def _auto_enrich() -> None:
         return
     if enrich.runner.start(s.cfg.sqlite_path, s.cfg, lambda db: Canonicalizer(db)):
         audit.log_event("enrich_started",
-                        "enrichment auto-started after re-ingest",
-                        auto=True, chapters=pending["chapters_to_process"],
+                        f"enrichment auto-started after {reason}",
+                        auto=True, reason=reason,
+                        chapters=pending["chapters_to_process"],
                         estimated_cost_usd=pending["estimated_cost_usd"])
 
 
@@ -613,6 +636,11 @@ def ingest_run(book: int | None = None, full: bool = False,
             audit.log_event("ingest_refused", "an ingestion run is already in progress",
                             book=book, started_at=_ingest["started_at"])
             raise HTTPException(409, "an ingestion run is already in progress")
+        # Snapshot chapter numbering before the subprocess touches the DB: if
+        # this sync adds or removes a chapter, every enrichment row at or after
+        # the insertion point is now keyed to the wrong chapter and must be
+        # regenerated no matter what the writer's cadence says.
+        roster_before = _chapter_roster(book)
         log_path = REPO_ROOT / "logs" / "ingest_ui.log"
         log_path.parent.mkdir(exist_ok=True)
         cmd = [sys.executable, str(REPO_ROOT / "ingest.py"), "--yes"]
@@ -642,7 +670,8 @@ def ingest_run(book: int | None = None, full: bool = False,
                         book=book, full=full, log=str(log_path))
 
         def _watch(proc=proc, scope=scope, title=title, log_path=log_path,
-                   enrich_after=enrich_after):
+                   enrich_after=enrich_after, book=book,
+                   roster_before=roster_before):
             # success and no-op runs self-report from ingest.py with a full
             # summary; the watcher only covers crashes that never got there
             code = proc.wait()
@@ -688,12 +717,32 @@ def ingest_run(book: int | None = None, full: bool = False,
                 # not rewritten by ingest, so after a mid-book insertion the
                 # renumbered chapters keep serving the previous chapter's
                 # summary — the numbers all still exist, so the GC above
-                # can't catch it. Only the nightly scheduler asks to enrich,
-                # and only when the writer's cadence is due; it is hash-gated
-                # per chapter, so a full day's accumulated changes are billed
-                # once instead of on every incremental sync.
+                # can't catch it. Two things can ask for a run: the nightly
+                # scheduler when the writer's cadence is due, and a numbering
+                # change here. The latter is the correctness trigger — wrong
+                # summaries are visible on the plan page immediately and must
+                # not wait out a weekly or monthly cadence. Prose-only edits
+                # deliberately do not qualify: they leave the roster identical
+                # and wait for the cadence, which is what keeps incremental
+                # loom-event syncs from billing enrichment several times a day.
+                reason = "re-ingest"
+                if not enrich_after:
+                    roster_after = _chapter_roster(book)
+                    # An empty "before" means the snapshot failed or the book
+                    # was not yet indexed; treat neither as a numbering change.
+                    if roster_before and roster_after != roster_before:
+                        added = sorted(roster_after - roster_before)
+                        removed = sorted(roster_before - roster_after)
+                        audit.log_event(
+                            "enrich_forced",
+                            "chapter numbering changed — enriching regardless "
+                            "of cadence",
+                            added=[c for _b, c in added],
+                            removed=[c for _b, c in removed])
+                        enrich_after = True
+                        reason = "chapter numbering change"
                 if enrich_after:
-                    _auto_enrich()
+                    _auto_enrich(reason)
             if code != 0:
                 from .. import notify
                 # ingest_ui.log is truncated ('w') at the start of the next

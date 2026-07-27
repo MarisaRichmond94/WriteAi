@@ -59,7 +59,10 @@ async def _tick() -> None:
     _last_run_date = today
     # Enrichment rides the nightly sync, but only on days the writer's cadence
     # is due — so daily/weekly/biweekly/monthly all bill one batched run at
-    # most, never per incremental sync.
+    # most, never per incremental sync. Independently of this, any sync that
+    # adds or removes a chapter forces a run (see _watch in routers/books.py),
+    # because renumbering strands every downstream summary on the wrong
+    # chapter and that is visible on the plan page right away.
     enrich_after = bool(profile.get("auto_enrich_enabled")) and _enrich_due_today(
         now, profile.get("enrich_frequency", "daily"))
     log.info("nightly sync: sync_time=%s UTC reached, starting scheduled re-ingest "
