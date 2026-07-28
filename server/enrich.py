@@ -249,8 +249,20 @@ def gc_orphans(db: sqlite3.Connection) -> int:
     except sqlite3.OperationalError:  # ingest has never run — nothing to GC
         db.rollback()
         return 0
+    # Always end the transaction, even when nothing was deleted. A DELETE
+    # opens a write transaction the moment it runs — matching zero rows does
+    # not change that — and SQLite's single write lock is held until that
+    # transaction ends. Committing only `if total` left the lock pinned to
+    # this connection on the (usual) no-op path. Harmless when the caller is
+    # the short-lived post-ingest watcher thread, whose connection is
+    # finalized on thread exit, but the enrichment runner calls this on a
+    # connection that lives for the whole run: the lock was then held across
+    # every LLM call in the pass, and any ingest subprocess starting in that
+    # window exhausted its retries and died with "database is locked".
     if total:
         db.commit()
+    else:
+        db.rollback()
     return total
 
 

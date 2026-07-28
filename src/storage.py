@@ -196,19 +196,29 @@ class SeriesStore:
         export (the failure loop). Retrying after rolling back the partial
         transaction keeps a transient lock from stranding a book. The writes
         here are idempotent (delete-then-insert by chunk_id), so a full retry
-        is safe."""
-        attempts, delay = 4, 0.5
+        is safe.
+
+        The budget is sized against the longest realistic hold — an enrichment
+        pass, which writes between LLM calls — not against a momentary
+        collision: 8 attempts of (30s busy_timeout + exponential backoff capped
+        at 30s) is roughly a 5-minute ceiling. Waiting out a slow writer costs
+        the sync some latency; giving up costs it the whole run."""
+        attempts, max_delay = 8, 30.0
         for attempt in range(1, attempts + 1):
             try:
                 write()
                 return
             except sqlite3.OperationalError as e:
+                # Roll back either way: on the final attempt too, so a store
+                # that outlives this call isn't left holding a partial txn
+                # (and, with it, the write lock the next writer needs).
+                self.db.rollback()
                 if "locked" not in str(e).lower() or attempt == attempts:
                     raise
-                self.db.rollback()  # discard the partial txn before retrying
+                delay = min(2.0 ** (attempt - 1), max_delay)
                 log.warning("SQLite write locked (attempt %d/%d); retrying in %.1fs",
-                            attempt, attempts, delay * attempt)
-                time.sleep(delay * attempt)
+                            attempt, attempts, delay)
+                time.sleep(delay)
 
     # ── writes ──────────────────────────────────────────────────────────────
 
@@ -216,11 +226,20 @@ class SeriesStore:
         """records: [{chunk, metadata (dict|None), embedding, text_hash}, ...]
 
         Idempotent: existing rows/vectors for the same chunk_id are replaced.
+
+        SQLite goes first because it is the write that can fail: it contends
+        with the always-on server for the single write lock, while Chroma has
+        no such competition. Writing vectors first meant a lock failure left
+        new embeddings pointing at old row text, so semantic search returned
+        prose that no longer matched the chunk. In this order the worst case
+        is rows without refreshed vectors — retrieval degrades, but never
+        serves the wrong text. Either way the run aborts before ingest.py
+        records the chunk hashes, so the next sync repairs it.
         """
         if not records:
             return
-        self._upsert_chroma(records)
         self._write_with_retry(lambda: self._upsert_sqlite(records))
+        self._upsert_chroma(records)
 
     def delete_chunks(self, chunk_ids: list[str]) -> None:
         if not chunk_ids:
