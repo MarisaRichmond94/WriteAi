@@ -2,10 +2,15 @@
 
 Every AI stream emits:
     data: {"type": "chunk", "content": "..."}        (many)
+    data: {"type": "notice", "message": "..."}        (optional, before chunks)
     data: {"type": "citations", "sources": [...]}     (once, optional)
     data: {"type": "usage", ...}                      (once, optional)
     data: {"type": "done"}                            (always last)
     data: {"type": "error", "message": "..."}         (on failure)
+
+A `notice` reports that the answer is degraded but real — retrieval fell over
+and the model worked from thinner context, say. `error` means there is no
+answer at all.
 """
 
 from __future__ import annotations

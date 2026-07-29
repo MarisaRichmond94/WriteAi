@@ -443,6 +443,7 @@ def review_stream(req: ReviewRequest):
         # semantic context from before the chapter, probing several slices
         # of the chapter so retrieval isn't skewed to whatever it opens with
         excerpts: list[dict] = []
+        degraded: str | None = None     # set when the review runs on less context
         if not no_prior:
             seen = set()
             dropped_self = 0
@@ -470,9 +471,15 @@ def review_stream(req: ReviewRequest):
                 # inconsistent with the rewritten segments; degrade to a review
                 # with no prior-context excerpts (the story-so-far notes below
                 # still come from SQLite) rather than emit a blank bubble.
+                # The store reopens and retries once before it gets here, so
+                # reaching this point means retrieval is genuinely unavailable.
                 log.exception("review: semantic retrieval failed — continuing "
                               "without prior-context excerpts")
                 excerpts = []
+                degraded = ("Prior-context search was unavailable, so this "
+                            "review read the chapter with the story bibles and "
+                            "story-so-far notes but no retrieved manuscript "
+                            "excerpts. Re-syncing the book usually clears it.")
             if dropped_self:
                 log.info("review: dropped %d excerpt(s) near-identical to the "
                          "chapter under review", dropped_self)
@@ -535,6 +542,10 @@ def review_stream(req: ReviewRequest):
         # the Ideal Version section rewrites the whole chapter with markup —
         # far past the default 12K output budget
         ideal = IDEAL_VERSION_INSTRUCTION if req.include_ideal else NO_IDEAL_INSTRUCTION
+        # ahead of the reply, so the writer knows the review is running on
+        # thinner context while she reads it — not after she has acted on it
+        if degraded:
+            yield {"type": "notice", "message": degraded}
         # the scope ledgers the request from a `finally`, so a review that dies
         # mid-stream still shows up in the spend dashboard (marked failed)
         # instead of vanishing from it

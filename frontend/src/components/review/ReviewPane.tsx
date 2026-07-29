@@ -277,6 +277,15 @@ function ReviewBubble({
     // height instead of scrolling inside a capped box.
     <div className="flex justify-start">
       <div className="flex w-[90%] flex-col gap-4">
+        {/* Degraded-context warning: the review below is real feedback, but it
+            was written with less to go on than usual. Sits above the reply so
+            it is read before the notes, not after acting on them. */}
+        {message.notice && (
+          <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed text-amber-200/90">
+            <Info className="mt-px h-3.5 w-3.5 flex-shrink-0" />
+            <span>{message.notice}</span>
+          </div>
+        )}
         <div className="relative">
           <div className="rounded-2xl rounded-tl-sm bg-surface-card px-4 py-3 border border-surface-border">
             {message.isStreaming && !message.content ? (
@@ -755,6 +764,10 @@ export default function ReviewPane() {
         if (event.type === "chunk") {
           setMessages((prev) =>
             prev.map((m) => m.id === assistantId ? { ...m, content: m.content + event.content } : m)
+          );
+        } else if (event.type === "notice") {
+          setMessages((prev) =>
+            prev.map((m) => m.id === assistantId ? { ...m, notice: event.message } : m)
           );
         } else if (event.type === "citations") {
           setMessages((prev) =>

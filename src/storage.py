@@ -129,25 +129,11 @@ def slugify(name: str) -> str:
 
 class SeriesStore:
     def __init__(self, cfg):
-        import chromadb  # heavy import, keep at call time
-
         cfg.ensure_data_dirs()
-        self._chroma = chromadb.PersistentClient(path=str(cfg.chroma_dir))
+        self._chroma_dir = str(cfg.chroma_dir)
         self._collection_name = slugify(cfg.series_name)
-        self.collection = self._chroma.get_or_create_collection(
-            name=self._collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+        self._open_chroma()
         self._notes_collection = None  # companion notes index; created lazily
-        # Exhaustive-depth vector search: at this corpus scale (~1.4k chunks)
-        # an ef_search beyond the collection size makes HNSW queries exact AND
-        # deterministic across processes (chroma 1.x's approximate path flips
-        # near-tie ranks per process, which breaks eval gating) at sub-ms cost.
-        # Idempotent: modify() only runs when the stored value is lower.
-        # Revisit if the corpus outgrows ~10k chunks.
-        hnsw_cfg = (self.collection.configuration_json or {}).get("hnsw") or {}
-        if hnsw_cfg.get("ef_search", 0) < 2000:
-            self.collection.modify(configuration={"hnsw": {"ef_search": 2000}})
         # One SQLite connection per thread: the web server calls this from a
         # threadpool, and sharing a single connection across threads
         # interleaves cursors. SQLite coordinates between connections.
@@ -158,6 +144,47 @@ class SeriesStore:
         migrate_schema(self.db)
         self._backfill_fts()
         self.db.commit()
+
+    def _open_chroma(self) -> None:
+        """(Re)open the Chroma client and collection from disk."""
+        import chromadb  # heavy import, keep at call time
+
+        self._chroma = chromadb.PersistentClient(path=self._chroma_dir)
+        self.collection = self._chroma.get_or_create_collection(
+            name=self._collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
+        # Exhaustive-depth vector search: at this corpus scale (~1.4k chunks)
+        # an ef_search beyond the collection size makes HNSW queries exact AND
+        # deterministic across processes (chroma 1.x's approximate path flips
+        # near-tie ranks per process, which breaks eval gating) at sub-ms cost.
+        # Idempotent: modify() only runs when the stored value is lower.
+        # Revisit if the corpus outgrows ~10k chunks.
+        hnsw_cfg = (self.collection.configuration_json or {}).get("hnsw") or {}
+        if hnsw_cfg.get("ef_search", 0) < 2000:
+            self.collection.modify(configuration={"hnsw": {"ef_search": 2000}})
+
+    def _requery_after_reopen(self, exc: Exception, what: str):
+        """Decide whether `exc` is the stale-handle error and, if so, reopen.
+
+        A re-ingest subprocess rewrites the on-disk segments underneath this
+        process's cached client, which then serves an inconsistent in-memory
+        view and fails with `Internal error: Error finding id`. AppState
+        rebuilds the store when it hears about a re-ingest, but it only hears
+        about the ones this server started — an ingest run from the CLI, or a
+        reload that lands mid-query, leaves the handle stale with nobody to
+        fix it. Reopening from disk here is cheap and idempotent, and turns a
+        dead query into a slow one.
+
+        Returns True when the caller should retry; re-raises anything else.
+        """
+        if "Error finding id" not in str(exc):
+            raise exc
+        log.warning("%s hit a stale Chroma handle (%s) — reopening the "
+                    "collection and retrying once", what, exc)
+        self._open_chroma()
+        self._notes_collection = None
+        return True
 
     def _backfill_fts(self) -> None:
         """One-time idempotent index build for stores created before chunks_fts
@@ -278,12 +305,19 @@ class SeriesStore:
 
     def semantic_search(self, query_embedding: list[float], top_k: int,
                         where: dict | None = None) -> list[dict]:
-        result = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=top_k,
-            where=where,
-            include=["documents", "metadatas", "distances"],
-        )
+        def _query():
+            return self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=top_k,
+                where=where,
+                include=["documents", "metadatas", "distances"],
+            )
+
+        try:
+            result = _query()
+        except Exception as e:
+            self._requery_after_reopen(e, "semantic_search")
+            result = _query()
         hits = []
         for cid, doc, meta, dist in zip(result["ids"][0], result["documents"][0],
                                         result["metadatas"][0], result["distances"][0]):
