@@ -36,6 +36,17 @@ function uuid(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
+// A stream that dies mid-flight used to leave an empty bubble and no
+// explanation anywhere the writer could see it — the reason only reached the
+// server log. Fold it into the reply instead, so it survives into the saved
+// session and the writer knows whether to retry or wait.
+function withFailureNote(content: string, message: string): string {
+  const note = content.trim()
+    ? `_The review stopped early — ${message}. The feedback above is only partial._`
+    : `_The review failed before any feedback arrived — ${message}. Nothing was saved; try again._`;
+  return content.trim() ? `${content}\n\n---\n\n${note}` : note;
+}
+
 // ── Dropdown ──────────────────────────────────────────────────────────────────
 
 function Dropdown<T extends string | number>({
@@ -341,7 +352,7 @@ function ReviewBubble({
 // ── Main pane ─────────────────────────────────────────────────────────────────
 
 export default function ReviewPane() {
-  const { books, appSettings, reviewSessions, viewingReviewSessionId, upsertReview, setViewingReviewSessionId, clearReviewSignal, refreshBell, setBooks } = useAppStore();
+  const { books, appSettings, reviewSessions, viewingReviewSessionId, upsertReview, setViewingReviewSessionId, clearReviewSignal, refreshBell, setBooks, showToast } = useAppStore();
 
   // Persisted filters
   const [filterBook, setFilterBook] = useState<string>(
@@ -749,24 +760,38 @@ export default function ReviewPane() {
           setMessages((prev) =>
             prev.map((m) => m.id === assistantId ? { ...m, citations: event.sources } : m)
           );
-        } else if (event.type === "done" || event.type === "error") {
+        } else if (event.type === "done") {
           setMessages((prev) =>
             prev.map((m) => m.id === assistantId ? { ...m, isStreaming: false } : m)
           );
           setIsStreaming(false);
+        } else if (event.type === "error") {
+          // `error` always precedes `done`. Toast it as well as writing it into
+          // the bubble — a full review runs for minutes and the writer is
+          // usually in another tab by the time it fails.
+          showToast(`Review failed: ${event.message}`);
+          setMessages((prev) =>
+            prev.map((m) => m.id === assistantId
+              ? { ...m, content: withFailureNote(m.content, event.message), isStreaming: false }
+              : m
+            )
+          );
+          setIsStreaming(false);
         }
       }
-    } catch {
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "unknown error";
+      showToast(`Review failed: ${msg}`);
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantId
-            ? { ...m, content: "Something went wrong. Please try again.", isStreaming: false }
+            ? { ...m, content: withFailureNote(m.content, msg), isStreaming: false }
             : m
         )
       );
       setIsStreaming(false);
     }
-  }, [chapterText, filterBook, filterFocus, includeIdeal, isStreaming, messages, model, resyncing, selectedChapter, upsertReview]);
+  }, [chapterText, filterBook, filterFocus, includeIdeal, isStreaming, messages, model, resyncing, selectedChapter, upsertReview, showToast]);
 
   const handleReviewClick = () => {
     sendMessage(`Please give me a ${filterFocus} review of this chapter.`);
