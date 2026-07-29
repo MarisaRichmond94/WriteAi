@@ -50,6 +50,14 @@ def _get_int(key: str, default: int) -> int:
         return default
 
 
+def _get_float(key: str, default: float) -> float:
+    try:
+        return float(os.environ.get(key, default))
+    except ValueError:
+        logging.warning("%s is not a number; using default %s", key, default)
+        return default
+
+
 @dataclass
 class Config:
     books_dir: Path
@@ -85,6 +93,9 @@ class Config:
     # inference ("who is X to Y") needs more reasoning than the rest of
     # enrichment; empty string falls back to extraction_model.
     enrich_rel_model: str = ""
+    # Seconds to wait on a silent socket before giving up on a model request.
+    # For a stream this is the gap between chunks, not the whole generation.
+    api_read_timeout_s: float = 120.0
 
     # Derived data locations (all under data_dir; created on demand)
     staging_dir: Path = field(init=False)
@@ -176,6 +187,7 @@ def load_config(env_file: Path | None = None) -> Config:
         enable_location_v2=_get_bool("ENABLE_LOCATION_V2", False),
         enable_canon_v2=_get_bool("ENABLE_CANON_V2", False),
         enrich_rel_model=os.environ.get("ENRICH_REL_MODEL", "").strip(),
+        api_read_timeout_s=_get_float("API_READ_TIMEOUT_S", 120.0),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)
 

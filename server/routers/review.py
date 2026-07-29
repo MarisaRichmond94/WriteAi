@@ -6,12 +6,11 @@ import difflib
 import logging
 import re
 import sqlite3
-import time
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from src.costlog import log_cost, usage_diff
+from src.costlog import cost_scope
 from src.query_router import QueryPlan, Scope
 
 from .. import writer_store
@@ -536,20 +535,21 @@ def review_stream(req: ReviewRequest):
         # the Ideal Version section rewrites the whole chapter with markup —
         # far past the default 12K output budget
         ideal = IDEAL_VERSION_INSTRUCTION if req.include_ideal else NO_IDEAL_INSTRUCTION
-        u0, c0, t0 = dict(answerer.usage), answerer.actual_cost_usd, time.monotonic()
-        for delta in answerer.answer_stream(review_plan, excerpts, notes,
-                                            history=history,
-                                            system_extra="\n\n".join(extra_parts),
-                                            system_base=f"{REVIEW_SYSTEM}\n\n{ideal}",
-                                            notes_header=STORY_NOTES_HEADER,
-                                            max_tokens=32000 if req.include_ideal else 12000):
-            yield {"type": "chunk", "content": delta}
-        log_cost(s.cfg, surface="review", model=answerer.model, qtype="general",
-                 usage=usage_diff(answerer.usage, u0),
-                 cost_usd=round(answerer.actual_cost_usd - c0, 4),
-                 latency_ms=int((time.monotonic() - t0) * 1000),
-                 extra={"focus": req.focus, "include_ideal": req.include_ideal,
-                        "draft_rereview": bool(req.previous_text)})
+        # the scope ledgers the request from a `finally`, so a review that dies
+        # mid-stream still shows up in the spend dashboard (marked failed)
+        # instead of vanishing from it
+        with cost_scope(s.cfg, surface="review", answerer=answerer,
+                        qtype="general",
+                        extra={"focus": req.focus,
+                               "include_ideal": req.include_ideal,
+                               "draft_rereview": bool(req.previous_text)}):
+            for delta in answerer.answer_stream(review_plan, excerpts, notes,
+                                                history=history,
+                                                system_extra="\n\n".join(extra_parts),
+                                                system_base=f"{REVIEW_SYSTEM}\n\n{ideal}",
+                                                notes_header=STORY_NOTES_HEADER,
+                                                max_tokens=32000 if req.include_ideal else 12000):
+                yield {"type": "chunk", "content": delta}
         yield citations_payload(excerpts)
         yield {"type": "usage", "model": answerer.model,
                "cost_usd": answerer.actual_cost_usd}
