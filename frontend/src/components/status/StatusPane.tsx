@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Library, RefreshCw, Info, ChevronRight, FileDown, AlertTriangle } from "lucide-react";
+import { RefreshCw, ChevronRight, FileDown, AlertTriangle } from "lucide-react";
 import { clsx } from "clsx";
 import type { BookResponse, BookSummary } from "../../types";
 import { useAppStore } from "../../store/useAppStore";
@@ -154,11 +154,14 @@ function BookCard({ book, active, condensed, lastSynced, onClick, onRebuild }: {
 // Loom-drift banner: shown when a manifest lists chapters the index hasn't
 // ingested. Missing manifests (pre-manifest exports) stay silent — unknown
 // is not the same as stale.
+// No top margin: this used to sit below the pane's title block and needed its
+// own gap. <main> now supplies the top padding for every pane (KAN-7), so a
+// margin here would double-space it.
 function DriftBanner({ status, onResync }: { status: SyncStatus; onResync: (title: string) => void }) {
   const behind = status.books.filter((b) => b.behind);
   if (!behind.length) return null;
   return (
-    <div className="mx-6 mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
+    <div className="mx-6 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3">
       <div className="flex items-center gap-2">
         <AlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-500" />
         <p className="text-xs font-semibold text-ink-primary">
@@ -251,30 +254,6 @@ export default function StatusPane() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Header — full width, static; no bottom padding so the drawer's
-          left border meets the divider line */}
-      <div className="flex-shrink-0 px-6 pt-4">
-        <div className="flex items-center gap-2">
-          <Library className="h-6 w-6 flex-shrink-0 text-accent" />
-          <div>
-            <div className="flex items-center gap-1">
-              <p className="text-xs font-semibold uppercase tracking-widest text-ink-primary">
-                Books
-              </p>
-              <div className="group relative">
-                <Info className="h-3.5 w-3.5 text-ink-muted hover:text-ink-secondary transition-colors cursor-default" />
-                <div className="pointer-events-none absolute left-0 top-5 z-50 w-72 rounded-md border border-surface-border bg-surface-card px-3 py-2 text-[11px] leading-relaxed text-ink-muted shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                  The data shown here is representative of the data that has been extracted by AI when going over your book chapter to chapter to glean the valuable context needed to build an understanding of characters, events, facts, and significant locations
-                </div>
-              </div>
-            </div>
-            <p className="mt-0.5 text-[11px] text-ink-muted">
-              Click on a book to view expanded details showing the insights that has been extracted
-            </p>
-          </div>
-        </div>
-        <div className="mt-3 border-t border-surface-border" />
-      </div>
 
       {syncStatus && <DriftBanner status={syncStatus} onResync={handleDriftResync} />}
 

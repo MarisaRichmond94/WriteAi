@@ -975,29 +975,6 @@ export default function ReviewPane() {
         />
       )}
 
-      {/* Title block */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-3">
-        <div className="flex items-center gap-2">
-          <ScanText className="h-6 w-6 flex-shrink-0 text-accent" />
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold uppercase tracking-widest text-ink-primary">Review</p>
-              <div className="group relative">
-                <Info className="h-3.5 w-3.5 cursor-default text-ink-muted transition-colors hover:text-ink-secondary" />
-                <div className="pointer-events-none absolute left-0 top-5 z-50 w-72 rounded-md border border-surface-border bg-surface-card px-3 py-2 text-[11px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                  Get AI feedback on a chapter you're writing. Select the book for context, choose a Focus
-                  to set the analytical lens, then pick a synced chapter or paste new text to review.
-                  The AI draws on extracted knowledge from all prior books in the series.
-                </div>
-              </div>
-            </div>
-            <p className="mt-0.5 text-[11px] text-ink-muted">
-              AI feedback on your writing, grounded in your series canon
-            </p>
-          </div>
-        </div>
-        <div className="mt-3 border-t border-surface-border" />
-      </div>
 
       {/* Main content: left column + right panel */}
       <div className="flex flex-1 min-h-0 overflow-hidden">

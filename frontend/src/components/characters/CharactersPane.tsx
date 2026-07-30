@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Users, Camera, ChevronRight, RefreshCw, Info, Search, Link, Sparkles, X, Pencil, Eye, EyeOff } from "lucide-react";
+import { Users, Camera, ChevronRight, RefreshCw, Search, Link, Sparkles, X, Pencil, Eye, EyeOff } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import type { CharacterSummary, CharacterDetail, CharacterBookDetail, CharacterRelationship, KnowledgeItem, ArcEntry, AliasWithProvenance, Citation } from "../../types";
@@ -1144,27 +1144,6 @@ export default function CharactersPane() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-3">
-        <div className="flex items-center gap-2">
-          <Users className="h-6 w-6 flex-shrink-0 text-accent" />
-          <div>
-            <div className="flex items-center gap-1">
-              <p className="text-xs font-semibold uppercase tracking-widest text-ink-primary">Characters</p>
-              <div className="group relative">
-                <Info className="h-3.5 w-3.5 text-ink-muted hover:text-ink-secondary transition-colors cursor-default" />
-                <div className="pointer-events-none absolute left-0 top-5 z-50 w-72 rounded-md border border-surface-border bg-surface-card px-3 py-2 text-[11px] leading-relaxed text-ink-muted shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                  Character profiles are built by AI as it reads each chapter — extracting names, relationships, knowledge, and conflicts for every POV character across the series. Insights update when you re-extract.
-                </div>
-              </div>
-            </div>
-            <p className="mt-0.5 text-[11px] text-ink-muted">
-              Click a character to view their profile. Select a book for book-level insights.
-            </p>
-          </div>
-        </div>
-        <div className="mt-3 border-t border-surface-border" />
-      </div>
 
       {/* Book filter tabs */}
       <div className="flex-shrink-0 flex items-center gap-2 px-6 pt-1 pb-3">

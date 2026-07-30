@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { ArrowLeft, BookOpen, Calendar, ChevronDown, ChevronLeft, ChevronRight, Clock, Info, MapPin, Search, Users, X, Zap } from "lucide-react";
+import { ArrowLeft, BookOpen, Calendar, ChevronDown, ChevronLeft, ChevronRight, MapPin, Search, Users, X, Zap } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import type { Citation, TimelineEvent, EventSourceQuote } from "../../types";
@@ -1007,32 +1007,6 @@ export default function TimelinePane() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-3">
-        <div className="flex items-center gap-2">
-          <Clock className="h-6 w-6 flex-shrink-0 text-accent" />
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold uppercase tracking-widest text-ink-primary">
-                Events
-              </p>
-              <div className="group relative">
-                <Info className="h-3.5 w-3.5 cursor-default text-ink-muted transition-colors hover:text-ink-secondary" />
-                <div className="pointer-events-none absolute left-0 top-5 z-50 w-72 rounded-md border border-surface-border bg-surface-card px-3 py-2 text-[11px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                  The Events page visualises significant events extracted from your books. Use the List view
-                  for a scannable overview, or the Chart view for a visual timeline you can pan and zoom.
-                  Click any event to see full details including character knowledge impact, cross-book connections,
-                  and direct source passages from the text.
-                </div>
-              </div>
-            </div>
-            <p className="mt-0.5 text-[11px] text-ink-muted">
-              Significant events extracted from the series. Select an event to view expanded details.
-            </p>
-          </div>
-        </div>
-        <div className="mt-3 border-t border-surface-border" />
-      </div>
 
       {/* Controls row */}
       <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 pt-0 pb-4">

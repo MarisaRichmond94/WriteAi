@@ -1,4 +1,4 @@
-import { Compass, Clock, Library, MapPin, Users, Info, Kanban, PenLine, ScanText, FlaskConical, DollarSign } from "lucide-react";
+import { Compass, Clock, Library, MapPin, Users, Kanban, PenLine, ScanText, FlaskConical, DollarSign } from "lucide-react";
 import { FaTimeline } from "react-icons/fa6";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
@@ -40,26 +40,16 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
         collapsed ? "w-0 border-r-0" : "w-64 border-r border-surface-border"
       )}
     >
-      {/* Header */}
-      <div className="flex items-center gap-2 border-b border-surface-border px-4 py-4">
-        <img src="/logo.svg" alt="" className="h-10 w-10 flex-shrink-0" />
-        <div className="flex flex-col">
-          <span className="text-sm font-semibold tracking-wide text-ink-primary">
-            {siteName}
-          </span>
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-ink-muted">
-              An AI-Powered Writing Hub
-            </span>
-            <div className="group relative">
-              <Info className="h-2.5 w-2.5 text-ink-muted hover:text-ink-secondary transition-colors cursor-default" />
-              <div className="pointer-events-none absolute left-0 top-4 z-50 w-64 rounded-md border border-surface-border bg-surface-card px-3 py-2 text-[11px] leading-relaxed text-ink-muted shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                This app uses Retrieval-Augmented Generation (RAG) — when you ask a question, it searches a pre-built index of your books to find the most relevant passages, then feeds those directly to an AI to generate a grounded, accurate answer. Rather than relying on the AI's general knowledge, every response is anchored to your actual text.
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* Identity block deleted (KAN-7): the logo, site name, tagline and the
+          ⓘ RAG explainer all lived here. Brand moved to the header, matching
+          Loom, and the sidebar is now navigation only — as Loom's already is.
+
+          The tagline and explainer were removed rather than rehomed. Under the
+          new model the text in that header slot becomes a project name rather
+          than a site name, so a product tagline beneath it would read as
+          nonsense. Writer's call.
+
+          siteName is still used below, for the Loom jump URL. */}
 
       {/* Nav */}
       <nav className="flex flex-col py-2">

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
-import { CalendarClock, Info, MapPin, Plus, Search, X } from "lucide-react";
+import { CalendarClock, MapPin, Plus, Search, X } from "lucide-react";
 import { FaTimeline } from "react-icons/fa6";
 import type { BookResponse, WriterCharacter } from "../../types";
 import { formatTime12h } from "../../lib/format";
@@ -469,33 +469,6 @@ export default function WriterTimelinePane() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-3">
-        <div className="flex items-center gap-2">
-          <FaTimeline className="h-6 w-6 flex-shrink-0 text-accent" />
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold uppercase tracking-widest text-ink-primary">
-                Timeline
-              </p>
-              <div className="group relative">
-                <Info className="h-3.5 w-3.5 cursor-default text-ink-muted transition-colors hover:text-ink-secondary" />
-                <div className="pointer-events-none absolute left-0 top-5 z-50 w-72 rounded-md border border-surface-border bg-surface-card px-3 py-2 text-[11px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                  Your own timeline — events you author as part of the writing
-                  process, separate from the AI-extracted Events page. Use the
-                  List view for a scannable overview, or the Chart view for a
-                  visual timeline you can pan.
-                </div>
-              </div>
-            </div>
-            <p className="mt-0.5 text-[11px] text-ink-muted">
-              Events you author as you plan and write. Add or select an event to
-              edit its details.
-            </p>
-          </div>
-        </div>
-        <div className="mt-3 border-t border-surface-border" />
-      </div>
 
       {/* Controls row */}
       <div className="flex-shrink-0 flex items-center justify-between gap-3 px-6 pt-0 pb-4">

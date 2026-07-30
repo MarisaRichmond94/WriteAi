@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { Info, Compass } from "lucide-react";
+
 import FilterBar from "./FilterBar";
 import MessageList from "./MessageList";
 import ChatInput from "./ChatInput";
@@ -79,27 +79,6 @@ export default function ChatPane() {
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
 
-      {/* Title block */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-3">
-        <div className="flex items-center gap-2">
-          <Compass className="h-6 w-6 flex-shrink-0 text-accent" />
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-xs font-semibold uppercase tracking-widest text-ink-primary">Explore</p>
-              <div className="group relative">
-                <Info className="h-3.5 w-3.5 cursor-default text-ink-muted transition-colors hover:text-ink-secondary" />
-                <div className="pointer-events-none absolute left-0 top-5 z-50 w-72 rounded-md border border-surface-border bg-surface-card px-3 py-2 text-[11px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                  Ask AI questions about your book series. Filter by POV, book, or query mode to focus the response.
-                </div>
-              </div>
-            </div>
-            <p className="mt-0.5 text-[11px] text-ink-muted">
-              Ask AI anything about your series, grounded in extracted knowledge
-            </p>
-          </div>
-        </div>
-        <div className="mt-3 border-t border-surface-border" />
-      </div>
 
       <FilterBar />
 

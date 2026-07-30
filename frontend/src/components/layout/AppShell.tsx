@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
-import { ChevronLeft, ChevronRight, Moon, Sun } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { fetchBooks, fetchIndexStatus } from "../../api/books";
 import { fetchSessions } from "../../api/sessions";
 import { fetchSettings } from "../../api/settings";
@@ -17,55 +17,12 @@ import CharactersPane from "../characters/CharactersPane";
 import PlanPane from "../plan/PlanPane";
 import SettingsPane from "../settings/SettingsPane";
 import ReviewPane from "../review/ReviewPane";
-import NotificationBell from "../notifications/NotificationBell";
+import AppHeader from "./AppHeader";
 import Toast from "../ui/Toast";
 
-function timeOfDay(): string {
-  const h = new Date().getHours();
-  if (h >= 5 && h < 12) return "Morning";
-  if (h >= 12 && h < 18) return "Afternoon";
-  return "Evening";
-}
-
-function WriterAvatar() {
-  const { appSettings, setActivePane } = useAppStore();
-
-  // settings not loaded yet: skeleton circle, no "W" initials flash
-  if (appSettings === null) {
-    return <span className="h-8 w-8 flex-shrink-0 animate-pulse rounded-full bg-surface-hover ring-1 ring-surface-border" />;
-  }
-
-  const name = appSettings.writer_name || "Writer";
-  const photoUrl = appSettings.writer_photo_url ?? null;
-
-  const initials = name.trim()
-    ? name.trim().split(" ").map((w: string) => w[0]).slice(0, 2).join("").toUpperCase()
-    : "W";
-
-  return (
-    <button
-      onClick={() => setActivePane("settings")}
-      // The avatar is the only way into settings (the redundant gear that sat
-      // beside it is gone), so the tooltip names the destination rather than
-      // the writer — matching Loom's AvatarButton. The name is already on
-      // screen in the greeting immediately to the left.
-      title="Settings"
-      aria-label="Settings"
-      className="h-8 w-8 flex-shrink-0 rounded-full overflow-hidden ring-1 ring-surface-border hover:ring-accent transition-all"
-    >
-      {photoUrl ? (
-        <img src={photoUrl} alt={name} className="h-full w-full object-cover" />
-      ) : (
-        <div className="flex h-full w-full items-center justify-center bg-accent/20 text-[10px] font-semibold text-accent">
-          {initials}
-        </div>
-      )}
-    </button>
-  );
-}
 
 export default function AppShell() {
-  const { setBooks, setBooksLoading, setIndexStatus, showToast, activePane, setActivePane, setAppSettings, appSettings, setChatSessions, setReviewSessions } = useAppStore();
+  const { setBooks, setBooksLoading, setIndexStatus, showToast, activePane, setActivePane, setAppSettings, setChatSessions, setReviewSessions } = useAppStore();
   // light mode applies to the page body only; sidebar stays dark (Loom's pattern)
   const [lightMode, setLightMode] = useState(
     () => localStorage.getItem("writeai-light-mode") === "true"
@@ -174,6 +131,12 @@ export default function AppShell() {
           You are viewing this app in mock mode
         </div>
       )}
+      {/* Full-width header above the sidebar row, matching Loom (KAN-7). The
+          cluster this replaces lived inside <main>, so it began to the right of
+          the sidebar; spanning the full width is what makes the two apps read as
+          one product. Sits below the mock-mode banner, which stays topmost. */}
+      <AppHeader lightMode={lightMode} onToggleLightMode={toggleLightMode} />
+
       <div className="flex flex-1 overflow-hidden bg-surface">
       {/* Wrapper stays w-3 when collapsed so the hover strip (and handle) stay reachable at the edge */}
       <div
@@ -206,38 +169,20 @@ export default function AppShell() {
           </button>
         </div>
       </div>
-      <main className={clsx("relative flex flex-1 flex-col overflow-hidden", lightMode && "light-body")}>
-        <div className="absolute right-6 top-5 z-50 flex items-center gap-2">
-          {appSettings === null ? (
-            <span className="h-3.5 w-40 animate-pulse rounded bg-surface-hover" />
-          ) : (
-            <span className="text-xs text-ink-primary">
-              Good {timeOfDay()}, {appSettings.writer_name || "Writer"}
-            </span>
-          )}
-          <button
-            role="switch"
-            aria-checked={lightMode}
-            onClick={toggleLightMode}
-            title={lightMode ? "Switch to dark mode" : "Switch to light mode"}
-            className="mx-1 flex items-center gap-1.5 text-ink-muted hover:text-ink-primary transition-colors"
-          >
-            <Moon className="h-3 w-3" />
-            <span className={clsx(
-              "relative inline-flex w-9 h-5 rounded-full transition-colors duration-200",
-              lightMode ? "bg-accent" : "bg-surface-hover"
-            )}>
-              <span className={clsx(
-                "absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all duration-200",
-                lightMode ? "left-4" : "left-0.5"
-              )} />
-            </span>
-            <Sun className="h-3 w-3" />
-          </button>
-          <NotificationBell />
-          <WriterAvatar />
-        </div>
+      {/* pt-4 restores the breathing room the per-pane title blocks used to
+          provide (KAN-7) — without it pane content sits flush against the
+          header's bottom border. Applied here once rather than in each of the
+          nine panes, so it cannot drift between them.
 
+          Spend is excluded: its charts are laid out to sit flush, and the
+          writer wants that one left alone. */}
+      <main
+        className={clsx(
+          "relative flex flex-1 flex-col overflow-hidden",
+          activePane !== "spend" && "pt-4",
+          lightMode && "light-body"
+        )}
+      >
         {activePane === "explore" && <ChatPane />}
         {activePane === "timeline" && <TimelinePane />}
         {activePane === "writer-timeline" && <WriterTimelinePane />}

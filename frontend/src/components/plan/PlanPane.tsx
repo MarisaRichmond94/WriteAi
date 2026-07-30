@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Info, Kanban, RefreshCw, Loader2, Plus, Download, MessageSquare, TriangleAlert } from "lucide-react";
+import { RefreshCw, Loader2, Plus, Download, MessageSquare, TriangleAlert } from "lucide-react";
 import { clsx } from "clsx";
 import { useAppStore } from "../../store/useAppStore";
 import { usePlanStore } from "../../store/usePlanStore";
@@ -123,33 +123,6 @@ export default function PlanPane() {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex-shrink-0 px-6 pt-4 pb-3">
-        <div className="flex items-center gap-2">
-          <Kanban className="h-6 w-6 flex-shrink-0 text-accent" />
-          <div>
-            <div className="flex items-center gap-1">
-              <p className="text-xs font-semibold uppercase tracking-widest text-ink-primary">
-                Plan
-              </p>
-              <div className="group relative">
-                <Info className="h-3.5 w-3.5 cursor-default text-ink-muted transition-colors hover:text-ink-secondary" />
-                <div className="pointer-events-none absolute left-0 top-5 z-50 w-80 rounded-md border border-surface-border bg-surface-card px-3 py-2 text-[11px] leading-relaxed text-ink-muted shadow-lg opacity-0 transition-opacity duration-150 group-hover:opacity-100">
-                  Your living planning workspace. The Outline view shows your chapter cards and syncs
-                  with your extracted chapter data — letting the AI fill in what actually happened once
-                  you write it. The Characters view is where you record your authorial intent for each
-                  character, and compare it against what the AI picked up from reading your books.
-                  AI feedback is available on both outlines and individual characters.
-                </div>
-              </div>
-            </div>
-            <p className="mt-0.5 text-[11px] text-ink-muted">
-              Outline your story and design your characters — AI keeps it in sync with what you actually wrote.
-            </p>
-          </div>
-        </div>
-        <div className="mt-3 border-t border-surface-border" />
-      </div>
 
       {/* Row 1 — view toggle */}
       <div className="flex-shrink-0 flex items-center gap-4 px-6 pb-2">
