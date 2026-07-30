@@ -143,15 +143,75 @@ When the navigation model is settled there is nothing left to compare. Delete:
 - the `⌥⇧U` branch in `AppShell.tsx` (WriteAI)
 - `NEXT_PUBLIC_UNIFIED_CHROME` from any `.env`
 
+## Always-dark chrome
+
+Some chrome must stay dark **inside** light mode: the chapter editor's sticky
+footer and its skeleton, which mirror the reader's bars. The reader gets this
+free by living outside the `light-body` wrapper; those two do not.
+
+`.light-body` redefines `--color-*`, so `var(--color-ink)` inside it resolves
+*light*. `--dark-*` is a parallel reference light mode never touches, and
+`.chrome-dark` maps the theme tokens back onto it:
+
+```css
+.chrome-dark {
+  --color-surface-raised: var(--dark-surface-raised);
+  /* …ink, ink-muted, ink-faint, surface-muted */
+}
+```
+
+Descendants then use ordinary `bg-surface-raised` / `text-ink` utilities. Use
+this class instead of inlining dark hexes — that is what previously pinned that
+chrome to the old palette regardless of the flag.
+
+**`--dark-*` must be kept in step with `--color-*` in both token blocks.** They
+are declared adjacently for exactly that reason. KAN-8 removes half of this when
+it collapses the flag.
+
 ## Rule: no hardcoded colour literals
 
-Every colour must resolve through a token, so the palette stays a
-few-values edit. Two literals were found and fixed during KAN-6, both in Loom's
-`globals.css`:
+Every colour must resolve through a token, so the palette stays a few-values
+edit.
 
-- `body` hardcoded `background-color: #0d0d18; color: #e0d9c8`, which would have
-  left the page background on the old palette no matter what the flag said
-- the `.footnote-ref::after` tooltip hardcoded its background, ink, and an
-  `rgba(136,136,255,0.2)` border
+**Check three places, not one.** KAN-6 grepped `globals.css` only and declared
+the rule satisfied; KAN-17 then found colours the flag could not reach in two
+places that grep never looked at:
 
-Grep for `#[0-9a-fA-F]{3,6}` outside the token blocks before calling this done.
+1. **Stylesheets** — `globals.css`, `index.css`.
+2. **Inline styles in components** — `style={{ … }}` and inline CSS-variable
+   overrides. This is where the chapter footer and skeleton hid.
+3. **Generated HTML strings** — markup built for a *different* document, which
+   CSS variables cannot reach at all. `useWriteAiReview` opens a popup splash
+   via `document.write`; it now resolves the token with `getComputedStyle` and
+   interpolates the value.
+
+Fixed across KAN-6 and KAN-17:
+
+- `body` hardcoded `background-color: #0d0d18; color: #e0d9c8` — the page
+  background could never have followed the palette
+- the `.footnote-ref::after` tooltip hardcoded background, ink, and border
+- `.character-ref` and `.narration-word.is-active` referenced
+  `--color-accent-rgb`, **which is defined nowhere** — the literal fallback was
+  always what rendered. A dead var reference reads as tokenised while behaving
+  like a hardcode.
+- the chapter footer and `ChapterSkeleton` inlined dark hexes (now `.chrome-dark`)
+- `ReaderView`'s character card hardcoded its dark palette
+- the `useWriteAiReview` splash background
+
+Acceptance grep — should return hits only inside token definitions:
+
+```sh
+grep -rn "#0d0d18\|#12121e\|#1a1a2e\|#1e1e3a\|#e0d9c8" src/
+```
+
+### Accepted remainders
+
+- **`ReaderView`'s character card keeps its *light*-mode literals**
+  (`#ffffff`, `#d4d0c8`, `#ede9e0`, `#1a1a2a`). The card renders outside the
+  `light-body` wrapper, so it cannot inherit the page theme and must branch on
+  `lightMode` by hand. Its light palette is bespoke and not covered by the token
+  set. Light mode is unchanged by the flag, so these are inert — but they are a
+  genuine remaining inconsistency, not an oversight.
+- **`useWriteAiReview`'s `#9ca3af`** body text and its `#111` emergency
+  fallback. Neither is a palette value; the fallback is deliberately neutral so
+  it cannot go stale the way a copied token would.
