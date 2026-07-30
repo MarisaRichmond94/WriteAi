@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { clsx } from "clsx";
-import { ChevronLeft, ChevronRight, Moon, Settings as SettingsIcon, Sun } from "lucide-react";
+import { ChevronLeft, ChevronRight, Moon, Sun } from "lucide-react";
 import { fetchBooks, fetchIndexStatus } from "../../api/books";
 import { fetchSessions } from "../../api/sessions";
 import { fetchSettings } from "../../api/settings";
@@ -45,7 +45,12 @@ function WriterAvatar() {
   return (
     <button
       onClick={() => setActivePane("settings")}
-      title={name}
+      // The avatar is the only way into settings (the redundant gear that sat
+      // beside it is gone), so the tooltip names the destination rather than
+      // the writer — matching Loom's AvatarButton. The name is already on
+      // screen in the greeting immediately to the left.
+      title="Settings"
+      aria-label="Settings"
       className="h-8 w-8 flex-shrink-0 rounded-full overflow-hidden ring-1 ring-surface-border hover:ring-accent transition-all"
     >
       {photoUrl ? (
@@ -215,13 +220,6 @@ export default function AppShell() {
             <Sun className="h-3 w-3" />
           </button>
           <NotificationBell />
-          <button
-            onClick={() => setActivePane("settings")}
-            title="Settings"
-            className="rounded-md p-1 text-ink-muted hover:text-ink-primary transition-colors"
-          >
-            <SettingsIcon className="h-4 w-4" strokeWidth={1.5} />
-          </button>
           <WriterAvatar />
         </div>
 
