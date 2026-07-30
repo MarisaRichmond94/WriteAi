@@ -57,26 +57,11 @@ export default function AppShell() {
   }
 
   // ⌥⇧1 toggles the sidebar — matches Loom's shortcut for the same action.
-  // ⌥⇧U flips UNIFIED_CHROME (KAN-6), also matching Loom, so the shared palette
-  // can be judged across both apps in lockstep. TEMPORARY — delete the ⌥⇧U
-  // branch when KAN-8 closes.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.altKey && e.shiftKey && e.code === "Digit1") {
         e.preventDefault();
         toggleSidebar();
-      }
-      if (e.altKey && e.shiftKey && e.code === "KeyU") {
-        e.preventDefault();
-        const root = document.documentElement;
-        const next = root.getAttribute("data-chrome") !== "v2";
-        if (next) root.setAttribute("data-chrome", "v2");
-        else root.removeAttribute("data-chrome");
-        try {
-          localStorage.setItem("writeai-unified-chrome", String(next));
-        } catch {
-          // storage disabled — the attribute applied, it just won't persist
-        }
       }
     }
     window.addEventListener("keydown", onKeyDown);

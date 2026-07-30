@@ -110,38 +110,30 @@ New shared code should pick one package. Existing code stays.
 Exception worth knowing: WriteAI's sidebar uses `FaTimeline` from
 `react-icons/fa6`, which has no Lucide equivalent.
 
-## The flag
+## `UNIFIED_CHROME` — retired 2026-07-30 (KAN-8)
 
-| | Loom | WriteAI |
-|---|---|---|
-| Attribute | `data-chrome="v2"` on `<html>` | same |
-| Primary switch | `localStorage['loom-unified-chrome']` | `localStorage['writeai-unified-chrome']` |
-| Build default | `NEXT_PUBLIC_UNIFIED_CHROME` | none — defaults off |
-| Toggle | `⌥⇧U` | `⌥⇧U` |
+**The flag is gone.** The values above are simply the palette now; there is no
+toggle, no `data-chrome` attribute, no boot script, and no old-palette fallback.
+Retired on schedule rather than becoming permanent, which is what happened to the
+eight `ENABLE_*` flags in WriteAI's `.env`.
 
-**`localStorage` is the primary switch, not the env var.** Next.js inlines
-`NEXT_PUBLIC_*` at build time and both apps run production builds under launchd,
-so flipping an env var appears to do nothing until a rebuild.
+Deleted, for anyone tracing an old reference: the `[data-chrome="v2"]` blocks in
+`globals.css` and `index.css`, `src/lib/unifiedChrome.ts`,
+`src/components/ChromeFlagToggle.tsx`, the pre-hydration scripts in `layout.tsx`
+and `index.html`, and the `⌥⇧U` handlers in both apps.
 
-WriteAI's flag is client-side only, on purpose: routing a short-lived UI flag
-through FastAPI's `/api/settings` would add backend plumbing that gets deleted
-at retirement anyway.
+`⌥⇧U` is free again. `⌥⇧1` still toggles the sidebar in both.
 
-Both apps apply the flag via a pre-hydration inline script in `<head>`, so the
-palette is settled before first paint instead of flashing the old one. This is
-the same selector-override technique `.light-body` already uses in both apps —
-not new machinery.
+### What retirement flushed out
 
-### Retirement — owned by KAN-8
+**Hardcoded old-accent values become permanently wrong at exactly this moment.**
+While the flag existed they were merely wrong-when-flagged; once the new accent
+is the only accent, they are simply wrong. Three were found in WriteAI and fixed:
+`.prose-dark code` and `.prose-dark blockquote` in `index.css`, and an
+`accent-[#7c6af7]` arbitrary value in `ReviewPane`.
 
-When the navigation model is settled there is nothing left to compare. Delete:
-
-- `[data-chrome="v2"]` blocks in `globals.css` and `index.css`, promoting their
-  values into `@theme` / `:root`
-- `src/lib/unifiedChrome.ts` and `src/components/ChromeFlagToggle.tsx` (Loom)
-- the inline script in `layout.tsx` (Loom) and `index.html` (WriteAI)
-- the `⌥⇧U` branch in `AppShell.tsx` (WriteAI)
-- `NEXT_PUBLIC_UNIFIED_CHROME` from any `.env`
+Worth repeating the rule below: grep for the *old* literals whenever a palette
+becomes the default, not just when it is introduced.
 
 ## Metrics
 

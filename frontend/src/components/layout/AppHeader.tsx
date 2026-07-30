@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import { Moon, Sun } from "lucide-react";
+import { Moon, PenLine, Sun } from "lucide-react";
 import { useAppStore } from "../../store/useAppStore";
 import NotificationBell from "../notifications/NotificationBell";
 
@@ -89,6 +89,26 @@ export default function AppHeader({ lightMode, onToggleLightMode }: Props) {
       <span className="text-ink-primary font-normal tracking-wider text-xl leading-none flex-shrink-0 truncate max-w-[420px]">
         {siteName}
       </span>
+
+      {/* Jump to Loom — the mirror of Loom's sparkles jump to WriteAI (KAN-8).
+          Same slot, same size, same icon-plus-tooltip treatment, so the round
+          trip works identically in both directions. Previously this existed
+          only as the sidebar's "Write" row, while Loom's was an unlabeled icon
+          on one surface out of four.
+
+          A pen rather than sparkles: the icons name the DESTINATION, not the
+          action. Sparkles means "the AI tool", a pen means "the writing tool",
+          matching the sidebar's own Write icon.
+
+          The sidebar row stays. One destination, two doors — the header slot is
+          the symmetric affordance, the sidebar row the discoverable one. */}
+      <a
+        href={`${import.meta.env.VITE_LOOM_URL ?? "http://localhost:3000"}/author/by-title/${encodeURIComponent(siteName)}`}
+        title="Open Loom"
+        className="self-center flex-shrink-0 ml-1 p-1 rounded text-ink-muted hover:text-accent hover:bg-accent/10 transition-colors"
+      >
+        <PenLine className="h-3.5 w-3.5" />
+      </a>
 
       <div className="ml-auto flex items-center gap-3 flex-shrink-0">
         {appSettings === null ? (

@@ -186,7 +186,7 @@ function ResyncConfirmModal({
               type="checkbox"
               checked={runEnrich}
               onChange={(e) => setRunEnrich(e.target.checked)}
-              className="mt-0.5 accent-[#7c6af7]"
+              className="mt-0.5 accent-accent"
             />
             <span className="text-[11px] text-ink-muted leading-relaxed">
               <span className="font-semibold text-ink-secondary">Run enrichment afterward</span><br />
