@@ -32,7 +32,7 @@ function WriterAvatar() {
 
   // settings not loaded yet: skeleton circle, no "W" initials flash
   if (appSettings === null) {
-    return <span className="h-8 w-8 flex-shrink-0 animate-pulse rounded-full bg-surface-hover ring-1 ring-surface-border" />;
+    return <span className="h-10 w-10 flex-shrink-0 animate-pulse rounded-full bg-surface-hover border-2 border-accent/30" />;
   }
 
   const name = appSettings.writer_name || "Writer";
@@ -51,7 +51,7 @@ function WriterAvatar() {
       // the greeting immediately to the left.
       title="Settings"
       aria-label="Settings"
-      className="h-8 w-8 flex-shrink-0 rounded-full overflow-hidden ring-1 ring-surface-border hover:ring-accent transition-all"
+      className="h-10 w-10 flex-shrink-0 rounded-full overflow-hidden border-2 border-accent/30 hover:border-accent transition"
     >
       {photoUrl ? (
         <img src={photoUrl} alt={name} className="h-full w-full object-cover" />
@@ -66,9 +66,9 @@ function WriterAvatar() {
 
 function timeOfDay(): string {
   const h = new Date().getHours();
-  if (h >= 5 && h < 12) return "Morning";
-  if (h >= 12 && h < 18) return "Afternoon";
-  return "Evening";
+  if (h >= 5 && h < 12) return "morning";
+  if (h >= 12 && h < 18) return "afternoon";
+  return "evening";
 }
 
 type Props = {
@@ -80,7 +80,7 @@ export default function AppHeader({ lightMode, onToggleLightMode }: Props) {
   const { appSettings, siteName } = useAppStore();
 
   return (
-    <nav className="flex-shrink-0 flex items-center gap-3 border-b border-surface-border bg-surface-card px-6 py-3 text-sm">
+    <nav className="font-chrome flex-shrink-0 flex items-center gap-3 border-b border-surface-border bg-surface-card px-6 py-3 text-sm">
       <img src="/logo.svg" alt="" className="block h-9 w-9 flex-shrink-0" />
       {/* Matches Loom's project title exactly: ink at 400, xl, wide tracking —
           NOT accent/bold, which is the treatment Loom's wordmark used to have
@@ -94,7 +94,7 @@ export default function AppHeader({ lightMode, onToggleLightMode }: Props) {
         {appSettings === null ? (
           <span className="h-3.5 w-40 animate-pulse rounded bg-surface-hover" />
         ) : (
-          <span className="text-xs text-ink-primary whitespace-nowrap">
+          <span className="text-sm text-ink-primary whitespace-nowrap mr-2">
             Good {timeOfDay()}, {appSettings.writer_name || "Writer"}
           </span>
         )}
@@ -112,7 +112,7 @@ export default function AppHeader({ lightMode, onToggleLightMode }: Props) {
           title={lightMode ? "Switch to dark mode" : "Switch to light mode"}
           className="flex items-center gap-1.5 text-ink-muted hover:text-ink-primary transition-colors"
         >
-          <Moon className="h-3 w-3" />
+          <Moon className="h-3.5 w-3.5" />
           <span className={clsx(
             "relative inline-flex w-9 h-5 rounded-full transition-colors duration-200",
             lightMode ? "bg-accent" : "bg-surface-hover"
@@ -122,7 +122,7 @@ export default function AppHeader({ lightMode, onToggleLightMode }: Props) {
               lightMode ? "left-4" : "left-0.5"
             )} />
           </span>
-          <Sun className="h-3 w-3" />
+          <Sun className="h-3.5 w-3.5" />
         </button>
 
         <NotificationBell />

@@ -39,6 +39,9 @@ export default {
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
+        // Chrome stays on the native UI face while content uses Inter — both
+        // apps carry this split (KAN-21, TOKENS.md).
+        chrome: ["system-ui", "-apple-system", "sans-serif"],
         mono: ["JetBrains Mono", "ui-monospace", "monospace"],
       },
       animation: {

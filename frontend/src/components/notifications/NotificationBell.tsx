@@ -155,7 +155,7 @@ export default function NotificationBell() {
       <button
         onClick={() => setOpen((o) => !o)}
         className={clsx(
-          "relative flex h-8 w-8 items-center justify-center rounded-full transition-colors",
+          "relative flex items-center justify-center rounded p-1 transition-colors",
           "text-ink-secondary hover:text-ink-primary hover:bg-surface",
           pulse && "animate-pulse"
         )}
@@ -163,22 +163,22 @@ export default function NotificationBell() {
       >
         <Bell className="h-4 w-4" strokeWidth={1.5} />
         {unreadCount > 0 && (
-          // Geometry mirrors Loom's NotificationBell so the two headers read as
-          // one product: 14px, 9px bold text, accent fill.
+          // Identical to Loom's badge now, offsets included (KAN-21): 14px,
+          // 9px bold, accent fill, -top-1 -right-1.
           //
-          // Tucked flush to the button edge rather than protruding past it. The
-          // button is 32px around a 16px icon, so 8px of dead space sits between
-          // the glyph and the edge the badge anchors to — protruding further
-          // detached the badge from the bell and left only 6px before the
-          // avatar. Flush restores Loom's ~8px clearance.
+          // KAN-1 had to tuck this flush instead, because the button was 32px
+          // around a 16px icon — the badge anchors to the BUTTON edge, so
+          // Loom's outward offsets pushed it off the glyph and into the avatar.
+          // The button is now p-1 (24px around 16px), which was the actual
+          // cause, so the compensation is no longer needed.
           //
           // min-w + px + leading rather than a fixed square with flex centering:
-          // that lets "9+" grow sideways instead of cramping, which a fixed
-          // 14px box would. Same technique Loom uses.
+          // that lets "9+" grow sideways instead of cramping. Same technique
+          // Loom uses.
           //
           // bg-accent is the token, not a literal — so KAN-6's palette
           // reconciliation carries here for free.
-          <span className="absolute right-0 top-0 min-w-[14px] h-[14px] px-0.5 rounded-full bg-accent text-center text-[9px] font-bold leading-[14px] text-white">
+          <span className="absolute -right-1 -top-1 min-w-[14px] h-[14px] px-0.5 rounded-full bg-accent text-center text-[9px] font-bold leading-[14px] text-white">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}

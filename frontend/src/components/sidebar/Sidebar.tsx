@@ -37,7 +37,7 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
     <aside
       className={clsx(
         "flex h-full flex-shrink-0 flex-col overflow-hidden bg-surface-card transition-[width] duration-300 ease-in-out",
-        collapsed ? "w-0 border-r-0" : "w-64 border-r border-surface-border"
+        collapsed ? "w-0 border-r-0" : "w-56 border-r border-surface-border"
       )}
     >
       {/* Identity block deleted (KAN-7): the logo, site name, tagline and the

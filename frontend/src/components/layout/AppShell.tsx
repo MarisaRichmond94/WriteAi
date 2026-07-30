@@ -142,7 +142,7 @@ export default function AppShell() {
       <div
         className={clsx(
           "relative flex-shrink-0 transition-[width] duration-300 ease-in-out",
-          sidebarCollapsed ? "w-3" : "w-64"
+          sidebarCollapsed ? "w-3" : "w-56"
         )}
         onMouseEnter={onEdgeEnter}
         onMouseLeave={onEdgeLeave}

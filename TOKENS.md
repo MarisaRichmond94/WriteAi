@@ -143,6 +143,113 @@ When the navigation model is settled there is nothing left to compare. Delete:
 - the `⌥⇧U` branch in `AppShell.tsx` (WriteAI)
 - `NEXT_PUBLIC_UNIFIED_CHROME` from any `.env`
 
+## Metrics
+
+The colour contract above got the two apps most of the way to reading as one
+product. This is the remainder: type, icon and control sizes.
+
+It exists because KAN-7's acceptance criterion said *"match Loom's within the
+shared spec"* — and no such spec existed for sizes, so matching was done by eye,
+one control at a time. That reaches roughly 80% and stalls.
+
+**Loom's header is the reference.** Where the two disagreed, Loom's value wins,
+with two deliberate roundings noted below.
+
+### Typography
+
+| Role | Stack |
+|------|-------|
+| Content | **Inter**, falling back to `system-ui, sans-serif` |
+| Chrome — header and app furniture | **`system-ui`**, `-apple-system, sans-serif` |
+
+**The split is deliberate, not an oversight.** Inter in the header "doesn't look
+quite right" — chrome reads better in the native UI face, while body content
+carries the branded one. Both apps apply the same rule, so this is a shared
+decision rather than Loom simply never having declared a font.
+
+Expose it as a `font-chrome` utility in both apps so the intent is legible at the
+call site, rather than a bare `font-[system-ui]`.
+
+- **Loom** loads Inter via `next/font/google` with `variable: '--font-inter'` —
+  self-hosted, no layout shift, no external request.
+- **WriteAI** already loads Inter from Google Fonts in `index.html`.
+
+### Header
+
+| Element | Value |
+|---------|-------|
+| Padding | `px-6 py-3` |
+| Identity cluster gap | `gap-3` (12px) |
+| Logo | 36px (`h-9 w-9`) |
+| Project title | 20px, weight 400, `tracking-wider` |
+| Greeting | 14px (`text-sm`), **plus `mr-2`** — see below |
+| Avatar | 40px (`w-10 h-10`) with **`border-2`**, not `ring` — see below |
+| Icon-button glyph | 16px |
+| Icon-button padding | `p-1` → a 24px control around a 16px glyph |
+| Light-toggle sun/moon | 14px |
+| App-switch (sparkles) | 14px |
+
+### Sizes alone are not enough
+
+Three mismatches survived the first pass at this contract because they are about
+*treatment*, not measurement. Matching numbers is necessary and insufficient.
+
+**Avatar — border, never ring.** Both apps read `w-10 h-10`, yet WriteAI's
+rendered visibly larger: `ring-1` is a box-shadow drawn **outside** the element,
+so a 40px avatar occupied 42px, while Loom's `border-2` draws **inside**. Use
+`border-2 border-accent/30 hover:border-accent`.
+
+**Font smoothing.** WriteAI's `<body>` carried `antialiased`
+(`-webkit-font-smoothing: antialiased`) and Loom's did not. The same face renders
+noticeably thinner under it on macOS — enough to read as a different font even
+when the stack is identical. Neither app sets it now.
+
+**Greeting trailing margin.** Loom's greeting carries `mr-2` on top of the
+cluster's `gap-3`, giving 20px before the light toggle where every other gap is
+12px. Inherited rather than designed, but it is what Loom looks like today and
+Loom is the reference, so WriteAI matches it. Worth revisiting if the cluster is
+ever tidied — at which point remove it from **both**.
+
+### Copy
+
+**Greeting is sentence case**: "Good afternoon, …", not "Good Afternoon, …".
+WriteAI title-cased the period, which reads as a proper noun.
+
+### Sidebar
+
+| | |
+|---|---|
+| Width | 224px (`w-56`) |
+
+### Two roundings, on purpose
+
+Loom used `size={13}` for the toggle icons and `size={15}` for the bell. Neither
+maps to a Tailwind step, and the two apps address icons differently — Loom via
+`react-icons` `size={n}` in pixels, WriteAI via `lucide-react` and Tailwind
+classes. A shared value has to be expressible in both.
+
+- Toggle icons **13 → 14px** (`h-3.5` / `size={14}`)
+- Bell **15 → 16px** (`h-4` / `size={16}`)
+
+Loom shifts by a pixel in each case; the alternative is a contract WriteAI cannot
+express.
+
+### Icon-button ratio
+
+**Size the control to its glyph.** WriteAI's bell was `h-8 w-8` (32px) around a
+16px icon — 8px of dead space per side. Absolutely-positioned children such as
+the unread badge anchor to the *button* edge, so they drifted away from the glyph
+and crowded the neighbouring control.
+
+KAN-1 patched that at the badge with flush positioning; the ratio is the actual
+cause. With `p-1`, badge offsets converge on Loom's `-top-1 -right-1` in both
+apps rather than needing per-control compensation.
+
+### Rule
+
+No hardcoded sizes at a call site where a token exists — the same rule the colour
+contract carries. If a value here changes, it changes in one place per app.
+
 ## Always-dark chrome
 
 Some chrome must stay dark **inside** light mode: the chapter editor's sticky
