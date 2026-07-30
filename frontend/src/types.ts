@@ -334,6 +334,9 @@ export interface ReviewMessage {
   citations?: Citation[];
   timestamp: Date;
   isStreaming?: boolean;
+  /** the review ran on degraded context (e.g. retrieval was down) — shown as
+   *  a banner above the reply, and persisted with the session */
+  notice?: string;
 }
 
 export interface ReviewSession {

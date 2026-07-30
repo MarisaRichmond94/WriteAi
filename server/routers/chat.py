@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import logging
-import time
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
 from src.answerer import ALTERNATE_SYSTEM
-from src.costlog import log_cost, usage_diff
+from src.costlog import cost_scope
 from src.query_router import Scope, classify
 
 from ..deps import get_state
@@ -97,16 +96,14 @@ def chat_stream(req: ChatRequest):
         # "what-if" mode swaps in a speculation-friendly base prompt instead of
         # the default "answer only from the text" one; None keeps the default.
         system_base = ALTERNATE_SYSTEM if req.mode == "alternate" else None
-        u0, c0, t0 = dict(answerer.usage), answerer.actual_cost_usd, time.monotonic()
-        for delta in answerer.answer_stream(plan, excerpts, notes,
-                                            history=history, system_extra=extra,
-                                            system_base=system_base):
-            yield {"type": "chunk", "content": delta}
-        log_cost(s.cfg, surface="chat", model=answerer.model, qtype=plan.qtype,
-                 usage=usage_diff(answerer.usage, u0),
-                 cost_usd=round(answerer.actual_cost_usd - c0, 4),
-                 latency_ms=int((time.monotonic() - t0) * 1000),
-                 extra={"mode": req.mode})
+        # ledgered from a `finally` — a chat answer that dies mid-stream was
+        # still billed, and used to leave no trace in the spend dashboard
+        with cost_scope(s.cfg, surface="chat", answerer=answerer,
+                        qtype=plan.qtype, extra={"mode": req.mode}):
+            for delta in answerer.answer_stream(plan, excerpts, notes,
+                                                history=history, system_extra=extra,
+                                                system_base=system_base):
+                yield {"type": "chunk", "content": delta}
         yield citations_payload(excerpts)
         u = answerer.usage
         yield {"type": "usage", "model": answerer.model,

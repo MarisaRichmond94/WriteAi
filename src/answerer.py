@@ -38,12 +38,29 @@ Two rules govern every answer:
 Open by briefly grounding the premise in canon (what actually happened, cited), then reason through the consequences. Stay consistent with established characterization and the world's rules — imagine different choices and their plausible fallout, not different laws of the world. If the premise contradicts something the text has firmly established, say so before running with it."""
 
 
+def _partial_usage(stream):
+    """Usage accumulated before a stream died, or None if it never got as far
+    as its message_start event. The SDK's snapshot accessor asserts rather
+    than returning None on an unstarted stream, hence the guard."""
+    try:
+        return stream.current_message_snapshot.usage
+    except (AssertionError, AttributeError):
+        return None
+
+
 class Answerer:
     def __init__(self, cfg, model: str | None = None):
         import anthropic
+        import httpx        # a dependency of anthropic; kept lazy alongside it
 
-        self.client = anthropic.Anthropic(api_key=cfg.anthropic_api_key or None,
-                                          max_retries=3)
+        # An explicit read timeout is the difference between a stalled stream
+        # failing in two minutes and hanging for the SDK's default ten. It is
+        # the gap BETWEEN chunks, not the total generation time — a healthy
+        # stream emits several a second, so this only fires on a real stall.
+        self.client = anthropic.Anthropic(
+            api_key=cfg.anthropic_api_key or None, max_retries=3,
+            timeout=httpx.Timeout(getattr(cfg, "api_read_timeout_s", 120.0),
+                                  connect=10.0))
         # per-request override (e.g. the review pane's model dropdown, which
         # drops to a cheaper model for interim iterations)
         self.model = model or cfg.query_model
@@ -172,13 +189,25 @@ class Answerer:
                       system_base: str | None = None,
                       notes_header: str | None = None,
                       max_tokens: int | None = None):
-        """Generator of text deltas; records usage when the stream ends."""
+        """Generator of text deltas; records usage when the stream ends —
+        including when it ends badly. A stream killed by a read timeout or a
+        client disconnect was still billed for the prompt it processed and the
+        output it had produced, so the partial snapshot gets recorded rather
+        than dropped."""
         request = self.build_request(plan, excerpts, notes, history, system_extra,
                                      system_base, notes_header, max_tokens)
-        with self.client.messages.stream(**request) as stream:
-            yield from stream.text_stream
-            final = stream.get_final_message()
-        self._record_usage(final.usage)
+        usage = None
+        try:
+            with self.client.messages.stream(**request) as stream:
+                try:
+                    yield from stream.text_stream
+                    usage = stream.get_final_message().usage
+                finally:
+                    if usage is None:
+                        usage = _partial_usage(stream)
+        finally:
+            if usage is not None:
+                self._record_usage(usage)
 
     # ── export modes ────────────────────────────────────────────────────────
 

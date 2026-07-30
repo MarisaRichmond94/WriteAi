@@ -15,6 +15,8 @@ import json
 import logging
 import os
 import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from config import REPO_ROOT
@@ -65,3 +67,40 @@ def log_cost(cfg, *, surface: str, model: str, qtype: str | None = None,
                 f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception:
         log.warning("cost log write to %s failed", _PATH, exc_info=True)
+
+
+@contextmanager
+def cost_scope(cfg, *, surface: str, answerer, qtype: str | None = None,
+               extra: dict | None = None):
+    """Ledger one streamed request — whether it finishes, fails, or the reader
+    closes the tab on it.
+
+    The API bills for everything it processed before a stream died, so the
+    line is written from a `finally`. Logging only on the happy path (the
+    original shape) meant a mid-stream read timeout wrote nothing at all: the
+    spend dashboard showed $0 for a request that really cost input, cache
+    writes, and whatever output had already been generated.
+
+    Every line carries `state`: done | failed | aborted, with `error` naming
+    the failure — so a surface's ledger total can be split into spend the
+    writer got something for and spend she didn't.
+    """
+    u0 = dict(answerer.usage)
+    c0 = answerer.actual_cost_usd
+    t0 = time.monotonic()
+    state, err = "done", None
+    try:
+        yield
+    except GeneratorExit:               # client hung up mid-stream
+        state, err = "aborted", "client disconnected"
+        raise
+    except BaseException as e:
+        state, err = "failed", f"{type(e).__name__}: {e}"
+        raise
+    finally:
+        log_cost(cfg, surface=surface, model=answerer.model, qtype=qtype,
+                 usage=usage_diff(answerer.usage, u0),
+                 cost_usd=round(answerer.actual_cost_usd - c0, 4),
+                 latency_ms=int((time.monotonic() - t0) * 1000),
+                 extra={**(extra or {}), "state": state,
+                        **({"error": err} if err else {})})

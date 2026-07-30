@@ -20,6 +20,9 @@ export interface ReviewRequest {
 
 export type ReviewSSEEvent =
   | { type: "chunk"; content: string }
+  // the review ran, but on degraded context (e.g. prior-context search was
+  // down) — distinct from `error`, which means no review at all
+  | { type: "notice"; message: string }
   | { type: "citations"; sources: Citation[] }
   | { type: "done" }
   | { type: "error"; message: string };
