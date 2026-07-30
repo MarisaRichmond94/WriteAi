@@ -11,6 +11,19 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
+    <!-- UNIFIED_CHROME (KAN-6) — TEMPORARY, remove when KAN-8 closes.
+         Runs before the module bundle so the palette is settled before first
+         paint rather than flashing the old accent. Deliberately client-side
+         only: this is a short-lived UI flag, and routing it through FastAPI's
+         /api/settings would add backend plumbing that gets deleted anyway.
+         Defaults off, matching Loom, so the two apps toggle in lockstep. -->
+    <script>
+      try {
+        if (localStorage.getItem("writeai-unified-chrome") === "true") {
+          document.documentElement.setAttribute("data-chrome", "v2");
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body class="bg-surface text-ink-primary antialiased">
     <div id="root"></div>

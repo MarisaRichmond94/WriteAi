@@ -15,10 +15,14 @@ export default {
           hover: "rgb(var(--surface-hover) / <alpha-value>)",
           border: "rgb(var(--surface-border) / <alpha-value>)",
         },
+        // Accent moved from literals to RGB-channel vars (KAN-6) so
+        // UNIFIED_CHROME can swap it at runtime, the way surfaces and ink
+        // already can. The channel form is also what keeps `bg-accent/10` and
+        // `ring-accent` opacity modifiers working.
         accent: {
-          DEFAULT: "#7c6af7",
-          hover: "#6b59e8",
-          muted: "#4a3fa6",
+          DEFAULT: "rgb(var(--accent) / <alpha-value>)",
+          hover: "rgb(var(--accent-hover) / <alpha-value>)",
+          muted: "rgb(var(--accent-muted) / <alpha-value>)",
           subtle: "rgb(var(--accent-subtle) / <alpha-value>)",
         },
         ink: {

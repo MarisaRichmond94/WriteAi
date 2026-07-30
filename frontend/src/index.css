@@ -10,11 +10,35 @@
   --surface-card: 26 29 39;
   --surface-hover: 33 37 58;
   --surface-border: 42 45 58;
+  /* Accent as channels (KAN-6) — these were literals in tailwind.config.ts,
+     which the UNIFIED_CHROME flag had no way to reach. */
+  --accent: 124 106 247;
+  --accent-hover: 107 89 232;
+  --accent-muted: 74 63 166;
   --accent-subtle: 42 37 80;
   --ink-primary: 232 234 240;
   --ink-secondary: 157 163 180;
   --ink-muted: 92 98 122;
 }
+
+/* ---------------------------------------------------------------------------
+   UNIFIED_CHROME (KAN-6) — the shared palette with Loom. See TOKENS.md.
+
+   WriteAI's surfaces and ink were chosen as canonical, so they are absent from
+   this block: they already hold the agreed values. Only the accent moves, from
+   WriteAI's #7c6af7 to Loom's #8888ff.
+
+   Flag off leaves :root untouched, so today's look survives as the comparison
+   baseline. Retirement: fold these into :root and delete the selector when
+   KAN-8 closes.
+   --------------------------------------------------------------------------- */
+[data-chrome="v2"] {
+  --accent: 136 136 255;         /* #8888ff — canonical */
+  --accent-hover: 119 119 240;   /* #7777f0 — same -17/-17/-15 step as before */
+  --accent-muted: 74 74 122;     /* #4a4a7a — Loom's; R=G tracks the new hue */
+  --accent-subtle: 42 42 85;     /* #2a2a55 — was 42 37 80, nudged so R=G */
+}
+
 .light-body {
   --surface: 245 242 235;
   --surface-card: 237 233 224;
