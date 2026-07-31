@@ -120,6 +120,26 @@ def migrate_schema(db: sqlite3.Connection) -> None:
             log.info("migrating %s: adding source_quote column", table)
             db.execute(f"ALTER TABLE {table} ADD COLUMN source_quote TEXT")
 
+    # Stable Loom identity (KAN-12). book_number and book_title are derived
+    # from the folder name: book_number survives a rename but breaks on
+    # insertion or reordering, book_title does the reverse. Loom's cuids
+    # survive both, and reach us through the manifest sidecar.
+    #
+    # Nullable, and both old columns are kept, so existing rows and every
+    # existing query keep working. Rows written before a book has been
+    # canon-exported will hold NULL — readers must fall back rather than
+    # assume a match.
+    for table in ("chunks", "events", "chapter_timeline",
+                  "chapter_summaries", "location_map_v2"):
+        cols = {row[1] for row in
+                db.execute(f"SELECT * FROM pragma_table_info('{table}')")}
+        if not cols:
+            continue  # table not created yet on this store
+        for col in ("loom_book_id", "loom_series_id"):
+            if col not in cols:
+                log.info("migrating %s: adding %s column", table, col)
+                db.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
+
 
 def slugify(name: str) -> str:
     """Series name -> ChromaDB collection name (3-63 chars, [a-z0-9._-])."""
@@ -139,6 +159,9 @@ class SeriesStore:
         # interleaves cursors. SQLite coordinates between connections.
         import threading
         self._cfg_path = cfg.sqlite_path
+        self._cfg = cfg
+        # book_number -> (loom_book_id, loom_series_id); built lazily, once.
+        self._loom_id_map: dict[int, tuple[str | None, str | None]] | None = None
         self._local = threading.local()
         self.db.executescript(_SCHEMA)
         migrate_schema(self.db)
@@ -490,6 +513,31 @@ class SeriesStore:
         }
         return {k: v for k, v in flat.items() if v is not None}
 
+    def _loom_identity(self, book_number: int) -> tuple[str | None, str | None]:
+        """(loom_book_id, loom_series_id) for a book number (KAN-12).
+
+        Without this, every chunk written after the KAN-12 backfill would carry
+        NULL and the migration would silently decay as new prose is ingested.
+
+        Cached for the life of the store: discovery walks the books directory
+        and opens a manifest per book, which is far too much work to repeat for
+        every chunk. Resolution failure is non-fatal — chunks are still written,
+        just without stable IDs, which is the pre-KAN-12 behaviour.
+        """
+        if self._loom_id_map is None:
+            try:
+                from .discovery import discover_books
+                self._loom_id_map = {
+                    b.number: (b.loom_book_id, b.loom_series_id)
+                    for b in discover_books(self._cfg)
+                }
+            except Exception:
+                log.warning("could not resolve Loom identity for this ingest — "
+                            "chunks will be written without stable IDs",
+                            exc_info=True)
+                self._loom_id_map = {}
+        return self._loom_id_map.get(book_number, (None, None))
+
     def _upsert_sqlite(self, records: list[dict]) -> None:
         cur = self.db.cursor()
         for r in records:
@@ -506,14 +554,16 @@ class SeriesStore:
                 """INSERT INTO chunks (chunk_id, book_number, book_title,
                        chapter_number, chapter_kind, scene_number, chunk_index,
                        pov_character, date_line, part_number, part_title,
-                       word_count, timeline_position, text, text_hash, metadata_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       word_count, timeline_position, text, text_hash, metadata_json,
+                       loom_book_id, loom_series_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (chunk.chunk_id, chunk.book_number, chunk.book_title,
                  chunk.chapter_number, chunk.chapter_kind, chunk.scene_number,
                  chunk.chunk_index, chunk.pov_character, chunk.date_line,
                  chunk.part_number, chunk.part_title, chunk.word_count,
                  meta.get("timeline_position"), chunk.text, r["text_hash"],
-                 json.dumps(meta, ensure_ascii=False) if meta else None),
+                 json.dumps(meta, ensure_ascii=False) if meta else None,
+                 *self._loom_identity(chunk.book_number)),
             )
             cur.execute("INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)",
                         (cur.lastrowid, chunk.text))

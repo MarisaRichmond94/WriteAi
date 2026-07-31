@@ -23,6 +23,32 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 
+def _indexed_chapters(s, book) -> set[int]:
+    """Chapter numbers the index holds for a book, keyed by stable ID (KAN-12).
+
+    Prefers loom_book_id: book_number is positional, so inserting or reordering
+    a book silently repoints this lookup at another book's rows — drift
+    detection would then compare the wrong manifest against the wrong index and
+    report confidently wrong answers.
+
+    Falls back to book_number when the book has no Loom identity (never
+    canon-exported) or when nothing in the index carries the ID yet (chunks
+    ingested before this change). The fallback is what the code always did, so
+    the worst case is unchanged behaviour rather than a regression.
+    """
+    if book.loom_book_id:
+        rows = {r[0] for r in s.db.execute(
+            "SELECT DISTINCT chapter_number FROM chunks WHERE loom_book_id = ?",
+            (book.loom_book_id,))}
+        if rows:
+            return rows
+        log.debug("book %d (%s) has a Loom id but no chunks carry it yet — "
+                  "falling back to book_number", book.number, book.title)
+    return {r[0] for r in s.db.execute(
+        "SELECT DISTINCT chapter_number FROM chunks WHERE book_number = ?",
+        (book.number,))}
+
+
 def book_sync_state(s, book_number: int) -> tuple[bool, dict[int, str]]:
     """(index matches the manifest?, manifest chapter number -> Loom chapter
     id) for one book. (False, {}) when no manifest is readable — callers must
@@ -37,9 +63,7 @@ def book_sync_state(s, book_number: int) -> tuple[bool, dict[int, str]]:
             return (False, {})
         num_to_id = {c["number"]: c["id"] for c in m.get("chapters", [])
                      if c.get("number") is not None and c.get("id")}
-        index_ch = {r[0] for r in s.db.execute(
-            "SELECT DISTINCT chapter_number FROM chunks WHERE book_number = ?",
-            (book_number,))}
+        index_ch = _indexed_chapters(s, b)
         return (set(num_to_id) == index_ch, num_to_id)
     return (False, {})
 
@@ -55,11 +79,6 @@ def sync_status():
     drift; unnumbered chapters (part dividers) are outside the comparison.
     """
     s = get_state()
-    indexed: dict[int, set[int]] = {}
-    for b, c in s.db.execute(
-            "SELECT DISTINCT book_number, chapter_number FROM chunks"):
-        indexed.setdefault(b, set()).add(c)
-
     books = []
     stale = 0
     for book in discover_books(s.cfg):
@@ -77,7 +96,11 @@ def sync_status():
                 continue
             manifest_ch = {c["number"] for c in m.get("chapters", [])
                            if c.get("number") is not None}
-            index_ch = indexed.get(book.number, set())
+            # Per-book rather than one bulk scan: the lookup now keys on
+            # loom_book_id where available (KAN-12), which a single
+            # GROUP BY book_number can't express. Five books, five cheap
+            # indexed queries.
+            index_ch = _indexed_chapters(s, book)
             missing = sorted(manifest_ch - index_ch)
             extra = sorted(index_ch - manifest_ch)
             entry.update({
