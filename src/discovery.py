@@ -13,6 +13,7 @@ Versions/, PDFs of the same book, and design files.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -37,6 +38,19 @@ class Book:
     title: str
     folder: Path
     manuscript: Path
+    # Stable Loom identity, read from the manifest sidecar (KAN-12).
+    #
+    # `number` and `title` are both derived from the folder name, which makes
+    # them presentational, not identifying: `number` survives a rename but
+    # breaks on insertion or reordering, `title` does the reverse. Loom's cuids
+    # survive both. The manifest has carried them since manifestVersion 1 —
+    # nothing here consumed them until now.
+    #
+    # None when no manifest is readable (a book Loom has never canon-exported).
+    # Callers must treat None as "unknown identity" and fall back to number or
+    # title rather than assuming a match.
+    loom_book_id: str | None = None
+    loom_series_id: str | None = None
 
 
 def _find_manuscript(folder: Path, title: str) -> Path | None:
@@ -55,6 +69,35 @@ def _find_manuscript(folder: Path, title: str) -> Path | None:
                  candidates[0].name, title)
         return candidates[0]
     return None
+
+
+def _read_loom_identity(folder: Path, title: str) -> tuple[str | None, str | None]:
+    """Pull (loom_book_id, loom_series_id) out of the manifest sidecar.
+
+    Deliberately forgiving: a missing, unreadable, or malformed manifest yields
+    (None, None) rather than raising. Discovery runs on every sync and must not
+    be brought down by one bad sidecar — the caller degrades to number/title
+    matching, which is what it did before KAN-12 anyway.
+
+    The manifest is still LOCATED by folder and title. Locating it is the last
+    title-dependent step; once it is open, identity is stable.
+    """
+    path = folder / f"{title}.manifest.json"
+    if not path.exists():
+        return (None, None)
+    try:
+        m = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("unreadable manifest for '%s' (%s) — falling back to "
+                    "number/title identity", title, exc)
+        return (None, None)
+    book_id = m.get("bookId")
+    series_id = m.get("seriesId")
+    if not book_id:
+        log.warning("manifest for '%s' has no bookId (manifestVersion=%s) — "
+                    "falling back to number/title identity",
+                    title, m.get("manifestVersion"))
+    return (book_id or None, series_id or None)
 
 
 def discover_books(cfg) -> list[Book]:
@@ -77,7 +120,11 @@ def discover_books(cfg) -> list[Book]:
         if manuscript is None:
             log.warning("no manuscript found for book %d (%s) — skipping", number, title)
             continue
-        books.append(Book(number=number, title=title, folder=entry, manuscript=manuscript))
+        loom_book_id, loom_series_id = _read_loom_identity(entry, title)
+        books.append(Book(number=number, title=title, folder=entry,
+                          manuscript=manuscript,
+                          loom_book_id=loom_book_id,
+                          loom_series_id=loom_series_id))
 
     books.sort(key=lambda b: b.number)
     return books
