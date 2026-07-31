@@ -95,6 +95,24 @@ def _sync_state(in_sync: bool, num_to_loom: dict[int, str]) -> str:
     return "synced" if in_sync else "behind"
 
 
+def _is_machine_written(card: dict) -> bool:
+    """True when nothing on this card came from the writer.
+
+    Same provenance test the reconcile loop already trusts to decide whether a
+    summary may be cleared: machine content matches `summary_source` exactly (or
+    is the auto-backfill of its own bullets), and a writer edit of even one
+    character breaks the match. Notes are writer-only, so any note makes a card
+    writer-authored regardless of its summary.
+    """
+    if (card.get("notes") or "").strip():
+        return False
+    ws = (card.get("writer_summary") or "").strip()
+    if not ws:
+        return True
+    return (ws == (card.get("summary_source") or "").strip()
+            or ws == _bullets_html(card.get("extracted_bullets") or []))
+
+
 def _auto_reconcile(book: int, cards: list[dict],
                     in_sync: bool, num_to_loom: dict[int, str]) -> bool:
     """Fold newly written / renumbered chapters into the outline without ever
@@ -115,10 +133,20 @@ def _auto_reconcile(book: int, cards: list[dict],
     by_num = {c["chapter"]: c for c in cards
               if c.get("chapter") is not None and not c.get("loom_id")}
     changed = False
+    # Cards left stranded when a stamped card is renumbered ONTO the number an
+    # unstamped card already occupies. by_loom wins the match, so the unstamped
+    # card is never claimed by any iteration and lingers as a visible duplicate.
+    # This is how book 3 ended up with two chapter-68 cards holding identical
+    # summaries: ch-3-65-… was created at 65, renumbered to 68, and landed on
+    # the seeded ch-3-68.
+    superseded: list[dict] = []
     for num in sorted(extracted):
         loom_id = num_to_loom[num]
         ext = extracted[num]
         card = by_loom.get(loom_id) or by_num.get(num)
+        twin = by_num.get(num)
+        if twin is not None and twin is not card:
+            superseded.append(twin)
         if card is None:  # newly written chapter — a card can only be added
             cards.append({
                 "id": f"ch-{book}-{num}-{uuid.uuid4().hex[:6]}",
@@ -165,6 +193,25 @@ def _auto_reconcile(book: int, cards: list[dict],
         if touched:
             card["status"] = "synced"
             changed = True
+
+    # Drop the stranded twins, but only the ones the machine wrote. A twin
+    # carrying writer words or notes is kept and reported: silently deleting
+    # writing to tidy a duplicate would be far worse than leaving the duplicate
+    # visible, and the manual Sync flow exists for exactly that conflict.
+    for twin in superseded:
+        if twin not in cards:      # defensive: same card stranded twice
+            continue
+        if not _is_machine_written(twin):
+            log.warning(
+                "outline book %d: chapter %s has a duplicate card (%s) carrying "
+                "writer content — leaving both in place for manual resolution",
+                book, twin.get("chapter"), twin.get("id"))
+            continue
+        cards.remove(twin)
+        changed = True
+        log.info("outline book %d: removed superseded duplicate card %s at "
+                 "chapter %s (machine-written, no writer content)",
+                 book, twin.get("id"), twin.get("chapter"))
     return changed
 
 
