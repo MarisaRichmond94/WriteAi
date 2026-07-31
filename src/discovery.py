@@ -100,6 +100,19 @@ def _read_loom_identity(folder: Path, title: str) -> tuple[str | None, str | Non
     return (book_id or None, series_id or None)
 
 
+def loom_book_id_for(cfg, number: int) -> str | None:
+    """Stable Loom id for a book number, or None when it can't be resolved.
+
+    The bridge for callers that only have a positional number (existing route
+    params, stored outline keys) but want to query by stable identity. Returning
+    None is normal — the caller falls back to number matching.
+    """
+    for b in discover_books(cfg):
+        if b.number == number:
+            return b.loom_book_id
+    return None
+
+
 def discover_books(cfg) -> list[Book]:
     """Scan BOOKS_DIR for book folders; return them in series order."""
     books: list[Book] = []

@@ -12,6 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile
 from pydantic import BaseModel
 
+from src.discovery import loom_book_id_for
 from src.query_router import QueryPlan, Scope
 
 from .. import writer_store
@@ -27,11 +28,21 @@ router = APIRouter(prefix="/api/plan")
 def _extracted_chapters(book: int) -> dict[int, dict]:
     """chapter_number -> {heading, pov, date, bullets} from ingestion data."""
     s = get_state()
-    rows = s.db.execute(
-        """SELECT chapter_number, chapter_kind, pov_character, date_line,
-                  metadata_json
-           FROM chunks WHERE book_number = ?
-           ORDER BY chapter_number, chunk_index""", (book,)).fetchall()
+    # Prefer the stable Loom id (KAN-12). book_number is positional, so after
+    # an insertion or reorder this query would pull another book's chapters and
+    # _auto_reconcile would fold them into this book's outline cards. Falls back
+    # to book_number when identity is unknown or nothing indexed carries it yet.
+    _SELECT = """SELECT chapter_number, chapter_kind, pov_character, date_line,
+                        metadata_json
+                 FROM chunks WHERE {} = ?
+                 ORDER BY chapter_number, chunk_index"""
+    rows = []
+    loom_book_id = loom_book_id_for(s.cfg, book)
+    if loom_book_id:
+        rows = s.db.execute(_SELECT.format("loom_book_id"),
+                            (loom_book_id,)).fetchall()
+    if not rows:
+        rows = s.db.execute(_SELECT.format("book_number"), (book,)).fetchall()
     chapters: dict[int, dict] = {}
     bullets: dict[int, list] = defaultdict(list)
     for ch, kind, pov, date, meta_json in rows:
