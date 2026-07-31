@@ -1,6 +1,7 @@
 import { Compass, Clock, Library, MapPin, Users, Kanban, PenLine, ScanText, FlaskConical, DollarSign } from "lucide-react";
 import { FaTimeline } from "react-icons/fa6";
 import { clsx } from "clsx";
+import { loomAuthorHref } from "../../lib/loomLinks";
 import { useAppStore } from "../../store/useAppStore";
 import ChatHistory from "./ChatHistory";
 import PipelineStatusBar from "./PipelineStatusBar";
@@ -31,7 +32,7 @@ const NAV_GROUPS = [
 ] as const;
 
 export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
-  const { activePane, setActivePane, siteName } = useAppStore();
+  const { activePane, setActivePane, siteName, appSettings } = useAppStore();
 
   return (
     <aside
@@ -60,14 +61,14 @@ export default function Sidebar({ collapsed = false }: { collapsed?: boolean }) 
             </p>
             {items.map(({ pane, label, icon: Icon }) => {
               // "Write" is an external jump into Loom rather than a pane.
-              // Loom resolves the series by name (our site name) and lands
-              // on its author view; same tab so Back returns here.
+              // Addressed by the stable series id where we have one (KAN-12),
+              // falling back to the site name. Lands on the author view in the
+              // same tab so Back returns here.
               if (pane === "loom-write") {
-                const loomUrl = import.meta.env.VITE_LOOM_URL ?? "http://localhost:3000";
                 return (
                   <a
                     key={pane}
-                    href={`${loomUrl}/author/by-title/${encodeURIComponent(siteName)}`}
+                    href={loomAuthorHref(appSettings?.loom_series_id, siteName)}
                     className="flex w-full items-center gap-3 border-l-2 border-transparent px-4 py-2.5 text-sm text-ink-secondary transition-colors hover:bg-surface hover:text-ink-primary"
                   >
                     <Icon className="h-4 w-4 flex-shrink-0" strokeWidth={1.5} />

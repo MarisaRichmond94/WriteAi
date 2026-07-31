@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { clsx } from "clsx";
 import { ExternalLink } from "lucide-react";
 import type { Citation } from "../../types";
+import { loomReaderHref } from "../../lib/loomLinks";
 import { useAppStore } from "../../store/useAppStore";
 import {
   expandToSentenceWindow,
@@ -40,13 +41,24 @@ export default function CitationCard({ citation, index, isSelected, onClick, ans
   const relevance = Math.max(0, Math.min(100, Math.round((1 - citation.distance) * 100)));
   const pov = citation.pov ? povColor(citation.pov) : null;
 
-  // Deep-link into Loom's reader at this exact chapter. Loom resolves the
-  // series (our site name) + book title + chapter *number* (prologue = 0) to
-  // the chapter's cuid the same way the export manifest does — WriteAI has no
-  // Loom ids to send. Only shown once we know the series name to build with.
-  const loomUrl = import.meta.env.VITE_LOOM_URL ?? "http://localhost:3000";
+  // Deep-link into Loom's reader at this exact chapter.
+  //
+  // Uses the stable series/book cuids the citation now carries (KAN-12), so
+  // the link survives renaming either. Falls back to title addressing for a
+  // book that has never been canon-exported and therefore has no manifest.
+  // Either way Loom resolves the chapter *number* (prologue = 0) to the
+  // chapter's cuid by walking canon the same way the export did.
+  //
+  // Still gated on siteName: without it there is no usable fallback, and a
+  // half-built link is worse than no link.
   const loomHref = siteName
-    ? `${loomUrl}/read/by-title/${encodeURIComponent(siteName)}/${encodeURIComponent(citation.book)}/${citation.chapter}`
+    ? loomReaderHref({
+        loomSeriesId: citation.loom_series_id,
+        loomBookId: citation.loom_book_id,
+        siteName,
+        bookTitle: citation.book,
+        chapter: citation.chapter,
+      })
     : null;
 
   // Prefer the full chunk text (new payloads) over the legacy 220-char

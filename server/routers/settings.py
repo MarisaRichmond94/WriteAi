@@ -36,12 +36,20 @@ def get_settings():
               for t in ("chunks", "characters", "character_knowledge",
                         "foreshadowing", "unresolved_questions")}
     from src.discovery import discover_books
+    loom_series_id = None
     try:
-        discovered = [b.title for b in discover_books(get_state().cfg)]
+        books = discover_books(get_state().cfg)
+        discovered = [b.title for b in books]
+        # Stable Loom series id (KAN-12), read from the manifest sidecars. Every
+        # book in a series carries the same one, so the first that resolves
+        # wins. None when nothing has been canon-exported yet — the UI falls
+        # back to title-addressed jump links.
+        loom_series_id = next((b.loom_series_id for b in books if b.loom_series_id), None)
     except Exception:
         discovered = []
     return {"fields": fields, "discovered_books": discovered,
             "profile": writer_store.ui_settings(),
+            "loom_series_id": loom_series_id,
             "store_counts": counts}
 
 

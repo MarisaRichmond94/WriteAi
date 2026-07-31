@@ -36,18 +36,36 @@ sidecars to the same folder:
 
 ### 2. Jump links
 
-- **WriteAI → Loom (author):** `GET <LOOM_URL>/author/by-title/<series title>`
-  (case-insensitive title match; lands on the series' last-touched chapter).
-  WriteAI configures `VITE_LOOM_URL` (default `http://localhost:3000`).
+Each direction has an **id-addressed** form (preferred) and a **title-addressed**
+form (fallback, retained indefinitely). WriteAI configures `VITE_LOOM_URL`
+(default `http://localhost:3000`). Both are built by
+`frontend/src/lib/loomLinks.ts` — never hand-assemble one, or the fallback
+logic ends up implemented three different ways.
+
+- **WriteAI → Loom (author):**
+  - `GET <LOOM_URL>/author/by-id/<seriesId>` — preferred; `<seriesId>` is
+    `appSettings.loom_series_id`, served by `GET /api/settings`.
+  - `GET <LOOM_URL>/author/by-title/<series title>` — fallback, using the
+    configured site name.
+
+  Both land on the series' last-touched chapter.
 - **WriteAI → Loom (reader):**
-  `GET <LOOM_URL>/read/by-title/<series title>/<book title>/<chapter number>`
-  — the "Open in Loom" action on an Explore citation card opens this in a new
-  tab. `<series title>` is the configured site name; `<book title>` is
-  `citation.book`; `<chapter number>` is `citation.chapter` (0 = prologue).
-  Loom re-runs its canon walk to map the number to the chapter's cuid, mints a
-  reader session, and redirects into `/read/...` at that chapter. Requires no
-  new fields on the citation payload — series + book title + chapter number
-  are all the reader link needs.
+  - `GET <LOOM_URL>/read/by-id/<seriesId>/<bookId>/<chapter number>` —
+    preferred, from `citation.loom_series_id` / `citation.loom_book_id`.
+  - `GET <LOOM_URL>/read/by-title/<series title>/<book title>/<chapter number>`
+    — fallback, from the site name and `citation.book`.
+
+  The "Open in Loom" action on an Explore citation card, opened in a new tab.
+  `<chapter number>` is `citation.chapter` (0 = prologue) in **both** forms:
+  the chapter is addressed by number because that is what the reader sees and
+  what we ingested. Loom re-runs its canon walk to map the number to the
+  chapter's cuid, mints a reader session, and redirects into `/read/...` at
+  that chapter.
+
+  > This previously read "requires no new fields on the citation payload".
+  > That is no longer true: citations carry `loom_book_id` and
+  > `loom_series_id` as of KAN-12. They are nullable, and a null means fall
+  > back to the title form.
 - **Loom → WriteAI:** plain link to `NEXT_PUBLIC_WRITEAI_URL`
   (default `http://localhost:5173`), plus the review deep link below.
 
@@ -92,8 +110,40 @@ incremental ingest of a book once its exports have been quiet for 10
 minutes. The nightly scheduler (Settings → Sync) remains the
 reconciliation safety net when either app was closed.
 
-## Identity caveat
+## Identity
 
-Series/book identity across the apps is **title-based** (punctuation-loose).
-Renaming a series or book in Loom breaks the jump links and folder matching
-until the WriteAI-side folder/series name is updated to match.
+**Loom's cuids are the identity of a series and a book across both apps.**
+Loom mints them; WriteAI reads them from the manifest sidecar and stores them.
+They are stable across renaming, reordering, and re-ingestion.
+
+Resolved by KAN-12. The former caveat — *"identity is title-based, so renaming
+breaks the jump links and folder matching"* — no longer describes the contract.
+
+**Where WriteAI holds them**
+
+- `Book.loom_book_id` / `Book.loom_series_id` on discovered books
+  (`src/discovery.py`), read from the manifest at scan time.
+- `loom_book_id` / `loom_series_id` columns on `chunks`, `events`,
+  `chapter_timeline`, `chapter_summaries`, `location_map_v2`. Created by
+  `migrate_schema()` and populated on write.
+- `citation.loom_book_id` / `.loom_series_id` on the citations payload;
+  `appSettings.loom_series_id` from `GET /api/settings`.
+
+**Three things are still positional or title-derived, deliberately:**
+
+1. **Locating** a book folder and its manifest — `<number>. <title>/`. This is
+   the last title-dependent step; once the manifest is open, identity is
+   stable. A rename is invisible to everything downstream.
+2. **The chapter number** in reader deep links (0 = prologue). Citations are
+   anchored to what the reader sees.
+3. **`site_name`** is display only. It is *not* identity and must never be used
+   as such again — doing so is what made renaming the site break every jump
+   link.
+
+**Degradation contract.** A book that has never been canon-exported has no
+manifest and therefore no cuid. Every consumer treats a missing id as *unknown
+identity* and falls back to `book_number` or title matching — never as *no
+match*. So the pre-KAN-12 behaviour remains the worst case, never a regression.
+
+`book_number` and `book_title` columns are retained and still written. They are
+no longer load-bearing for identity, but plenty of queries and the UI read them.

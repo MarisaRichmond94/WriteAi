@@ -8,6 +8,7 @@ interface BackendSettings {
              auto_enrich_enabled?: boolean; enrich_frequency?: string;
              backup_retention_days?: number; viewer_light_mode?: boolean };
   discovered_books?: string[];
+  loom_series_id?: string | null;
 }
 
 async function backendSettings(): Promise<BackendSettings> {
@@ -21,6 +22,7 @@ export async function fetchSettings(): Promise<AppSettings> {
   const f = (k: string) => data.fields.find((x) => x.key === k)?.value ?? "";
   return {
     site_name: data.profile.site_name || "The Archive",
+    loom_series_id: data.loom_series_id ?? null,
     source_books_dir: f("BOOKS_DIR"),
     books_dir: f("TEXT_EXPORT_DIR"),
     data_dir: f("DATA_DIR"),

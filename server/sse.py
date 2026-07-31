@@ -27,6 +27,29 @@ def _event(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+def _loom_ids_by_book_number() -> dict[int, tuple[str | None, str | None]]:
+    """book_number -> (loom_book_id, loom_series_id) for citation deep links.
+
+    Resolved from the manifest sidecars (KAN-12) rather than threaded through
+    retrieval: those queries return positional tuples unpacked in three places,
+    so widening their column lists would be a far larger and riskier change
+    than looking the ids up here.
+
+    Never raises. Citations must render even when identity is unresolvable —
+    the UI falls back to title-addressed links.
+    """
+    try:
+        from src.discovery import discover_books
+
+        from .deps import get_state
+        return {b.number: (b.loom_book_id, b.loom_series_id)
+                for b in discover_books(get_state().cfg)}
+    except Exception:
+        log.warning("could not resolve Loom ids for citations — deep links "
+                    "fall back to title addressing", exc_info=True)
+        return {}
+
+
 def stream_response(generator) -> StreamingResponse:
     """Wrap a generator of payload dicts as an SSE response, guaranteeing a
     terminal done/error event even when the generator raises."""
@@ -50,8 +73,10 @@ def citations_payload(excerpts: list[dict]) -> dict:
     POV, snippet, distance (plus chunk_id so the source viewer can open the
     exact passage). `text` carries the full chunk so the card can quote-match
     and sentence-snap; `snippet` stays as the legacy 220-char prefix."""
+    loom_ids = _loom_ids_by_book_number()
     sources = []
     for e in excerpts:
+        loom_book_id, loom_series_id = loom_ids.get(e.get("book_number"), (None, None))
         chunk_index = 0
         cid = e.get("chunk_id") or ""
         if ".k" in cid:
@@ -70,5 +95,10 @@ def citations_payload(excerpts: list[dict]) -> dict:
             "text": e.get("text") or "",
             "distance": e.get("distance") if e.get("distance") is not None else 0.5,
             "chunk_id": e.get("chunk_id"),
+            # Stable identity for the Loom deep link (KAN-12). Null when the
+            # book has never been canon-exported; the card then falls back to
+            # the title-addressed route.
+            "loom_book_id": loom_book_id,
+            "loom_series_id": loom_series_id,
         })
     return {"type": "citations", "sources": sources}

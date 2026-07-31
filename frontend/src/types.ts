@@ -13,6 +13,11 @@ export interface Citation {
   /** Full chunk text (superset of snippet); optional for synthetic citations. */
   text?: string;
   distance: number;
+  /** Stable Loom ids for the deep link (KAN-12). Null when the book has never
+   *  been canon-exported, and absent on synthetic or pre-KAN-12 citations —
+   *  the card falls back to the title-addressed route. */
+  loom_book_id?: string | null;
+  loom_series_id?: string | null;
 }
 
 export interface Message {
@@ -223,6 +228,10 @@ export interface ExtractedLocation {
 
 export interface AppSettings {
   site_name: string;
+  /** Stable Loom series cuid, from the manifest sidecar (KAN-12). Null until a
+   *  book has been canon-exported. site_name is display-only, never identity —
+   *  renaming the site must not break a jump link. */
+  loom_series_id: string | null;
   source_books_dir: string;
   books_dir: string;
   data_dir: string;

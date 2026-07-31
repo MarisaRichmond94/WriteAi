@@ -1,5 +1,6 @@
 import { clsx } from "clsx";
 import { Moon, PenLine, Sun } from "lucide-react";
+import { loomAuthorHref } from "../../lib/loomLinks";
 import { useAppStore } from "../../store/useAppStore";
 import NotificationBell from "../notifications/NotificationBell";
 
@@ -103,7 +104,7 @@ export default function AppHeader({ lightMode, onToggleLightMode }: Props) {
           The sidebar row stays. One destination, two doors — the header slot is
           the symmetric affordance, the sidebar row the discoverable one. */}
       <a
-        href={`${import.meta.env.VITE_LOOM_URL ?? "http://localhost:3000"}/author/by-title/${encodeURIComponent(siteName)}`}
+        href={loomAuthorHref(appSettings?.loom_series_id, siteName)}
         title="Open Loom"
         className="self-center flex-shrink-0 ml-1 p-1 rounded text-ink-muted hover:text-accent hover:bg-accent/10 transition-colors"
       >
