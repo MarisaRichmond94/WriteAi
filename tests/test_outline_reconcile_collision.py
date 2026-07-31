@@ -145,6 +145,33 @@ class ReconcileCollisionTest(unittest.TestCase):
         self.assertEqual(len(cards), 2)
         self.assertIn("MY OWN WORDS", cards[1]["writer_summary"])
 
+    def test_stamped_card_whose_chapter_left_canon_is_pruned(self):
+        """The Faded case: a chapter is un-canonised, and a DIFFERENT chapter
+        renumbers into the number it vacated. The orphan's number is still in
+        canon, so judging by number keeps it and reconcile adds a second card
+        beside it — a duplicate created by the pass meant to prevent them."""
+        machine = "<p>machine</p>"
+        cards = [
+            # renumbered 45 -> 47, still canon under its own id
+            card("ch-2-45", 45, loom_id="L47", summary=machine, source=machine),
+            # was canon at 47, its chapter has left canon entirely
+            card("ch-2-47", 47, loom_id="L_GONE", summary=machine, source=machine),
+        ]
+        changed, cards = self.reconcile(cards, {47: ext(47)}, {47: "L47"})
+        self.assertTrue(changed)
+        self.assertEqual(len(cards), 1, "the orphaned stamped card should be gone")
+        self.assertEqual(cards[0]["loom_id"], "L47")
+        self.assertEqual(cards[0]["chapter"], 47)
+
+    def test_orphaned_stamped_card_with_writer_content_is_kept(self):
+        machine = "<p>machine</p>"
+        cards = [
+            card("ch-2-45", 45, loom_id="L47", summary=machine, source=machine),
+            card("ch-2-47", 47, loom_id="L_GONE", summary="<p>MY WORDS</p>", source=machine),
+        ]
+        _, cards = self.reconcile(cards, {47: ext(47)}, {47: "L47"})
+        self.assertEqual(len(cards), 2)
+
     def test_planned_cards_are_never_pruned(self):
         """chapter=None is authorial intent for something not yet written."""
         machine = "<p>machine</p>"

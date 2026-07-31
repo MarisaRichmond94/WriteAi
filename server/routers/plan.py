@@ -215,10 +215,30 @@ def _auto_reconcile(book: int, cards: list[dict],
     # chapter is genuinely gone -- not that the ingest is lagging. Planned cards
     # (chapter=None) are skipped: authorial intent, never derived.
     canon_numbers = set(extracted)
+    canon_ids = set(num_to_loom.values())
+
+    def _left_canon(c: dict) -> bool:
+        """An unclaimed card that no longer corresponds to a canon chapter.
+
+        Two distinct cases, and keying only on the NUMBER misses the second:
+
+        * unstamped -> judge by number. A card sitting at a number canon no
+          longer contains is a leftover (Faded's phantom `ch-2-93`).
+        * stamped -> judge by IDENTITY. Its number may still exist while being
+          occupied by a different chapter entirely. Faded hit exactly this:
+          un-canonising Bonus Chapter 3 left `ch-2-47` holding a loom_id absent
+          from the manifest, while another chapter renumbered INTO 47. Judging
+          by number kept the orphan and reconcile added a second card beside
+          it -- a duplicate created by the very pass meant to prevent them.
+        """
+        if c.get("chapter") is None:
+            return False                      # planned card, never derived
+        if c.get("loom_id"):
+            return c["loom_id"] not in canon_ids
+        return c["chapter"] not in canon_numbers
+
     superseded.extend(c for c in cards
-                      if id(c) not in claimed
-                      and c.get("chapter") is not None
-                      and c["chapter"] not in canon_numbers)
+                      if id(c) not in claimed and _left_canon(c))
 
     # Drop stranded cards -- duplicates and out-of-canon leftovers alike -- but
     # ONLY the ones the machine wrote. A card carrying writer words or notes is
