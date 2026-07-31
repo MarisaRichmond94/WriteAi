@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from src.costlog import cost_scope
 from src.query_router import QueryPlan, Scope
 
-from .. import writer_store
+from .. import outline_store
 from ..deps import get_state
 from ..sse import citations_payload, stream_response
 from .books import _build_bible
@@ -266,7 +266,7 @@ def _upcoming(s, book: int, chapter: int | None) -> list[str]:
     except sqlite3.OperationalError:    # enrichment hasn't run yet
         pass
     try:
-        cards = writer_store.plan_outline().get(str(book), [])
+        cards = outline_store.chapters_for(book)
     except Exception:                   # outline store unreadable — skip it
         log.warning("review: could not read the plan outline", exc_info=True)
         cards = []

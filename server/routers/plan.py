@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from src.discovery import loom_book_id_for
 from src.query_router import QueryPlan, Scope
 
-from .. import writer_store
+from .. import outline_store, writer_store
 from ..deps import get_state
 from ..sse import citations_payload, stream_response
 
@@ -272,11 +272,11 @@ def _auto_reconcile(book: int, cards: list[dict],
 def get_outline(book: int):
     from .sync import book_sync_state
 
-    outlines = writer_store.plan_outline()
-    key = str(book)
+    outlines = outline_store.load_outlines()
+    key = outline_store.outline_key(book)
     if key not in outlines:
         outlines[key] = _seed_outline(book)
-        writer_store.save_plan_outline(outlines)
+        outline_store.save_outlines(outlines)
     in_sync, num_to_loom = book_sync_state(get_state(), book)
     sync_state = _sync_state(in_sync, num_to_loom)
     if sync_state == "unknown":
@@ -284,7 +284,7 @@ def get_outline(book: int):
             "outline book %d: no readable Loom manifest — auto-reconcile is "
             "inert, so chapter numbering will not self-correct after edits", book)
     if _auto_reconcile(book, outlines[key], in_sync, num_to_loom):
-        writer_store.save_plan_outline(outlines)
+        outline_store.save_outlines(outlines)
     # Backfill: cards display writer_summary; where the writer hasn't written
     # one, show the enriched prose chapter summary (falling back to key
     # events as bullets). `summary_source` records exactly what the machine
@@ -321,7 +321,7 @@ def get_outline(book: int):
             c["summary_source"] = new  # adopt provenance for legacy backfills
             changed = True
     if changed:
-        writer_store.save_plan_outline(outlines)
+        outline_store.save_outlines(outlines)
     return {"book": book, "sync_state": sync_state,
             "chapters": sorted(outlines[key], key=lambda c: c["position"])}
 
@@ -332,9 +332,9 @@ class OutlinePut(BaseModel):
 
 @router.put("/outline/{book}")
 def put_outline(book: int, body: OutlinePut):
-    outlines = writer_store.plan_outline()
-    outlines[str(book)] = body.chapters
-    writer_store.save_plan_outline(outlines)
+    outlines = outline_store.load_outlines()
+    outlines[outline_store.outline_key(book)] = body.chapters
+    outline_store.save_outlines(outlines)
     return get_outline(book)
 
 
@@ -347,8 +347,8 @@ class NewChapter(BaseModel):
 
 @router.post("/outline/{book}/chapter")
 def add_chapter(book: int, body: NewChapter):
-    outlines = writer_store.plan_outline()
-    key = str(book)
+    outlines = outline_store.load_outlines()
+    key = outline_store.outline_key(book)
     outlines.setdefault(key, _seed_outline(book))
     ch = {"id": f"plan-{uuid.uuid4().hex[:8]}", "book": book, "chapter": None,
           "position": body.position, "status": "planned",
@@ -356,17 +356,17 @@ def add_chapter(book: int, body: NewChapter):
           "writer_summary": body.writer_summary, "extracted_bullets": [],
           "notes": None}
     outlines[key].append(ch)
-    writer_store.save_plan_outline(outlines)
+    outline_store.save_outlines(outlines)
     return ch
 
 
 @router.delete("/outline/{book}/chapter/{chapter_id}")
 def delete_chapter(book: int, chapter_id: str):
-    outlines = writer_store.plan_outline()
-    key = str(book)
+    outlines = outline_store.load_outlines()
+    key = outline_store.outline_key(book)
     before = len(outlines.get(key, []))
     outlines[key] = [c for c in outlines.get(key, []) if c["id"] != chapter_id]
-    writer_store.save_plan_outline(outlines)
+    outline_store.save_outlines(outlines)
     return {"ok": True, "deleted": before - len(outlines[key])}
 
 
@@ -385,7 +385,7 @@ def resync_preview(book: int):
     the resync modal expects: per-chapter field diffs (approval granularity is
     the chapter card) plus numbering assignments for newly written chapters."""
     extracted = _extracted_chapters(book)
-    outline_chapters = writer_store.plan_outline().get(str(book), [])
+    outline_chapters = outline_store.chapters_for(book)
     outline = {c["chapter"]: c for c in outline_chapters
                if c.get("chapter") is not None}
     planned = [c for c in outline_chapters if c.get("chapter") is None]
@@ -435,8 +435,8 @@ class ResyncApprove(BaseModel):
 @router.post("/resync/{book}/approve")
 def resync_approve(book: int, body: ResyncApprove):
     extracted = _extracted_chapters(book)
-    outlines = writer_store.plan_outline()
-    key = str(book)
+    outlines = outline_store.load_outlines()
+    key = outline_store.outline_key(book)
     chapters = outlines.get(key, [])
     by_num = {c["chapter"]: c for c in chapters if c.get("chapter") is not None}
     approved_cards = set(body.approved_diff_ids)
@@ -457,7 +457,7 @@ def resync_approve(book: int, body: ResyncApprove):
             oc["extracted_bullets"] = ext["bullets"]
         oc["status"] = "synced"
     outlines[key] = chapters
-    writer_store.save_plan_outline(outlines)
+    outline_store.save_outlines(outlines)
     return get_outline(book)
 
 
@@ -696,7 +696,7 @@ class OutlineReviewRequest(BaseModel):
 @router.post("/outline/review/stream")
 def outline_review_stream(req: OutlineReviewRequest):
     s = get_state()
-    chapters = writer_store.plan_outline().get(str(req.book), [])
+    chapters = outline_store.chapters_for(req.book)
     if req.chapter_ids:
         chapters = [c for c in chapters if c["id"] in req.chapter_ids]
     if not chapters:
