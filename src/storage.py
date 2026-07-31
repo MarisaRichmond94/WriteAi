@@ -615,18 +615,44 @@ class SeriesStore:
         just without stable IDs, which is the pre-KAN-12 behaviour.
         """
         if self._loom_id_map is None:
-            try:
-                from .discovery import discover_books
-                self._loom_id_map = {
-                    b.number: (b.loom_book_id, b.loom_series_id)
-                    for b in discover_books(self._cfg)
-                }
-            except Exception:
-                log.warning("could not resolve Loom identity for this ingest — "
-                            "chunks will be written without stable IDs",
-                            exc_info=True)
-                self._loom_id_map = {}
-        return self._loom_id_map.get(book_number, (None, None))
+            self._loom_id_map = {}
+        hit = self._loom_id_map.get(book_number)
+        if hit and hit[0]:
+            return hit
+
+        # NEVER cache a miss. Loom's canon export writes the manifest
+        # atomically -- temp file, then rename -- so there is a window where it
+        # does not exist. A discovery pass landing in that window resolves the
+        # book to None, and caching that made a TRANSIENT miss permanent for
+        # the whole ingest: every chunk written afterwards silently lost its
+        # stable id.
+        #
+        # That is not hypothetical. Marisa edited chapter 27 of The Secrets We
+        # Keep while an ingest was running; the export raced the scan and those
+        # two chunks were the only ones in the entire database written without
+        # a loom_book_id. It went unnoticed because a missing manifest is a
+        # legitimate state (a book never canon-exported) and so does not warn.
+        #
+        # Re-resolving costs one directory walk per unresolved book per call,
+        # which only happens while something is genuinely unresolvable.
+        try:
+            from .discovery import discover_books
+            fresh = {b.number: (b.loom_book_id, b.loom_series_id)
+                     for b in discover_books(self._cfg)}
+        except Exception:
+            log.warning("could not resolve Loom identity — chunks for book %s "
+                        "will be written without stable IDs", book_number,
+                        exc_info=True)
+            return (None, None)
+
+        self._loom_id_map.update({n: v for n, v in fresh.items() if v[0]})
+        resolved = fresh.get(book_number, (None, None))
+        if not resolved[0]:
+            log.warning("no stable Loom id for book %s — writing its chunks "
+                        "without one. If a canon export was mid-write this is "
+                        "transient and the next write will pick it up.",
+                        book_number)
+        return resolved
 
     def _upsert_sqlite(self, records: list[dict]) -> None:
         cur = self.db.cursor()
