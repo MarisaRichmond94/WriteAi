@@ -140,6 +140,13 @@ def _auto_reconcile(book: int, cards: list[dict],
     # summaries: ch-3-65-… was created at 65, renumbered to 68, and landed on
     # the seeded ch-3-68.
     superseded: list[dict] = []
+    # Cards this pass matched or created. Anything left unclaimed at the end is
+    # a candidate for pruning -- computed AFTER the loop, never before: a card
+    # about to be renumbered (65 -> 68) still holds its OLD number here, so
+    # judging it against canon up front would delete exactly the cards the loop
+    # is on its way to fix.
+    claimed: set[int] = set()
+
     for num in sorted(extracted):
         loom_id = num_to_loom[num]
         ext = extracted[num]
@@ -156,8 +163,10 @@ def _auto_reconcile(book: int, cards: list[dict],
                 "writer_summary": "", "extracted_bullets": ext["bullets"],
                 "notes": None, "loom_id": loom_id,
             })
+            claimed.add(id(cards[-1]))
             changed = True
             continue
+        claimed.add(id(card))
         touched = False
         if card.get("loom_id") != loom_id:
             card["loom_id"] = loom_id
@@ -194,10 +203,28 @@ def _auto_reconcile(book: int, cards: list[dict],
             card["status"] = "synced"
             changed = True
 
-    # Drop the stranded twins, but only the ones the machine wrote. A twin
-    # carrying writer words or notes is kept and reported: silently deleting
-    # writing to tidy a duplicate would be far worse than leaving the duplicate
-    # visible, and the manual Sync flow exists for exactly that conflict.
+    # Cards the loop never claimed and whose number is not in canon. The loop
+    # only visits numbers present in `extracted`, so these are never inspected
+    # and survive forever -- reconcile adds and updates but has never pruned.
+    # Faded carried a phantom `ch-2-93` this way: canon ran 0..92, the outline
+    # had 94 cards, and the extra one rendered with a bullets fallback because
+    # no chapter summary existed for it.
+    #
+    # Safe because of the guard above: `extracted` is asserted equal to the
+    # manifest's chapter set before we get here, so "not in canon" means the
+    # chapter is genuinely gone -- not that the ingest is lagging. Planned cards
+    # (chapter=None) are skipped: authorial intent, never derived.
+    canon_numbers = set(extracted)
+    superseded.extend(c for c in cards
+                      if id(c) not in claimed
+                      and c.get("chapter") is not None
+                      and c["chapter"] not in canon_numbers)
+
+    # Drop stranded cards -- duplicates and out-of-canon leftovers alike -- but
+    # ONLY the ones the machine wrote. A card carrying writer words or notes is
+    # kept and reported: silently deleting writing to tidy the outline would be
+    # far worse than leaving a stale card visible, and the manual Sync flow
+    # exists for exactly that conflict.
     for twin in superseded:
         if twin not in cards:      # defensive: same card stranded twice
             continue

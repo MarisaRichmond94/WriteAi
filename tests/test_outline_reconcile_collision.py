@@ -110,6 +110,53 @@ class ReconcileCollisionTest(unittest.TestCase):
         _, cards = self.reconcile(cards, {1: ext(1), 2: ext(2)}, {1: "L1", 2: "L2"})
         self.assertEqual(len(cards), 2)
 
+    # --- out-of-canon cards (the Faded ch-2-93 phantom) -----------------------
+
+    def test_card_past_the_end_of_canon_is_pruned(self):
+        """Faded's shape: canon ran 0..92, the outline had a card at 93."""
+        machine = "<p>machine</p>"
+        cards = [
+            card("ch-2-91", 91, loom_id="L91", summary=machine, source=machine),
+            card("ch-2-92", 92, loom_id="L92", summary=machine, source=machine),
+            card("ch-2-93", 93, loom_id=None, summary=machine, source=machine),
+        ]
+        changed, cards = self.reconcile(
+            cards, {91: ext(91), 92: ext(92)}, {91: "L91", 92: "L92"})
+        self.assertTrue(changed)
+        self.assertEqual([c["chapter"] for c in cards], [91, 92])
+
+    def test_card_in_a_gap_is_pruned(self):
+        """Not just past the end — any number canon no longer contains."""
+        machine = "<p>machine</p>"
+        cards = [card("ch-2-1", 1, loom_id="L1", summary=machine, source=machine),
+                 card("ch-2-2", 2, loom_id="L2", summary=machine, source=machine),
+                 card("ch-2-3", 3, loom_id="L3", summary=machine, source=machine)]
+        _, cards = self.reconcile(cards, {1: ext(1), 3: ext(3)}, {1: "L1", 3: "L3"})
+        self.assertEqual([c["chapter"] for c in cards], [1, 3])
+
+    def test_out_of_canon_card_with_writer_content_is_kept(self):
+        """A chapter you cut but wrote notes about must not vanish silently."""
+        machine = "<p>machine</p>"
+        cards = [
+            card("ch-2-91", 91, loom_id="L91", summary=machine, source=machine),
+            card("ch-2-93", 93, summary="<p>MY OWN WORDS</p>", source=machine),
+        ]
+        _, cards = self.reconcile(cards, {91: ext(91)}, {91: "L91"})
+        self.assertEqual(len(cards), 2)
+        self.assertIn("MY OWN WORDS", cards[1]["writer_summary"])
+
+    def test_planned_cards_are_never_pruned(self):
+        """chapter=None is authorial intent for something not yet written."""
+        machine = "<p>machine</p>"
+        planned = card("ch-2-plan", 1, summary="", source=None)
+        planned["chapter"] = None
+        planned["position"] = 99.0
+        cards = [card("ch-2-1", 1, loom_id="L1", summary=machine, source=machine),
+                 planned]
+        _, cards = self.reconcile(cards, {1: ext(1)}, {1: "L1"})
+        self.assertEqual(len(cards), 2)
+        self.assertIsNone(cards[1]["chapter"])
+
     def test_new_chapter_still_adds_a_card(self):
         """The fix must not break ordinary growth."""
         cards = [card("ch-3-1", 1, loom_id="L1", summary="", source=None)]
