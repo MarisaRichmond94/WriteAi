@@ -69,10 +69,50 @@ logic ends up implemented three different ways.
 - **Loom → WriteAI:** plain link to `NEXT_PUBLIC_WRITEAI_URL`
   (default `http://localhost:5173`), plus the review deep link below.
 
-### 3. Review deep link (Loom → WriteAI)
+### 3. Review — now runs inside Loom (KAN-22)
 
-The chapter editor's Review button saves the book's canon manuscript, then
-opens:
+The chapter editor's Review button opens Loom's own review panel. It no
+longer opens WriteAI, and **Loom no longer constructs the deep link below** —
+the round trip through a second tab was the point of removing it.
+
+Loom calls three of its own routes, each proxying to us server-side so
+the browser never talks to `:8000` (no CORS, no WriteAI URL in client code,
+and — for the session list — no 6 MB of conversations shipped to render one):
+
+| Loom route | Proxies to | Purpose |
+|---|---|---|
+| `GET /api/writeai/review` | `GET /api/sessions` | Newest review for a chapter. Filters server-side by book title + canon chapter number. |
+| `POST /api/writeai/review/run` | `POST /api/review/stream` | Runs a review, streaming SSE straight through. |
+| `PUT`/`DELETE /api/writeai/review/session` | `PUT`/`DELETE /api/sessions/review/{id}` | Persist or remove a session. |
+
+**`chapter_text` carries the live editor content**, which is what removes the
+resync step: WriteAI documents that field as winning over the index, so no
+export, ingest, or disk write happens first. Loom derives the canon display
+number read-only via `reviewNumberForChapter()` — the canon export returns the
+same number but writes the manuscript as a side effect.
+
+**Spend stays WriteAI's.** It makes the Anthropic call and books it under
+`surface="review"`; `ANTHROPIC_API_KEY` exists only in WriteAI's `.env`, so
+Loom cannot bypass that. The `usage` event returns `cost_usd`, which Loom
+displays at the point of action.
+
+> **`PUT /api/sessions/{kind}/{sid}` REPLACES the whole session object** — it
+> does not merge. A partial body silently discards everything omitted,
+> including the conversation. Loom's proxy refuses incomplete sessions and
+> empty message arrays before they can reach WriteAI.
+
+WriteAI's own review pane is unchanged and remains fully usable.
+
+---
+
+#### Legacy: the review deep link (Loom → WriteAI)
+
+**Retained, but no longer produced by Loom.** The WriteAI-side route still
+works, so links already saved or shared keep resolving. Note it is
+title-addressed, which KAN-12 exists to move away from — do not extend it.
+
+The chapter editor's Review button used to save the book's canon manuscript,
+then open:
 
 ```
 <WRITEAI_URL>/?pane=review&book=<title>&chapter=<n>&focus=<persona>&draft=1
