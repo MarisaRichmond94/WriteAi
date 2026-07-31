@@ -142,16 +142,62 @@ def migrate_schema(db: sqlite3.Connection) -> None:
 
 
 def slugify(name: str) -> str:
-    """Series name -> ChromaDB collection name (3-63 chars, [a-z0-9._-])."""
+    """Series name -> ChromaDB collection name (3-63 chars, [a-z0-9._-]).
+
+    LEGACY naming. Retained to find and migrate collections created before
+    KAN-10, and as the fallback when no stable id is available. New stores use
+    stable_collection_name().
+    """
     slug = re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")
     return (slug or "series")[:63].ljust(3, "x")
+
+
+def stable_collection_name(loom_series_id: str) -> str:
+    """Loom series cuid -> ChromaDB collection name (KAN-10).
+
+    The collection used to be named `slugify(SERIES_NAME)`, which made the
+    entire vector index addressable by a *display* string. Changing SERIES_NAME
+    meant get_or_create_collection quietly created a NEW, EMPTY collection:
+    every query returned nothing and the index looked destroyed, while the real
+    one sat untouched under the old name. Silent, and indistinguishable from
+    catastrophic loss.
+
+    cuids are already lowercase alphanumeric, so they satisfy Chroma's
+    [a-z0-9._-] and 3-63 char rules without munging. The prefix keeps the name
+    self-describing in `chroma list` output.
+    """
+    return f"series-{loom_series_id}"[:63].ljust(3, "x")
+
+
+def _resolve_loom_series_id(cfg) -> str | None:
+    """Loom's series cuid from the manifest sidecars, or None (KAN-10).
+
+    Never raises: a store that cannot resolve identity must still open, on the
+    legacy display-name collection, exactly as it did before.
+    """
+    try:
+        from .discovery import discover_books
+        return next((b.loom_series_id for b in discover_books(cfg)
+                     if b.loom_series_id), None)
+    except Exception:
+        log.warning("could not resolve the Loom series id — the vector index "
+                    "stays on its display-name collection", exc_info=True)
+        return None
 
 
 class SeriesStore:
     def __init__(self, cfg):
         cfg.ensure_data_dirs()
         self._chroma_dir = str(cfg.chroma_dir)
-        self._collection_name = slugify(cfg.series_name)
+        self._cfg = cfg
+        # Name the collection by Loom's stable series id where we have one
+        # (KAN-10); fall back to the display-name slug when nothing has been
+        # canon-exported yet. _open_chroma migrates a legacy-named collection
+        # across in place.
+        self._legacy_collection_name = slugify(cfg.series_name)
+        loom_series_id = _resolve_loom_series_id(cfg)
+        self._collection_name = (stable_collection_name(loom_series_id)
+                                 if loom_series_id else self._legacy_collection_name)
         self._open_chroma()
         self._notes_collection = None  # companion notes index; created lazily
         # One SQLite connection per thread: the web server calls this from a
@@ -159,7 +205,6 @@ class SeriesStore:
         # interleaves cursors. SQLite coordinates between connections.
         import threading
         self._cfg_path = cfg.sqlite_path
-        self._cfg = cfg
         # book_number -> (loom_book_id, loom_series_id); built lazily, once.
         self._loom_id_map: dict[int, tuple[str | None, str | None]] | None = None
         self._local = threading.local()
@@ -168,11 +213,56 @@ class SeriesStore:
         self._backfill_fts()
         self.db.commit()
 
+    def _migrate_legacy_collections(self) -> None:
+        """Rename display-name collections onto the stable id (KAN-10).
+
+        A RENAME, not a rebuild: Chroma's modify(name=...) rewrites the
+        collection record only, so the embeddings are untouched. Re-embedding
+        would cost real API spend for zero benefit.
+
+        Ordering matters. This runs BEFORE get_or_create_collection — call it
+        after and you have already created the new empty collection, at which
+        point the rename can't happen and the old index is orphaned. That is
+        precisely the failure this whole change exists to prevent.
+
+        No-op when there is nothing to migrate, when the target already exists,
+        or when we never resolved a stable id.
+        """
+        if self._collection_name == self._legacy_collection_name:
+            return  # no stable id; nothing to migrate onto
+
+        try:
+            existing = {c.name for c in self._chroma.list_collections()}
+        except Exception:
+            log.warning("could not list Chroma collections — skipping the "
+                        "stable-id migration this run", exc_info=True)
+            return
+
+        # Main collection, then its companion notes index. Same rule for both.
+        pairs = [
+            (self._legacy_collection_name, self._collection_name),
+            (f"{self._legacy_collection_name[:57]}-notes",
+             f"{self._collection_name[:57]}-notes"),
+        ]
+        for old, new in pairs:
+            if new in existing or old not in existing:
+                continue
+            try:
+                self._chroma.get_collection(name=old).modify(name=new)
+                log.info("migrated Chroma collection %r -> %r (rename only; "
+                         "embeddings untouched)", old, new)
+            except Exception:
+                log.error("failed to rename Chroma collection %r -> %r. The "
+                          "index is NOT lost — it remains under the old name. "
+                          "Queries will use a new empty collection until this "
+                          "is resolved.", old, new, exc_info=True)
+
     def _open_chroma(self) -> None:
         """(Re)open the Chroma client and collection from disk."""
         import chromadb  # heavy import, keep at call time
 
         self._chroma = chromadb.PersistentClient(path=self._chroma_dir)
+        self._migrate_legacy_collections()
         self.collection = self._chroma.get_or_create_collection(
             name=self._collection_name,
             metadata={"hnsw:space": "cosine"},
