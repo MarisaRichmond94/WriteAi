@@ -61,10 +61,23 @@ def book_sync_state(s, book_number: int) -> tuple[bool, dict[int, str]]:
             m = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             return (False, {})
-        num_to_id = {c["number"]: c["id"] for c in m.get("chapters", [])
-                     if c.get("number") is not None and c.get("id")}
+        chapters = [c for c in m.get("chapters", [])
+                    if c.get("number") is not None and c.get("id")]
+        num_to_id = {c["number"]: c["id"] for c in chapters}
+        # Compare the index against canon chapters that HAVE PROSE. A stubbed
+        # chapter -- created to write later, wordCount 0 -- produces no chunks,
+        # so it can never appear in the index. Requiring equality against all
+        # of canon meant one stub marked its book permanently out of sync,
+        # which in turn blocked _auto_reconcile for that book forever: its
+        # outline could not self-heal, and renumbering went unnoticed.
+        # Observed on The Secrets We Keep, stubs at chapters 32 and 43.
+        #
+        # num_to_id still carries EVERY canon chapter, stubs included, because
+        # it is also the canon identity set used to decide which outline cards
+        # have left canon. Dropping stubs from it would delete their cards.
+        written = {c["number"] for c in chapters if c.get("wordCount")}
         index_ch = _indexed_chapters(s, b)
-        return (set(num_to_id) == index_ch, num_to_id)
+        return (written == index_ch, num_to_id)
     return (False, {})
 
 

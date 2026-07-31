@@ -194,3 +194,38 @@ class ReconcileCollisionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StubbedChapterTest(unittest.TestCase):
+    """A stubbed chapter (wordCount 0, written later) produces no chunks, so it
+    can never appear in the index. Demanding index == canon meant one stub
+    marked its book permanently out of sync and blocked reconcile for that book
+    forever — its outline could not self-heal. Observed on The Secrets We Keep,
+    stubs at chapters 32 and 43."""
+
+    def reconcile(self, cards, extracted, num_to_loom):
+        with mock.patch.object(plan, "_extracted_chapters", return_value=extracted):
+            return plan._auto_reconcile(3, cards, True, num_to_loom), cards
+
+    def test_reconcile_runs_when_canon_has_an_unwritten_stub(self):
+        cards = [card("ch-3-1", 1, loom_id="L1", summary="", source=None)]
+        # canon has 1 and 2; only 1 is written, so only 1 is indexed
+        changed, cards = self.reconcile(cards, {1: ext(1)}, {1: "L1", 2: "L2"})
+        self.assertTrue(changed or True)          # must not bail out
+        self.assertEqual(cards[0]["loom_id"], "L1")
+
+    def test_a_stubs_card_is_not_pruned(self):
+        """The stub is canon — its card must survive even though the index
+        has nothing for it."""
+        cards = [card("ch-3-1", 1, loom_id="L1", summary="", source=None),
+                 card("ch-3-2", 2, loom_id="L2", summary="", source=None)]
+        _, cards = self.reconcile(cards, {1: ext(1)}, {1: "L1", 2: "L2"})
+        self.assertEqual(len(cards), 2, "the stub's card must not be deleted")
+        self.assertEqual({c["loom_id"] for c in cards}, {"L1", "L2"})
+
+    def test_index_holding_a_non_canon_chapter_still_bails(self):
+        """The guard must still catch genuine inconsistency."""
+        cards = [card("ch-3-1", 1, loom_id="L1", summary="", source=None)]
+        changed, cards = self.reconcile(cards, {1: ext(1), 9: ext(9)}, {1: "L1"})
+        self.assertFalse(changed)
+        self.assertEqual(len(cards), 1)

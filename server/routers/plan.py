@@ -126,7 +126,13 @@ def _auto_reconcile(book: int, cards: list[dict],
     if not in_sync or not num_to_loom:
         return False
     extracted = _extracted_chapters(book)
-    if set(extracted) != set(num_to_loom):  # ingest raced the check — skip
+    # Subset, not equality: canon may legitimately contain chapters the index
+    # cannot hold. A stubbed chapter (wordCount 0, written later) produces no
+    # chunks, so demanding equality blocked reconcile for its whole book
+    # forever. `in_sync` above is the authoritative freshness signal and is
+    # already stub-aware (see book_sync_state); this guard only needs to catch
+    # the genuine inconsistency — the index holding chapters canon does not.
+    if not set(extracted) <= set(num_to_loom):  # ingest raced the check — skip
         return False
 
     by_loom = {c["loom_id"]: c for c in cards if c.get("loom_id")}
