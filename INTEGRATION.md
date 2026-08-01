@@ -216,6 +216,75 @@ chapters" stays distinguishable from "lookup failed". Unknown or malformed ids
 are dropped rather than failing the request, so one stale id cannot blank every
 other event's links.
 
+### 6. Character tagging (Loom ↔ WriteAI)
+
+Which chapters a writer-character appears in. **Loom owns the join; we own the
+character.** The sibling of §5, built from the same shared parts on Loom's side
+so the two tabs cannot drift apart.
+
+Keyed by **chapter cuid** (`ChapterCharacter` in Loom's schema). We can already
+say which *books* a character is in — `books`, matched by title — but nothing
+here is chapter-aware, and any chapter-level answer we stored would be
+renumbered out from under us by an insert in Loom. This is the one question
+only Loom can answer.
+
+| Direction | Route | Purpose |
+|---|---|---|
+| Loom → us | `GET /api/plan/characters` | The character pool, behind Loom's `/api/writeai/characters` proxy. |
+| Loom → us | `PUT/DELETE /api/plan/characters/{char_id}` | Create, edit and delete from Loom's Characters tab. |
+| Loom → us | `POST /api/plan/characters/{char_id}/photo` | Portrait upload (multipart). |
+| Loom → us | `GET /api/plan/photos/{file}` | Portraits, behind Loom's `/api/writeai/photo/[file]`. |
+| us → Loom | `GET /api/plan/characters/chapter-links?ids=…` → `GET <LOOM_URL>/api/chapter-characters?characterIds=…` | The reverse lookup the Plan character card renders. |
+
+`character_chapter_links` in `server/routers/plan.py` is a **pass-through, not a
+second source of truth**, and is deliberately **uncached** — the point of the
+seam is that these numbers track Loom, and a mirror reintroduces the drift it
+exists to remove. It is declared **before** `/characters/{char_id}` so the
+literal path wins the route match. Loom unreachable returns **503** with
+`unreachable: true` (nothing is broken, it simply isn't running), distinct from
+**502** for an upstream error — the card must say which, since an empty box
+would otherwise claim the character appears nowhere.
+
+> ⚠️ **`PUT /api/plan/characters/{char_id}` is ours, and it is the worst of the
+> three replace-shaped endpoints.** It takes a **raw `dict` with no model** and
+> does `chars[i] = body`, so an omitted key does not reset to a default — it
+> *disappears*. It is also an **upsert**: an unknown id appends rather than
+> 404ing, which is exactly how Loom's Characters tab creates a character. Both
+> behaviours are load-bearing; neither is guessable from the method.
+
+Ids are minted **by Loom**, client-side, as `wc-` + 8 hex to match ours, and
+handed straight to that upsert. Anywhere an id reaches the filesystem it must
+pass `_safe_photo_stem()`: LOOM-43 found `char_id` interpolated into a **glob
+whose matches are then unlinked**, where `*` widened the pattern to every
+portrait in the directory and deleted them all. It checks filename *safety*,
+not id *format* — one live character predates the `wc-` shape (`draft-<ms>`),
+and `*` is no more allowed in one shape than the other. `settings.py`'s
+`_safe_slug` guards the book-cover routes the same way; this was the missed one.
+
+**Rendering.** `frontend/src/components/plan/character/ChapterAppearances.tsx`,
+fed by the generalised `useChapterLinks` hook. It is rendered
+**unconditionally at a fixed height**, including for a character with no tags:
+the cards share a grid row, so one that collapses leaves the row ragged. Books
+group into one row each in **`bookOrder`** — Loom's `Book.order`, the reading
+order — never by title, which is alphabetical order wearing chronology's
+clothes. Chapter pills scroll **sideways** rather than wrapping, because a POV
+character can appear in forty chapters of one book and wrapping would let a
+single row swallow the viewport. `readPath` is relative and prefixed with
+`VITE_LOOM_URL` through `loomHref()`; a null one means an unnumbered chapter —
+a real appearance, shown unlinked rather than dropped.
+
+**Degradation** matches §5: unknown ids hidden and never auto-deleted, every
+requested id gets a key, malformed ids dropped rather than failing the request.
+
+> ⚠️ **Characters are not yet id-identified inside `writer_characters.json`.**
+> The seam is id-keyed end to end, but internally a relationship still
+> references its target **by name**, and writer-events still name their cast the
+> same way. Renaming a character in Loom updates the record the tags point at
+> and leaves those references dangling. LOOM-45 closes this; until then Loom's
+> Characters tab refuses a new character whose name duplicates an existing one,
+> which guards the reachable half only. **This is the one place the character
+> seam is weaker than the event seam** — do not assume symmetry.
+
 ## Identity
 
 **Loom's cuids are the identity of a series and a book across both apps.**
