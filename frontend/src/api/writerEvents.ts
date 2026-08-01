@@ -1,11 +1,6 @@
 // Writer-authored timeline events — the writer's own events, distinct from
 // the AI-extracted events served by /api/events.
 
-export interface WriterEventTag {
-  book: string;
-  chapter: number;
-}
-
 export interface WriterEvent {
   id: string;
   title: string;
@@ -14,7 +9,6 @@ export interface WriterEvent {
   description: string;
   characters: string[];
   location: string | null;
-  book_chapters: WriterEventTag[];
   created_at: string;
   updated_at: string;
 }
@@ -26,10 +20,6 @@ export interface WriterEventInput {
   description: string;
   characters: string[];
   location: string | null;
-  /** Legacy title+positional chapter tagging, replaced by Loom's cuid-keyed
-   *  join (LOOM-32) and removed outright in LOOM-40. Optional because nothing
-   *  authors it any more — neither this form nor Loom sends it. */
-  book_chapters?: WriterEventTag[];
 }
 
 /**
@@ -37,8 +27,8 @@ export interface WriterEventInput {
  *
  * Fully denormalised by Loom, so nothing here re-resolves anything. Loom owns
  * the join and keys it by chapter cuid — which is what makes a tag survive a
- * chapter being inserted above it, the failure that made `book_chapters`
- * unusable and went unnoticed because nothing ever reported it.
+ * chapter being inserted above it — the failure that made the retired
+ * `book_chapters` tagging unusable, and that nothing ever reported.
  */
 export interface ChapterLink {
   seriesId: string;

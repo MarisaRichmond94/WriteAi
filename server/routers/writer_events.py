@@ -4,9 +4,15 @@ These are events the writer creates by hand as part of the writing process,
 kept entirely separate from the AI-extracted `events` table. They live in
 writer_data/writer_events.json (via writer_store) and are never touched by AI.
 
-Each event may tag writer characters, a writer-created location, and any number
-of book+chapter pairs. The location pool is stored alongside the events so the
-form can offer "select an existing location" without re-deriving it.
+Each event may tag writer characters and a writer-created location. The
+location pool is stored alongside the events so the form can offer "select an
+existing location" without re-deriving it.
+
+Chapters are NOT tagged here. That used to be `book_chapters`, a list of
+{book title, chapter number} — both of which move, so inserting a chapter in
+Loom renumbered every tag in that book with nothing to report it. Loom owns
+that join now, keyed by chapter cuid (LOOM-32); this module serves the reverse
+lookup at /writer-events/chapter-links and stores nothing about chapters.
 """
 
 from __future__ import annotations
@@ -28,11 +34,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class BookChapterTag(BaseModel):
-    book: str
-    chapter: int
-
-
 class WriterEventBody(BaseModel):
     title: str = ""
     date: str | None = None
@@ -40,7 +41,6 @@ class WriterEventBody(BaseModel):
     description: str = ""
     characters: list[str] = []
     location: str | None = None
-    book_chapters: list[BookChapterTag] = []
 
 
 class LocationBody(BaseModel):
@@ -110,7 +110,6 @@ def create_writer_event(body: WriterEventBody):
         "description": body.description,
         "characters": body.characters,
         "location": (body.location or "").strip() or None,
-        "book_chapters": [bc.model_dump() for bc in body.book_chapters],
         "created_at": now,
         "updated_at": now,
     }
@@ -133,7 +132,6 @@ def update_writer_event(event_id: str, body: WriterEventBody):
         "description": body.description,
         "characters": body.characters,
         "location": (body.location or "").strip() or None,
-        "book_chapters": [bc.model_dump() for bc in body.book_chapters],
         "updated_at": _now(),
     })
     _add_location(store, event["location"])
