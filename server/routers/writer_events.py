@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from .. import writer_store
+from .. import loom_client, writer_store
 
 router = APIRouter(prefix="/api")
 
@@ -52,6 +54,40 @@ def _add_location(store: dict, name: str | None) -> None:
     name = name.strip()
     if name and name not in store["locations"]:
         store["locations"].append(name)
+
+
+@router.get("/writer-events/chapter-links")
+def writer_event_chapter_links(ids: str = ""):
+    """Which Loom chapters reference these events (LOOM-32).
+
+    The reverse of the tagging Loom's Events tab does. Loom owns the join —
+    keyed there by chapter cuid, which is what makes a tag survive a chapter
+    being inserted above it — so only Loom can answer, and this is a
+    pass-through rather than a second source of truth.
+
+    Deliberately NOT cached. A stale answer is worse than no answer here: the
+    point of the seam is that these numbers track Loom, and a mirror would
+    quietly reintroduce the drift the epic exists to remove. Loom being closed
+    is a state the UI names, not one it papers over.
+
+    Loom returns the rows already denormalised (series, book, chapter, number,
+    path), so nothing is re-resolved here. `readPath` is RELATIVE — Loom has no
+    reliable way to know its own external origin, and the frontend already
+    configures VITE_LOOM_URL for its existing jump links.
+
+    Declared before /writer-events/{event_id} so the literal path wins.
+    """
+    ids = ids.strip()
+    if not ids:
+        return {}
+    try:
+        return loom_client.get_json(f"/api/chapter-events?eventIds={quote(ids)}")
+    except loom_client.LoomUnreachable as exc:
+        # 503, not 502: nothing is broken, Loom is simply not running.
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Loom is not reachable", "unreachable": True, "detail": str(exc)},
+        )
 
 
 @router.get("/writer-events")

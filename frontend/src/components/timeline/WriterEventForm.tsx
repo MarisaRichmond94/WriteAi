@@ -15,8 +15,9 @@ import {
   X,
 } from "lucide-react";
 import { clsx } from "clsx";
-import type { BookResponse, WriterCharacter } from "../../types";
-import type { WriterEvent, WriterEventInput, WriterEventTag } from "../../api/writerEvents";
+import { ChapterLinkChips, ChapterLinksUnavailable } from "./ChapterLinks";
+import type { WriterCharacter } from "../../types";
+import type { ChapterLink, WriterEvent, WriterEventInput } from "../../api/writerEvents";
 import { formatTime12h } from "../../lib/format";
 import StoryDatePicker from "../plan/outline/StoryDatePicker";
 
@@ -93,8 +94,12 @@ interface WriterEventDrawerProps {
   defaultDate: string | null;
   defaultLocation: string | null;
   characters: WriterCharacter[];
-  books: BookResponse[];
   locations: string[];
+  /** Loom chapters referencing this event, and whether Loom could be asked
+   *  at all — an empty list and an unanswerable question look identical
+   *  otherwise, and only one means "referenced nowhere". */
+  chapterLinks: ChapterLink[];
+  loomUnreachable: boolean;
   saving: boolean;
   eventIndex: number;
   totalEvents: number;
@@ -110,6 +115,8 @@ interface WriterEventDrawerProps {
 function ViewMode({
   event,
   characters,
+  chapterLinks,
+  loomUnreachable,
   eventIndex,
   totalEvents,
   onPrev,
@@ -119,6 +126,8 @@ function ViewMode({
 }: {
   event: WriterEvent;
   characters: WriterCharacter[];
+  chapterLinks: ChapterLink[];
+  loomUnreachable: boolean;
   eventIndex: number;
   totalEvents: number;
   onPrev: () => void;
@@ -253,23 +262,23 @@ function ViewMode({
           </div>
         )}
 
-        {/* Book & Chapter tags */}
-        {event.book_chapters.length > 0 && (
+        {/* Chapters, from Loom (LOOM-32).
+            Tagging happens in Loom's Events tab now, keyed by chapter cuid, so
+            these follow their chapters through insertion and renumbering. The
+            old book_chapters editor stored a title and a NUMBER and drifted
+            silently the first time a chapter was inserted above one. */}
+        {(loomUnreachable || chapterLinks.length > 0) && (
           <div>
             <SectionHeader
-              label="Book & Chapter"
-              count={event.book_chapters.length}
+              label="Chapter(s)"
+              count={loomUnreachable ? undefined : chapterLinks.length}
             />
-            <div className="mt-1.5 flex flex-wrap gap-2">
-              {event.book_chapters.map((tag, i) => (
-                <span
-                  key={i}
-                  className="flex items-center gap-1.5 rounded-full border border-surface-border px-3 py-1 text-[11px] text-ink-secondary"
-                >
-                  <BookOpen className="h-3 w-3 flex-shrink-0" />
-                  {tag.book} — Ch. {tag.chapter}
-                </span>
-              ))}
+            <div className="mt-1.5">
+              {loomUnreachable ? (
+                <ChapterLinksUnavailable />
+              ) : (
+                <ChapterLinkChips links={chapterLinks} />
+              )}
             </div>
           </div>
         )}
@@ -278,7 +287,7 @@ function ViewMode({
         {!event.description &&
           event.characters.length === 0 &&
           !event.location &&
-          event.book_chapters.length === 0 && (
+          chapterLinks.length === 0 && (
             <p className="text-[11px] italic text-ink-muted">
               No details yet.{" "}
               <button
@@ -302,7 +311,6 @@ function EditMode({
   defaultDate,
   defaultLocation,
   characters,
-  books,
   locations,
   saving,
   onSave,
@@ -313,7 +321,6 @@ function EditMode({
   defaultDate: string | null;
   defaultLocation: string | null;
   characters: WriterCharacter[];
-  books: BookResponse[];
   locations: string[];
   saving: boolean;
   onSave: (input: WriterEventInput) => void;
@@ -333,10 +340,6 @@ function EditMode({
   const [location, setLocation] = useState(
     event ? event.location ?? "" : defaultLocation ?? "",
   );
-  const [tags, setTags] = useState<WriterEventTag[]>(
-    event?.book_chapters ?? [],
-  );
-
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   const [datePickerOpen, setDatePickerOpen] = useState(false);
@@ -362,7 +365,6 @@ function EditMode({
     setDescription(event?.description ?? "");
     setSelectedChars(event?.characters ?? []);
     setLocation(event ? event.location ?? "" : defaultLocation ?? "");
-    setTags(event?.book_chapters ?? []);
     setDatePickerOpen(false);
     setLocOpen(false);
     setCharOpen(false);
@@ -440,23 +442,6 @@ function EditMode({
       prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
     );
 
-  const addTag = () => {
-    const firstBook = books[0];
-    if (!firstBook) return;
-    setTags((prev) => [
-      ...prev,
-      { book: firstBook.name, chapter: firstBook.chapters[0]?.chapter ?? 0 },
-    ]);
-  };
-
-  const updateTag = (i: number, patch: Partial<WriterEventTag>) =>
-    setTags((prev) =>
-      prev.map((t, idx) => (idx === i ? { ...t, ...patch } : t)),
-    );
-
-  const removeTag = (i: number) =>
-    setTags((prev) => prev.filter((_, idx) => idx !== i));
-
   const handleSave = () =>
     onSave({
       title: title.trim(),
@@ -465,7 +450,6 @@ function EditMode({
       description,
       characters: selectedChars,
       location: location.trim() || null,
-      book_chapters: tags,
     });
 
   const canSave = title.trim().length > 0 && !saving;
@@ -734,63 +718,17 @@ function EditMode({
             </div>
           </div>
 
-          {/* Book + chapter tags */}
-          <div>
-            <SectionHeader label="Chapter(s)" />
-            <div className="mt-1.5 flex flex-col gap-2">
-              {tags.map((tag, i) => {
-                const book = books.find((b) => b.name === tag.book);
-                return (
-                  <div key={i} className="flex items-center gap-2">
-                    <select
-                      value={tag.book}
-                      onChange={(e) => {
-                        const nb = books.find((b) => b.name === e.target.value);
-                        updateTag(i, {
-                          book: e.target.value,
-                          chapter: nb?.chapters[0]?.chapter ?? 0,
-                        });
-                      }}
-                      className="flex-1 rounded-md border border-surface-border bg-surface px-2 py-1.5 text-xs text-ink-primary focus:border-accent/50 focus:outline-none"
-                    >
-                      {books.map((b) => (
-                        <option key={b.id} value={b.name}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={tag.chapter}
-                      onChange={(e) =>
-                        updateTag(i, { chapter: Number(e.target.value) })
-                      }
-                      className="w-40 rounded-md border border-surface-border bg-surface px-2 py-1.5 text-xs text-ink-primary focus:border-accent/50 focus:outline-none"
-                    >
-                      {(book?.chapters ?? []).map((c) => (
-                        <option key={c.chapter} value={c.chapter}>
-                          {c.chapter_heading}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => removeTag(i)}
-                      className="rounded p-1.5 text-ink-muted transition-colors hover:bg-surface-hover hover:text-red-400"
-                      title="Remove"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                );
-              })}
-              <button
-                onClick={addTag}
-                disabled={books.length === 0}
-                className="flex items-center gap-1.5 self-start rounded-md border border-dashed border-surface-border px-2.5 py-1.5 text-[11px] text-ink-secondary transition-colors hover:border-accent hover:text-accent disabled:opacity-40"
-              >
-                <Plus className="h-3 w-3" /> Tag a book &amp; chapter
-              </button>
-            </div>
-          </div>
+          {/* Chapter tagging lives in Loom now (LOOM-32).
+
+              It used to be two <select>s writing {book title, chapter number}
+              into book_chapters. Both halves move — inserting a chapter in Loom
+              renumbered every tag in that book, silently — which is why the
+              feature went unused. Loom keys the join by chapter cuid instead,
+              so a tag follows its chapter. The read view shows the result.
+
+              Deliberately no read-only remnant here: there were 6 legacy tags
+              in total and they are being re-made by hand (LOOM-40), so a
+              disabled control would be scar tissue, not a fallback. */}
         </div>
       </div>
 
@@ -833,8 +771,9 @@ export default function WriterEventDrawer({
   defaultDate,
   defaultLocation,
   characters,
-  books,
   locations,
+  chapterLinks,
+  loomUnreachable,
   saving,
   eventIndex,
   totalEvents,
@@ -858,6 +797,8 @@ export default function WriterEventDrawer({
         <ViewMode
           event={event}
           characters={characters}
+          chapterLinks={chapterLinks}
+          loomUnreachable={loomUnreachable}
           eventIndex={eventIndex}
           totalEvents={totalEvents}
           onPrev={onPrev}
@@ -871,7 +812,6 @@ export default function WriterEventDrawer({
           defaultDate={defaultDate}
           defaultLocation={defaultLocation}
           characters={characters}
-          books={books}
           locations={locations}
           saving={saving}
           onSave={onSave}

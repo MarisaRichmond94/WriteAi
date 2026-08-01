@@ -11,6 +11,18 @@
 
 const loomBase = () => import.meta.env.VITE_LOOM_URL ?? "http://localhost:3000";
 
+/**
+ * Absolutise a relative path Loom handed us (LOOM-32).
+ *
+ * Loom's chapter-link endpoint returns `readPath`, not a full URL, because it
+ * has no reliable way to know its own external origin — deriving one from a
+ * request Host header is a guess. We already configure VITE_LOOM_URL, so the
+ * base belongs here rather than being duplicated over there.
+ */
+export function loomHref(path: string): string {
+  return `${loomBase()}${path}`;
+}
+
 /** Author-side jump: lands on the chapter the writer last had open. */
 export function loomAuthorHref(
   loomSeriesId: string | null | undefined,

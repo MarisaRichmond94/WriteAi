@@ -2,9 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { clsx } from "clsx";
 import { CalendarClock, MapPin, Plus, Search, X } from "lucide-react";
 import { FaTimeline } from "react-icons/fa6";
-import type { BookResponse, WriterCharacter } from "../../types";
+import type { WriterCharacter } from "../../types";
 import { formatTime12h } from "../../lib/format";
-import { fetchBooks } from "../../api/books";
 import { fetchWriterCharacters } from "../../api/plan";
 import {
   fetchWriterEvents,
@@ -16,6 +15,9 @@ import {
 } from "../../api/writerEvents";
 import { useAppStore } from "../../store/useAppStore";
 import WriterEventDrawer from "./WriterEventForm";
+import { ChapterLinkChips, ChapterLinksUnavailable } from "./ChapterLinks";
+import { useChapterLinks } from "../../hooks/useChapterLinks";
+import type { ChapterLink } from "../../api/writerEvents";
 
 // ── Chart constants ──────────────────────────────────────────────────────────
 
@@ -252,10 +254,14 @@ function EventListCard({
   event,
   selected,
   onSelect,
+  links,
+  loomUnreachable,
 }: {
   event: WriterEvent;
   selected: boolean;
   onSelect: () => void;
+  links: ChapterLink[];
+  loomUnreachable: boolean;
 }) {
   return (
     <button
@@ -292,12 +298,17 @@ function EventListCard({
             {event.time && ` · ${formatTime12h(event.time)}`}
           </p>
         )}
-        {event.book_chapters.length > 0 && (
-          <p>
-            {event.book_chapters.length} tag
-            {event.book_chapters.length === 1 ? "" : "s"}
-          </p>
-        )}
+        {/* Chapters that reference this event, from Loom. Replaces a count of
+            `book_chapters`, which was often silently wrong: it stored chapter
+            NUMBERS, and inserting a chapter in Loom renumbered every tag in
+            that book without telling anyone. */}
+        {loomUnreachable ? (
+          <ChapterLinksUnavailable compact />
+        ) : links.length > 0 ? (
+          <div className="flex justify-end">
+            <ChapterLinkChips links={links} max={2} />
+          </div>
+        ) : null}
       </div>
     </button>
   );
@@ -310,8 +321,11 @@ export default function WriterTimelinePane() {
 
   const [events, setEvents] = useState<WriterEvent[]>([]);
   const [locations, setLocations] = useState<string[]>([]);
+  // One request for every event on the page. The hook re-fetches when the SET
+  // of ids changes, so creating or deleting an event refreshes the chips
+  // without a manual invalidation.
+  const chapterLinks = useChapterLinks(events.map((e) => e.id));
   const [characters, setCharacters] = useState<WriterCharacter[]>([]);
-  const [books, setBooks] = useState<BookResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"list" | "chart">(() => {
@@ -324,12 +338,11 @@ export default function WriterTimelinePane() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    Promise.all([fetchWriterEvents(), fetchWriterCharacters(), fetchBooks()])
-      .then(([we, chars, bks]) => {
+    Promise.all([fetchWriterEvents(), fetchWriterCharacters()])
+      .then(([we, chars]) => {
         setEvents(we.events);
         setLocations(we.locations);
         setCharacters(chars);
-        setBooks(bks);
       })
       .catch(() => showToast("Failed to load timeline."))
       .finally(() => setLoading(false));
@@ -455,8 +468,9 @@ export default function WriterTimelinePane() {
     defaultDate: lastEventDate,
     defaultLocation: lastEventLocation,
     characters,
-    books,
     locations,
+    chapterLinks: editing ? chapterLinks.links[editing.id] ?? [] : [],
+    loomUnreachable: chapterLinks.unreachable,
     saving,
     eventIndex: selectedIndex,
     totalEvents: visible.length,
@@ -623,6 +637,8 @@ export default function WriterTimelinePane() {
                     event={ev}
                     selected={open && editing?.id === ev.id}
                     onSelect={() => openEdit(ev)}
+                    links={chapterLinks.links[ev.id] ?? []}
+                    loomUnreachable={chapterLinks.unreachable}
                   />
                 ))}
               </div>
