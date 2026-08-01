@@ -39,7 +39,11 @@ class StubBackfillTest(unittest.TestCase):
         saved = []
 
         db = mock.Mock()
-        db.execute.return_value = list(prose.items())
+        # (chapter_number, summary, loom_chapter_id). These rows are deliberately
+        # UNSTAMPED: this suite is about the stub guard, and an unstamped row
+        # falls back to number matching, which is the path being tested.
+        rows = [(n, summary, None) for n, summary in prose.items()]
+        db.execute.return_value = mock.Mock(fetchall=lambda: rows)
 
         with mock.patch.object(plan.outline_store, "load_outlines",
                                return_value=store), \

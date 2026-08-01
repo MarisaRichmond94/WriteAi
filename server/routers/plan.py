@@ -348,12 +348,21 @@ def get_outline(book: int):
     # one character — stops matching and is never overwritten again.
     import html as _html
     s = get_state()
+    # Two lookups over one query. `by_id` is authoritative: a summary row
+    # carrying a Loom chapter id belongs to THAT chapter wherever it has been
+    # renumbered to, so a card matches its own summary even when the index and
+    # the manifest disagree about numbering (LOOM-65). `by_num` is the fallback
+    # for rows written before the column existed and for books that have never
+    # been canon-exported — a missing id is unknown identity, never "no match",
+    # so the worst case stays exactly the pre-LOOM-65 behaviour.
     try:
-        prose = dict(s.db.execute(
-            "SELECT chapter_number, summary FROM chapter_summaries "
-            "WHERE book_number = ?", (book,)))
+        rows = s.db.execute(
+            "SELECT chapter_number, summary, loom_chapter_id FROM chapter_summaries "
+            "WHERE book_number = ?", (book,)).fetchall()
     except Exception:
-        prose = {}
+        rows = []
+    by_num = {n: (summary, cid) for n, summary, cid in rows}
+    by_id = {cid: summary for _, summary, cid in rows if cid}
     changed = False
     for c in outlines[key]:
         ws = (c.get("writer_summary") or "").strip()
@@ -364,8 +373,21 @@ def get_outline(book: int):
             continue
         if c.get("chapter") in stub_numbers:
             continue
-        if c.get("chapter") in prose:
-            new = f"<p>{_html.escape(prose[c['chapter']])}</p>"
+        summary = by_id.get(c.get("loom_id"))
+        if summary is None:
+            # Fall back to the number only when the row sitting there claims no
+            # identity of its own. An UNSTAMPED row is unknown identity, and
+            # unknown identity degrades to number matching — the pre-LOOM-65
+            # behaviour, and what keeps a half-migrated book rendering while
+            # enrichment works through it. A row that IS stamped, with an id
+            # that is not this card's, demonstrably belongs to another chapter:
+            # that is precisely the stale neighbour this change exists to stop
+            # showing, so it is skipped and the card falls through to bullets.
+            row = by_num.get(c.get("chapter"))
+            if row and not row[1]:
+                summary = row[0]
+        if summary is not None:
+            new = f"<p>{_html.escape(summary)}</p>"
         elif c.get("extracted_bullets"):
             new = _bullets_html(c["extracted_bullets"])
         else:

@@ -266,6 +266,48 @@ def gc_orphans(db: sqlite3.Connection) -> int:
     return total
 
 
+_LOOM_ID_CACHE: dict[int, tuple[str | None, str | None, dict[int, str]]] = {}
+
+
+def _loom_ids(cfg, book_number: int,
+              chapter_number: int) -> tuple[str | None, str | None, str | None]:
+    """(loom_book_id, loom_series_id, loom_chapter_id) for one chapter.
+
+    Resolution failure is non-fatal and expected: a book that has never been
+    canon-exported has no manifest, so the summary is still written, just
+    without stable ids — exactly what every row held before LOOM-65. Readers
+    fall back to the chapter number.
+
+    Cached per book because resolving walks the books directory and opens a
+    manifest, which is far too much work to repeat for every chapter in a run.
+    A miss is NEVER cached, for the reason `SeriesStore._loom_identity` spells
+    out: Loom writes the manifest atomically (temp file, then rename), so there
+    is a window where it does not exist, and caching that miss would strip
+    identity from every chapter enriched afterwards.
+    """
+    from src.discovery import discover_books, read_manifest_chapters
+
+    hit = _LOOM_ID_CACHE.get(book_number)
+    if hit is None or not hit[0]:
+        book_id = series_id = None
+        chapter_ids: dict[int, str] = {}
+        try:
+            for b in discover_books(cfg):
+                if b.number == book_number:
+                    book_id, series_id = b.loom_book_id, b.loom_series_id
+                    chapter_ids = {c["number"]: c["id"]
+                                   for c in read_manifest_chapters(b.folder, b.title)}
+                    break
+        except Exception:
+            log.warning("could not resolve Loom identity for book %s — writing "
+                        "its summaries without stable ids", book_number,
+                        exc_info=True)
+        hit = (book_id, series_id, chapter_ids)
+        if book_id:
+            _LOOM_ID_CACHE[book_number] = hit
+    return (hit[0], hit[1], hit[2].get(chapter_number))
+
+
 def norm_quote(s: str) -> str:
     """Normalize for verbatim-quote matching: models straighten curly quotes
     and collapse whitespace when copying, but the words must match exactly."""
@@ -694,11 +736,31 @@ class EnrichmentRunner:
                     self._store_events(db, c, data.get("events", []))
                     summary = (data.get("chapter_summary") or "").strip()
                     if summary:
+                        book_id, series_id, chapter_id = _loom_ids(
+                            cfg, c["book_number"], c["chapter_number"])
+                        # Identity is stamped on write, never left to a later
+                        # backfill: a one-off backfill decays the moment new
+                        # prose is enriched. Book 2 chapter 93 proved it — the
+                        # only summary row in the database with a NULL
+                        # loom_book_id, written after the LOOM-12 backfill ran.
+                        #
+                        # The conflict clause refreshes the ids too. Rows that
+                        # predate this column are stamped the next time their
+                        # chapter is enriched, and a chapter that genuinely
+                        # moved gets its current identity rather than a stale
+                        # one.
                         db.execute(
-                            """INSERT INTO chapter_summaries (book_number, chapter_number, summary)
-                               VALUES (?,?,?) ON CONFLICT(book_number, chapter_number)
-                               DO UPDATE SET summary = excluded.summary""",
-                            (c["book_number"], c["chapter_number"], summary))
+                            """INSERT INTO chapter_summaries
+                                   (book_number, chapter_number, summary,
+                                    loom_book_id, loom_series_id, loom_chapter_id)
+                               VALUES (?,?,?,?,?,?)
+                               ON CONFLICT(book_number, chapter_number)
+                               DO UPDATE SET summary = excluded.summary,
+                                             loom_book_id = excluded.loom_book_id,
+                                             loom_series_id = excluded.loom_series_id,
+                                             loom_chapter_id = excluded.loom_chapter_id""",
+                            (c["book_number"], c["chapter_number"], summary,
+                             book_id, series_id, chapter_id))
                     _set_state(db, f"events:{c['book_number']}.{c['chapter_number']}",
                                c["content_hash"])
                     db.commit()
