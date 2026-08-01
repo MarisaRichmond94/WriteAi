@@ -276,14 +276,24 @@ a real appearance, shown unlinked rather than dropped.
 **Degradation** matches §5: unknown ids hidden and never auto-deleted, every
 requested id gets a key, malformed ids dropped rather than failing the request.
 
-> ⚠️ **Characters are not yet id-identified inside `writer_characters.json`.**
-> The seam is id-keyed end to end, but internally a relationship still
-> references its target **by name**, and writer-events still name their cast the
-> same way. Renaming a character in Loom updates the record the tags point at
-> and leaves those references dangling. LOOM-45 closes this; until then Loom's
-> Characters tab refuses a new character whose name duplicates an existing one,
-> which guards the reachable half only. **This is the one place the character
-> seam is weaker than the event seam** — do not assume symmetry.
+> ⚠️ **Renaming a writer character detaches it from its canon entity.**
+> Cross-references were resolved by LOOM-45: `events[].characters` and
+> `relationships[].target` hold `wc-` ids, and the display name is derived at
+> read time, so a rename reaches every event and relationship instead of
+> orphaning them. `scripts/migrate_character_refs.py` performed the
+> conversion — idempotent, and it aborts rather than dropping a reference it
+> cannot resolve. Both write paths also coerce an incoming NAME to an id, so an
+> older client cannot undo the migration one save at a time.
+>
+> What LOOM-45 deliberately did NOT change is the canon lookup in `plan.py` —
+> `s.canon.entities.get(c["name"])` — which still matches **by name**. Canon is
+> rebuilt from the manuscript and has no notion of `wc-` ids, so there is
+> nothing to key it on. The consequence is real: renaming a writer character to
+> something the manuscript does not call them detaches it from its canon
+> entity, and the features relying on that lookup — junk-pruning and
+> `/characters/{id}/extracted` — stop finding it. Nothing errors; the extracted
+> data just goes quiet. Rename to match the manuscript, or accept losing the
+> canon tie-in for that character.
 
 ## Identity
 

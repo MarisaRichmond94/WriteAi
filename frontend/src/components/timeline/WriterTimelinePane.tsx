@@ -4,6 +4,7 @@ import { CalendarClock, MapPin, Plus, Search, X } from "lucide-react";
 import { FaTimeline } from "react-icons/fa6";
 import type { WriterCharacter } from "../../types";
 import { formatTime12h } from "../../lib/format";
+import { characterLabel, indexCharacters, type CharacterIndex } from "../../lib/characterNames";
 import { fetchWriterCharacters } from "../../api/plan";
 import {
   fetchWriterEvents,
@@ -256,12 +257,17 @@ function EventListCard({
   onSelect,
   links,
   loomUnreachable,
+  charIndex,
 }: {
   event: WriterEvent;
   selected: boolean;
   onSelect: () => void;
   links: ChapterLink[];
   loomUnreachable: boolean;
+  /** `event.characters` stores `wc-` ids (LOOM-45), so the cast line needs the
+   *  character pool to render names. Passed in rather than fetched: this card
+   *  renders once per event and the pane already holds the list. */
+  charIndex: CharacterIndex;
 }) {
   return (
     <button
@@ -281,7 +287,7 @@ function EventListCard({
         </p>
         {event.characters.length > 0 && (
           <p className="truncate text-[11px] text-ink-muted">
-            {event.characters.join(", ")}
+            {event.characters.map((ref) => characterLabel(ref, charIndex)).join(", ")}
           </p>
         )}
       </div>
@@ -326,6 +332,8 @@ export default function WriterTimelinePane() {
   // without a manual invalidation.
   const chapterLinks = useChapterLinks(events.map((e) => e.id));
   const [characters, setCharacters] = useState<WriterCharacter[]>([]);
+  // Built once per render of the pane rather than once per event card.
+  const charIndex = useMemo(() => indexCharacters(characters), [characters]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"list" | "chart">(() => {
@@ -639,6 +647,7 @@ export default function WriterTimelinePane() {
                     onSelect={() => openEdit(ev)}
                     links={chapterLinks.links[ev.id] ?? []}
                     loomUnreachable={chapterLinks.unreachable}
+                    charIndex={charIndex}
                   />
                 ))}
               </div>

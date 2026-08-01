@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Camera, GitCompare, MessageSquare, Plus, X } from "lucide-react";
 import { clsx } from "clsx";
@@ -7,6 +7,7 @@ import { usePlanStore } from "../../../store/usePlanStore";
 import { uploadWriterCharacterPhoto } from "../../../api/plan";
 import type { WriterCharacter, CharacterCategory } from "../../../types";
 import { ChapterAppearances } from "./ChapterAppearances";
+import { indexCharacters, resolveCharacter } from "../../../lib/characterNames";
 import type { ChapterLink } from "../../../api/writerEvents";
 
 const POV_PALETTE = [
@@ -342,6 +343,10 @@ export default function WriterCharacterCard({
   const [localRelationships, setLocalRelationships] = useState(character.relationships);
   const [addingRel, setAddingRel] = useState(false);
   const [newRelTarget, setNewRelTarget] = useState("");
+  // The id actually stored (LOOM-45). The input above it holds a NAME, which is
+  // only what the writer types and reads; a relationship whose target is a name
+  // silently orphans the moment that character is renamed.
+  const [newRelTargetId, setNewRelTargetId] = useState<string | null>(null);
   const [newRelNature, setNewRelNature] = useState("");
   const [relDropdownOpen, setRelDropdownOpen] = useState(false);
   const [relDropdownPos, setRelDropdownPos] = useState({ top: 0, left: 0, width: 0 });
@@ -349,6 +354,7 @@ export default function WriterCharacterCard({
   const relNatureRef = useRef<HTMLInputElement>(null);
   const relNatureEnterRef = useRef(false);
   const { writerCharacters } = usePlanStore();
+  const relIndex = useMemo(() => indexCharacters(writerCharacters), [writerCharacters]);
 
   useEffect(() => { setLocalRelationships(character.relationships); }, [character.relationships]);
 
@@ -372,8 +378,9 @@ export default function WriterCharacterCard({
     setRelDropdownOpen(true);
   };
 
-  const selectRelTarget = (name: string) => {
-    setNewRelTarget(name);
+  const selectRelTarget = (c: { id: string; name: string }) => {
+    setNewRelTarget(c.name);
+    setNewRelTargetId(c.id);
     setRelDropdownOpen(false);
     relNatureRef.current?.focus();
   };
@@ -383,13 +390,22 @@ export default function WriterCharacterCard({
   );
 
   const confirmNewRel = (keepOpen = false) => {
-    const target = newRelTarget.trim();
-    if (target) {
-      const updated = [...localRelationships, { target, nature: newRelNature.trim() }];
+    // Only an existing character can be a target, because only an id survives a
+    // rename. A name typed but never matched is dropped rather than stored as
+    // an unresolvable reference — the exact-name fallback covers the case where
+    // the writer typed a full name and never opened the dropdown.
+    const typed = newRelTarget.trim();
+    const targetId =
+      newRelTargetId ??
+      writerCharacters.find((c) => c.id !== character.id && c.name.trim() === typed)?.id ??
+      null;
+    if (targetId) {
+      const updated = [...localRelationships, { target: targetId, nature: newRelNature.trim() }];
       setLocalRelationships(updated);
       onRelationshipsChange(updated);
     }
     setNewRelTarget("");
+    setNewRelTargetId(null);
     setNewRelNature("");
     if (keepOpen) {
       requestAnimationFrame(() => relTargetRef.current?.focus());
@@ -623,23 +639,26 @@ export default function WriterCharacterCard({
         ) : (
           <>
             {localRelationships.map((r, i) => {
-              const matched = writerCharacters.find((c) => c.name === r.target);
-              const colors = nameColor(r.target);
+              // `r.target` is a `wc-` id; the label is derived so a rename
+              // reaches every relationship pointing at that character.
+              const matched = resolveCharacter(r.target, relIndex);
+              const label = matched?.name ?? "Unknown character";
+              const colors = nameColor(label);
               return (
                 <div key={i} className="flex items-center gap-2 px-2 py-1.5 group/rel">
                   {matched?.photo_url ? (
                     <img
                       src={matched.photo_url}
-                      alt={r.target}
+                      alt={label}
                       className="h-6 w-6 rounded-full object-cover flex-shrink-0 ring-1 ring-surface-border"
                     />
                   ) : (
                     <div className={clsx("h-6 w-6 rounded-full flex items-center justify-center flex-shrink-0 ring-1 ring-surface-border", colors.bg)}>
-                      <span className={clsx("text-[9px] font-semibold", colors.text)}>{relInitials(r.target)}</span>
+                      <span className={clsx("text-[9px] font-semibold", colors.text)}>{relInitials(label)}</span>
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-medium text-ink-primary truncate">{r.target}</p>
+                    <p className={clsx("text-[11px] font-medium truncate", matched ? "text-ink-primary" : "italic text-ink-muted")}>{label}</p>
                     {r.nature && <p className="text-[10px] italic text-ink-muted truncate">{r.nature}</p>}
                   </div>
                   <button
@@ -657,13 +676,13 @@ export default function WriterCharacterCard({
                   <input
                     ref={relTargetRef}
                     value={newRelTarget}
-                    onChange={(e) => { setNewRelTarget(e.target.value); openRelDropdown(); }}
+                    onChange={(e) => { setNewRelTarget(e.target.value); setNewRelTargetId(null); openRelDropdown(); }}
                     onFocus={openRelDropdown}
                     onKeyDown={(e) => {
                       if (e.key === "Escape") { setRelDropdownOpen(false); setNewRelTarget(""); setNewRelNature(""); setAddingRel(false); }
                       if (e.key === "Enter" || e.key === "Tab") {
                         e.preventDefault();
-                        if (filteredChars.length > 0) setNewRelTarget(filteredChars[0].name);
+                        if (filteredChars.length > 0) { setNewRelTarget(filteredChars[0].name); setNewRelTargetId(filteredChars[0].id); }
                         setRelDropdownOpen(false);
                         relNatureRef.current?.focus();
                       }
@@ -680,7 +699,7 @@ export default function WriterCharacterCard({
                       {filteredChars.map((c) => (
                         <button
                           key={c.id}
-                          onMouseDown={(e) => { e.preventDefault(); selectRelTarget(c.name); }}
+                          onMouseDown={(e) => { e.preventDefault(); selectRelTarget(c); }}
                           className="w-full px-2.5 py-1.5 text-left text-[11px] text-ink-secondary hover:bg-surface-hover hover:text-ink-primary transition-colors"
                         >
                           {c.name}

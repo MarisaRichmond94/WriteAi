@@ -47,6 +47,33 @@ class LocationBody(BaseModel):
     name: str
 
 
+def _character_ids(refs: list[str]) -> list[str]:
+    """Normalise a cast list to `wc-` ids (LOOM-45).
+
+    Events reference characters by id so a rename cannot orphan them. A client
+    that still sends NAMES — an older Loom build, say, since the two apps
+    deploy independently — would otherwise write names straight back into a
+    file the rest of the system now reads as ids, silently undoing the
+    migration one edit at a time.
+
+    So names are accepted on the way IN and converted here. An entry matching
+    neither an id nor a name is passed through untouched rather than dropped:
+    it is more likely a character this server has not loaded yet than junk, and
+    silently deleting a cast member is the failure mode this whole ticket
+    exists to end. The UI renders an unresolvable entry as an unknown chip.
+    """
+    characters = writer_store.writer_characters()
+    ids = {c["id"] for c in characters if c.get("id")}
+    by_name = {(c.get("name") or "").strip(): c["id"] for c in characters if c.get("id")}
+    out: list[str] = []
+    for ref in refs:
+        if ref in ids:
+            out.append(ref)
+        else:
+            out.append(by_name.get((ref or "").strip(), ref))
+    return out
+
+
 def _add_location(store: dict, name: str | None) -> None:
     """Fold a location into the pool (case-preserving, de-duplicated)."""
     if not name:
@@ -108,7 +135,7 @@ def create_writer_event(body: WriterEventBody):
         "date": body.date,
         "time": body.time,
         "description": body.description,
-        "characters": body.characters,
+        "characters": _character_ids(body.characters),
         "location": (body.location or "").strip() or None,
         "created_at": now,
         "updated_at": now,
@@ -130,7 +157,7 @@ def update_writer_event(event_id: str, body: WriterEventBody):
         "date": body.date,
         "time": body.time,
         "description": body.description,
-        "characters": body.characters,
+        "characters": _character_ids(body.characters),
         "location": (body.location or "").strip() or None,
         "updated_at": _now(),
     })
