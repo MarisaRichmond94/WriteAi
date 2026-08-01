@@ -19,6 +19,7 @@ import { ChapterLinkChips, ChapterLinksUnavailable } from "./ChapterLinks";
 import type { WriterCharacter } from "../../types";
 import type { ChapterLink, WriterEvent, WriterEventInput } from "../../api/writerEvents";
 import { formatTime12h } from "../../lib/format";
+import { characterLabel, indexCharacters, isUnknown, resolveCharacter } from "../../lib/characterNames";
 import StoryDatePicker from "../plan/outline/StoryDatePicker";
 
 // ── Avatar helpers (matches TimelinePane pattern) ────────────────────────────
@@ -135,11 +136,10 @@ function ViewMode({
   onEdit: () => void;
   onClose: () => void;
 }) {
-  const charMap = useMemo(() => {
-    const map: Record<string, string | null> = {};
-    for (const c of characters) map[c.name] = c.photo_url;
-    return map;
-  }, [characters]);
+  // `event.characters` holds `wc-` ids (LOOM-45). Name and portrait are derived
+  // here, so renaming a character updates every event referencing it rather
+  // than orphaning them all.
+  const charIndex = useMemo(() => indexCharacters(characters), [characters]);
 
   return (
     <>
@@ -230,23 +230,36 @@ function ViewMode({
               count={event.characters.length}
             />
             <div className="mt-2 flex flex-wrap gap-2">
-              {event.characters.map((name) => (
-                <div
-                  key={name}
-                  className="flex items-center gap-2.5 rounded-lg border border-surface-border bg-surface px-3 py-2"
-                >
-                  <AvatarCircle
-                    name={name}
-                    photoUrl={charMap[name]}
-                    className="h-9 w-9 text-[11px]"
-                  />
-                  <div className="min-w-0">
-                    <div className="text-[12px] font-semibold text-ink-primary">
-                      {name}
+              {event.characters.map((ref) => {
+                const label = characterLabel(ref, charIndex);
+                return (
+                  <div
+                    key={ref}
+                    className="flex items-center gap-2.5 rounded-lg border border-surface-border bg-surface px-3 py-2"
+                  >
+                    <AvatarCircle
+                      name={label}
+                      photoUrl={resolveCharacter(ref, charIndex)?.photo_url ?? null}
+                      className="h-9 w-9 text-[11px]"
+                    />
+                    <div className="min-w-0">
+                      {/* An id that no longer resolves is shown, not dropped —
+                          a silently vanishing cast member is the failure this
+                          ticket exists to end. */}
+                      <div
+                        className={clsx(
+                          "text-[12px] font-semibold",
+                          isUnknown(ref, charIndex)
+                            ? "italic text-ink-muted"
+                            : "text-ink-primary",
+                        )}
+                      >
+                        {label}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -416,6 +429,11 @@ function EditMode({
     if (charOpen) setTimeout(() => charInputRef.current?.focus(), 0);
   }, [charOpen]);
 
+  // Selection is stored as `wc-` ids; this resolves them back to names for the
+  // chips. Searching and sorting still work on names — that is what the writer
+  // types and reads — only what gets STORED is an id.
+  const editIndex = useMemo(() => indexCharacters(characters), [characters]);
+
   const sortedChars = useMemo(
     () => [...characters].sort((a, b) => a.name.localeCompare(b.name)),
     [characters],
@@ -437,9 +455,11 @@ function EditMode({
     (l) => l.toLowerCase() === location.trim().toLowerCase(),
   );
 
-  const toggleChar = (name: string) =>
+  // Selection is by `wc-` id (LOOM-45), never by name — a name is a display
+  // value that can change under the reference.
+  const toggleChar = (id: string) =>
     setSelectedChars((prev) =>
-      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+      prev.includes(id) ? prev.filter((n) => n !== id) : [...prev, id],
     );
 
   const handleSave = () =>
@@ -587,16 +607,16 @@ function EditMode({
 
             {selectedChars.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedChars.map((name) => (
+                {selectedChars.map((ref) => (
                   <span
-                    key={name}
+                    key={ref}
                     className="flex items-center gap-1 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] text-accent"
                   >
-                    {name}
+                    {characterLabel(ref, editIndex)}
                     <button
-                      onClick={() => toggleChar(name)}
+                      onClick={() => toggleChar(ref)}
                       className="transition-colors hover:text-red-400"
-                      title={`Remove ${name}`}
+                      title={`Remove ${characterLabel(ref, editIndex)}`}
                     >
                       <X className="h-3 w-3" />
                     </button>
@@ -631,7 +651,7 @@ function EditMode({
                           className="w-full rounded border border-surface-border bg-surface py-1 pl-6 pr-2 text-[11px] text-ink-primary placeholder:text-ink-muted focus:border-accent/50 focus:outline-none"
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && filteredChars.length > 0) {
-                              toggleChar(filteredChars[0].name);
+                              toggleChar(filteredChars[0].id);
                               setCharSearch("");
                               charInputRef.current?.focus();
                             }
@@ -646,11 +666,11 @@ function EditMode({
                         </p>
                       ) : (
                         filteredChars.map((c) => {
-                          const isSelected = selectedChars.includes(c.name);
+                          const isSelected = selectedChars.includes(c.id);
                           return (
                             <button
                               key={c.id}
-                              onClick={() => { toggleChar(c.name); setCharSearch(""); }}
+                              onClick={() => { toggleChar(c.id); setCharSearch(""); }}
                               className={clsx(
                                 "flex w-full items-center justify-between px-3 py-1.5 text-left text-[11px] transition-colors hover:bg-surface-hover",
                                 isSelected ? "text-accent" : "text-ink-secondary",

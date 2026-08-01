@@ -627,6 +627,20 @@ def put_writer_character(char_id: str, body: dict):
     creates fresh characters this way)."""
     chars = writer_store.writer_characters()
     body["id"] = char_id
+    # Relationship targets are `wc-` ids (LOOM-45). A client still sending
+    # NAMES — an older Loom build, since the apps deploy independently — would
+    # write names back into a file the rest of the system reads as ids, undoing
+    # the migration one save at a time. Convert on the way in. An unmatched
+    # value is left alone rather than dropped: the UI shows it as unknown,
+    # which is recoverable, whereas deleting it is not.
+    rels = body.get("relationships")
+    if isinstance(rels, list):
+        ids = {c["id"] for c in chars if c.get("id")}
+        by_name = {(c.get("name") or "").strip(): c["id"] for c in chars if c.get("id")}
+        for rel in rels:
+            target = rel.get("target") if isinstance(rel, dict) else None
+            if isinstance(target, str) and target not in ids:
+                rel["target"] = by_name.get(target.strip(), target)
     for i, c in enumerate(chars):
         if c["id"] == char_id:
             chars[i] = body
