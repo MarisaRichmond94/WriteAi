@@ -150,6 +150,72 @@ incremental ingest of a book once its exports have been quiet for 10
 minutes. The nightly scheduler (Settings → Sync) remains the
 reconciliation safety net when either app was closed.
 
+### 5. Event tagging (Loom ↔ WriteAI)
+
+Which chapters a writer-event is referenced in. **Loom owns the join; WriteAI
+owns the event.** Loom stores only the event id — never a copy of the title,
+date or body — so there is no second source of truth and nothing to sync.
+
+The join is keyed by **chapter cuid** (`ChapterEvent` in Loom's schema). That
+is the whole point: WriteAI used to store `book_chapters`, a list of
+`{book title, chapter number}`, and both halves move. Inserting a chapter in
+Loom renumbered every tag in that book silently, with nothing to report it —
+which is why the feature went unused. A cuid-keyed tag simply follows its
+chapter.
+
+| Direction | Route | Purpose |
+|---|---|---|
+| Loom → WriteAI | `GET/POST /api/writeai/events`, `PATCH/DELETE /api/writeai/events/[id]`, `POST /api/writeai/events/locations` | Loom's server-side proxies onto `/api/writer-events*`. Full CRUD from the Events tab. |
+| Loom → WriteAI | `GET /api/writeai/characters` | Character pool for the event form. |
+| Loom → WriteAI | `GET /api/writeai/photo/[file]` | Character portraits, proxied from `/api/plan/photos/`. |
+| WriteAI → Loom | `GET /api/writer-events/chapter-links?ids=…` → `GET <LOOM_URL>/api/chapter-events?eventIds=…` | The reverse lookup the timeline renders. |
+
+**Loom never writes `writer_events.json` directly.** Every mutation goes
+through WriteAI's HTTP API so the FastAPI process stays the file's single
+writer — `writer_store` rewrites the whole file per save under an in-process
+lock, which a second process would defeat.
+
+> ⚠️ **`PATCH /api/writer-events/{id}` REPLACES the whole event.** Every field
+> on `WriterEventBody` has a default, so an omitted key is silently reset
+> rather than left alone — editing a title would erase the cast. Loom's proxy
+> refuses incomplete bodies before they can land. This is the same hazard as
+> `PUT /api/sessions/{kind}/{sid}` (§3) and `PUT /api/plan/characters/{id}`,
+> which takes a raw dict with no model at all. **Three endpoints now share this
+> shape: assume replace, not merge, unless a route says otherwise.**
+
+> ⚠️ **`GET /api/plan/characters` writes to disk.** It seeds from canon on
+> first call, prunes entries canon has reclassified, and self-heals `books`,
+> saving whenever any of that changes. Fetch it on open; never poll it.
+
+**`GET /api/chapter-events` is read-only and must stay that way.** It runs on
+every timeline render. Chapter numbers come from the canon **walk**
+(`canonNumbersForBook`), never the canon **export** — the export returns the
+same numbers but writes `.pages`/`.txt`/`.docx` to `<root>` on the way, so
+wiring it there would rewrite the manuscript on every page load and trigger an
+ingest each time. `tests/unit/chapterEventsRoute.test.ts` pins this at source
+level.
+
+`readPath` in that response is **relative**. Loom has no reliable way to know
+its own external origin; WriteAI prefixes `VITE_LOOM_URL` via
+`loomLinks.loomHref()`. A `null` `readPath` means the chapter has no canon
+number (unnumbered, not the prologue) — still a real tag, shown unlinked
+rather than dropped.
+
+**Accepted constraint: a symmetric hard dependency, with no cache.** Loom's
+Events tab is inert when WriteAI is down; WriteAI's chapter chips are absent
+when Loom is down. Both run under launchd, so this is acceptable — but each
+side must NAME the outage ("WriteAI isn't running" / "Loom isn't running")
+rather than render an empty list, which would claim the opposite of what is
+true. Do not "fix" this by adding a mirror: a cached answer reintroduces
+exactly the staleness this seam exists to remove.
+
+**Degradation.** An event id Loom holds that WriteAI no longer knows is
+*unknown identity*: hidden from the UI, never auto-deleted. Every requested id
+gets a key in the response — an event tagged nowhere maps to `[]`, so "no
+chapters" stays distinguishable from "lookup failed". Unknown or malformed ids
+are dropped rather than failing the request, so one stale id cannot blank every
+other event's links.
+
 ## Identity
 
 **Loom's cuids are the identity of a series and a book across both apps.**
@@ -168,6 +234,13 @@ breaks the jump links and folder matching"* — no longer describes the contract
   `migrate_schema()` and populated on write.
 - `citation.loom_book_id` / `.loom_series_id` on the citations payload;
   `appSettings.loom_series_id` from `GET /api/settings`.
+
+**`book_chapters` was a fourth, and is now REMOVED.** WriteAI's
+writer-events used to carry `[{book title, chapter number}]`. It was the exact
+pattern LOOM-12 moved away from, it drifted the first time a chapter was
+inserted above a tagged one, and it is gone from the model, the TypeScript
+types and the stored JSON (LOOM-40). It is **not** a fallback and must not be
+reintroduced — the cuid-keyed join in §5 replaces it.
 
 **Three things are still positional or title-derived, deliberately:**
 

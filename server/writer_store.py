@@ -89,7 +89,7 @@ def save_ui_settings(value: dict) -> None:
 def writer_events() -> dict:
     """Writer-authored timeline events (distinct from AI-extracted events).
       events:    [{id, title, date, time, description, characters, location,
-                   book_chapters:[{book, chapter}], created_at, updated_at}]
+                   created_at, updated_at}]
       locations: ["name", ...]   writer-created location pool
     """
     return load("writer_events.json", {"events": [], "locations": []})
