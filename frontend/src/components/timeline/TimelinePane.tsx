@@ -901,7 +901,7 @@ export default function TimelinePane() {
 
   const [view, setView] = useState<"list" | "chart">(() => {
     const v = new URLSearchParams(window.location.search).get("tlview");
-    return v === "list" || v === "chart" ? v : "chart";
+    return v === "list" || v === "chart" ? v : "list";
   });
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState("");
@@ -1013,7 +1013,7 @@ export default function TimelinePane() {
         {/* View toggle + sort */}
         <div className="flex items-center gap-2">
           <div className="flex items-center rounded border border-surface-border overflow-hidden">
-            {(["chart", "list"] as const).map((v) => (
+            {(["list", "chart"] as const).map((v) => (
               <button
                 key={v}
                 onClick={() => handleViewChange(v)}

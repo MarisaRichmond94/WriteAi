@@ -23,3 +23,5 @@ eval/results/
 __pycache__/
 *.pyc
 .venv/
+
+graphify-out/*

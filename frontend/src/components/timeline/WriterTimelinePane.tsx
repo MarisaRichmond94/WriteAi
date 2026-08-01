@@ -338,7 +338,7 @@ export default function WriterTimelinePane() {
   const [search, setSearch] = useState("");
   const [view, setView] = useState<"list" | "chart">(() => {
     const v = new URLSearchParams(window.location.search).get("wtlview");
-    return v === "list" || v === "chart" ? v : "chart";
+    return v === "list" || v === "chart" ? v : "list";
   });
 
   const [open, setOpen] = useState(false);
@@ -497,7 +497,7 @@ export default function WriterTimelinePane() {
         <div className="flex items-center gap-2">
           {/* View toggle */}
           <div className="flex items-center overflow-hidden rounded border border-surface-border">
-            {(["chart", "list"] as const).map((v) => (
+            {(["list", "chart"] as const).map((v) => (
               <button
                 key={v}
                 onClick={() => handleViewChange(v)}
