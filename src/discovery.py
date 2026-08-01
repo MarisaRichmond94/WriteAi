@@ -100,6 +100,47 @@ def _read_loom_identity(folder: Path, title: str) -> tuple[str | None, str | Non
     return (book_id or None, series_id or None)
 
 
+def read_manifest_chapters(folder: Path, title: str) -> list[dict]:
+    """The manifest's per-chapter records: {id, number, label, pov, date,
+    wordCount, contentHash}. Only chapters carrying BOTH a number and an id —
+    an unnumbered part divider has no stable place in canon numbering, and a
+    record with no id cannot be identity for anything.
+
+    Forgiving in exactly the way `_read_loom_identity` is: a missing,
+    unreadable, or malformed manifest yields [] rather than raising. Every
+    caller treats an empty result as "unknown identity" and falls back to
+    chapter numbers, which is the pre-LOOM-12 behaviour.
+    """
+    path = folder / f"{title}.manifest.json"
+    if not path.exists():
+        return []
+    try:
+        m = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        log.warning("unreadable manifest for '%s' (%s) — falling back to "
+                    "chapter-number identity", title, exc)
+        return []
+    return [c for c in m.get("chapters", [])
+            if c.get("number") is not None and c.get("id")]
+
+
+def loom_chapter_ids_for(cfg, number: int) -> dict[int, str]:
+    """chapter number -> Loom chapter cuid for one book (LOOM-65).
+
+    The chapter-level twin of `loom_book_id_for`. Callers that write rows keyed
+    by chapter number use it to stamp identity alongside the number, so a later
+    reader can match on something a mid-book insertion does not move.
+
+    An empty dict is normal — a book that has never been canon-exported has no
+    manifest and therefore no chapter ids.
+    """
+    for b in discover_books(cfg):
+        if b.number == number:
+            return {c["number"]: c["id"]
+                    for c in read_manifest_chapters(b.folder, b.title)}
+    return {}
+
+
 def loom_book_id_for(cfg, number: int) -> str | None:
     """Stable Loom id for a book number, or None when it can't be resolved.
 

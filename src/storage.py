@@ -140,6 +140,26 @@ def migrate_schema(db: sqlite3.Connection) -> None:
                 log.info("migrating %s: adding %s column", table, col)
                 db.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
 
+    # Stable CHAPTER identity (LOOM-65). loom_book_id fixed the book half;
+    # the chapter half stayed positional, so `chapter_summaries` is keyed
+    # (book_number, chapter_number) with nothing that survives an insert.
+    # Inserting a chapter in Loom renumbers every later chapter, and until the
+    # next enrichment run each renumbered chapter's row describes whichever
+    # chapter used to hold its number — the outline then renders a summary for
+    # a chapter it does not belong to.
+    #
+    # Nullable, like the columns above: rows written before this, and books
+    # that have never been canon-exported, hold NULL and readers fall back to
+    # the number. `chapter_timeline` has the identical shape and the same
+    # exposure; it is deliberately left for its own change, since nothing reads
+    # it by identity yet.
+    for table in ("chapter_summaries",):
+        cols = {row[1] for row in
+                db.execute(f"SELECT * FROM pragma_table_info('{table}')")}
+        if cols and "loom_chapter_id" not in cols:
+            log.info("migrating %s: adding loom_chapter_id column", table)
+            db.execute(f"ALTER TABLE {table} ADD COLUMN loom_chapter_id TEXT")
+
 
 def slugify(name: str) -> str:
     """Series name -> ChromaDB collection name (3-63 chars, [a-z0-9._-]).
