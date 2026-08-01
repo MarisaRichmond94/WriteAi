@@ -3,7 +3,7 @@
 The canonical palette both apps share. If you change a value here, change it in
 the other repo too — WriteAI has a mirror of this file, same as `INTEGRATION.md`.
 
-> **Status:** behind the `UNIFIED_CHROME` flag (KAN-6). Flag off renders each
+> **Status:** behind the `UNIFIED_CHROME` flag (LOOM-6). Flag off renders each
 > app's pre-unification palette untouched, so the old look stays available as a
 > comparison baseline for all of Phase A.
 
@@ -82,7 +82,7 @@ draws borders as `border-accent/10` and `border-accent/20`, i.e. the accent at
 low opacity, which reads as a faint violet edge rather than a neutral grey one.
 
 Deliberately **not** changed here: it would touch dozens of Loom files and is a
-visual-design question, not a token question. It belongs to KAN-2 when the
+visual-design question, not a token question. It belongs to LOOM-2 when the
 header is rebuilt. Until then the two apps' borders differ in character even
 with identical tokens.
 
@@ -110,7 +110,7 @@ New shared code should pick one package. Existing code stays.
 Exception worth knowing: WriteAI's sidebar uses `FaTimeline` from
 `react-icons/fa6`, which has no Lucide equivalent.
 
-## `UNIFIED_CHROME` — retired 2026-07-30 (KAN-8)
+## `UNIFIED_CHROME` — retired 2026-07-30 (LOOM-8)
 
 **The flag is gone.** The values above are simply the palette now; there is no
 toggle, no `data-chrome` attribute, no boot script, and no old-palette fallback.
@@ -140,7 +140,7 @@ becomes the default, not just when it is introduced.
 The colour contract above got the two apps most of the way to reading as one
 product. This is the remainder: type, icon and control sizes.
 
-It exists because KAN-7's acceptance criterion said *"match Loom's within the
+It exists because LOOM-7's acceptance criterion said *"match Loom's within the
 shared spec"* — and no such spec existed for sizes, so matching was done by eye,
 one control at a time. That reaches roughly 80% and stalls.
 
@@ -233,7 +233,7 @@ express.
 the unread badge anchor to the *button* edge, so they drifted away from the glyph
 and crowded the neighbouring control.
 
-KAN-1 patched that at the badge with flush positioning; the ratio is the actual
+LOOM-1 patched that at the badge with flush positioning; the ratio is the actual
 cause. With `p-1`, badge offsets converge on Loom's `-top-1 -right-1` in both
 apps rather than needing per-control compensation.
 
@@ -264,7 +264,7 @@ this class instead of inlining dark hexes — that is what previously pinned tha
 chrome to the old palette regardless of the flag.
 
 **`--dark-*` must be kept in step with `--color-*` in both token blocks.** They
-are declared adjacently for exactly that reason. KAN-8 removes half of this when
+are declared adjacently for exactly that reason. LOOM-8 removes half of this when
 it collapses the flag.
 
 ## Rule: no hardcoded colour literals
@@ -272,8 +272,8 @@ it collapses the flag.
 Every colour must resolve through a token, so the palette stays a few-values
 edit.
 
-**Check three places, not one.** KAN-6 grepped `globals.css` only and declared
-the rule satisfied; KAN-17 then found colours the flag could not reach in two
+**Check three places, not one.** LOOM-6 grepped `globals.css` only and declared
+the rule satisfied; LOOM-17 then found colours the flag could not reach in two
 places that grep never looked at:
 
 1. **Stylesheets** — `globals.css`, `index.css`.
@@ -284,7 +284,7 @@ places that grep never looked at:
    via `document.write`; it now resolves the token with `getComputedStyle` and
    interpolates the value.
 
-Fixed across KAN-6 and KAN-17:
+Fixed across LOOM-6 and LOOM-17:
 
 - `body` hardcoded `background-color: #0d0d18; color: #e0d9c8` — the page
   background could never have followed the palette

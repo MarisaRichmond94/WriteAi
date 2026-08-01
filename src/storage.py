@@ -120,7 +120,7 @@ def migrate_schema(db: sqlite3.Connection) -> None:
             log.info("migrating %s: adding source_quote column", table)
             db.execute(f"ALTER TABLE {table} ADD COLUMN source_quote TEXT")
 
-    # Stable Loom identity (KAN-12). book_number and book_title are derived
+    # Stable Loom identity (LOOM-12). book_number and book_title are derived
     # from the folder name: book_number survives a rename but breaks on
     # insertion or reordering, book_title does the reverse. Loom's cuids
     # survive both, and reach us through the manifest sidecar.
@@ -145,7 +145,7 @@ def slugify(name: str) -> str:
     """Series name -> ChromaDB collection name (3-63 chars, [a-z0-9._-]).
 
     LEGACY naming. Retained to find and migrate collections created before
-    KAN-10, and as the fallback when no stable id is available. New stores use
+    LOOM-10, and as the fallback when no stable id is available. New stores use
     stable_collection_name().
     """
     slug = re.sub(r"[^a-z0-9-]+", "-", name.lower()).strip("-")
@@ -153,7 +153,7 @@ def slugify(name: str) -> str:
 
 
 def stable_collection_name(loom_series_id: str) -> str:
-    """Loom series cuid -> ChromaDB collection name (KAN-10).
+    """Loom series cuid -> ChromaDB collection name (LOOM-10).
 
     The collection used to be named `slugify(SERIES_NAME)`, which made the
     entire vector index addressable by a *display* string. Changing SERIES_NAME
@@ -170,7 +170,7 @@ def stable_collection_name(loom_series_id: str) -> str:
 
 
 def _resolve_loom_series_id(cfg) -> str | None:
-    """Loom's series cuid from the manifest sidecars, or None (KAN-10).
+    """Loom's series cuid from the manifest sidecars, or None (LOOM-10).
 
     Never raises: a store that cannot resolve identity must still open, on the
     legacy display-name collection, exactly as it did before.
@@ -191,7 +191,7 @@ class SeriesStore:
         self._chroma_dir = str(cfg.chroma_dir)
         self._cfg = cfg
         # Name the collection by Loom's stable series id where we have one
-        # (KAN-10); fall back to the display-name slug when nothing has been
+        # (LOOM-10); fall back to the display-name slug when nothing has been
         # canon-exported yet. _open_chroma migrates a legacy-named collection
         # across in place.
         self._legacy_collection_name = slugify(cfg.series_name)
@@ -214,7 +214,7 @@ class SeriesStore:
         self.db.commit()
 
     def _migrate_legacy_collections(self) -> None:
-        """Rename display-name collections onto the stable id (KAN-10).
+        """Rename display-name collections onto the stable id (LOOM-10).
 
         A RENAME, not a rebuild: Chroma's modify(name=...) rewrites the
         collection record only, so the embeddings are untouched. Re-embedding
@@ -604,15 +604,15 @@ class SeriesStore:
         return {k: v for k, v in flat.items() if v is not None}
 
     def _loom_identity(self, book_number: int) -> tuple[str | None, str | None]:
-        """(loom_book_id, loom_series_id) for a book number (KAN-12).
+        """(loom_book_id, loom_series_id) for a book number (LOOM-12).
 
-        Without this, every chunk written after the KAN-12 backfill would carry
+        Without this, every chunk written after the LOOM-12 backfill would carry
         NULL and the migration would silently decay as new prose is ingested.
 
         Cached for the life of the store: discovery walks the books directory
         and opens a manifest per book, which is far too much work to repeat for
         every chunk. Resolution failure is non-fatal — chunks are still written,
-        just without stable IDs, which is the pre-KAN-12 behaviour.
+        just without stable IDs, which is the pre-LOOM-12 behaviour.
         """
         if self._loom_id_map is None:
             self._loom_id_map = {}

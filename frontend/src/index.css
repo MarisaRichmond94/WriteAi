@@ -10,8 +10,8 @@
   --surface-card: 26 29 39;
   --surface-hover: 33 37 58;
   --surface-border: 42 45 58;
-  /* Accent as channels — these were literals in tailwind.config.ts (KAN-6).
-     Values are the shared palette, promoted out of UNIFIED_CHROME when KAN-8
+  /* Accent as channels — these were literals in tailwind.config.ts (LOOM-6).
+     Values are the shared palette, promoted out of UNIFIED_CHROME when LOOM-8
      retired the flag. Canonical in TOKENS.md. */
   --accent: 136 136 255;
   --accent-hover: 119 119 240;

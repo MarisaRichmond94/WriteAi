@@ -64,12 +64,12 @@ logic ends up implemented three different ways.
 
   > This previously read "requires no new fields on the citation payload".
   > That is no longer true: citations carry `loom_book_id` and
-  > `loom_series_id` as of KAN-12. They are nullable, and a null means fall
+  > `loom_series_id` as of LOOM-12. They are nullable, and a null means fall
   > back to the title form.
 - **Loom → WriteAI:** plain link to `NEXT_PUBLIC_WRITEAI_URL`
   (default `http://localhost:5173`), plus the review deep link below.
 
-### 3. Review — now runs inside Loom (KAN-22)
+### 3. Review — now runs inside Loom (LOOM-22)
 
 The chapter editor's Review button opens Loom's own review panel. It no
 longer opens WriteAI, and **Loom no longer constructs the deep link below** —
@@ -109,7 +109,7 @@ WriteAI's own review pane is unchanged and remains fully usable.
 
 **Retained, but no longer produced by Loom.** The WriteAI-side route still
 works, so links already saved or shared keep resolving. Note it is
-title-addressed, which KAN-12 exists to move away from — do not extend it.
+title-addressed, which LOOM-12 exists to move away from — do not extend it.
 
 The chapter editor's Review button used to save the book's canon manuscript,
 then open:
@@ -156,7 +156,7 @@ reconciliation safety net when either app was closed.
 Loom mints them; WriteAI reads them from the manifest sidecar and stores them.
 They are stable across renaming, reordering, and re-ingestion.
 
-Resolved by KAN-12. The former caveat — *"identity is title-based, so renaming
+Resolved by LOOM-12. The former caveat — *"identity is title-based, so renaming
 breaks the jump links and folder matching"* — no longer describes the contract.
 
 **Where WriteAI holds them**
@@ -183,7 +183,7 @@ breaks the jump links and folder matching"* — no longer describes the contract
 **Degradation contract.** A book that has never been canon-exported has no
 manifest and therefore no cuid. Every consumer treats a missing id as *unknown
 identity* and falls back to `book_number` or title matching — never as *no
-match*. So the pre-KAN-12 behaviour remains the worst case, never a regression.
+match*. So the pre-LOOM-12 behaviour remains the worst case, never a regression.
 
 `book_number` and `book_title` columns are retained and still written. They are
 no longer load-bearing for identity, but plenty of queries and the UI read them.
