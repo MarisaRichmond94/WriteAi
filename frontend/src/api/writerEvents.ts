@@ -35,6 +35,9 @@ export interface ChapterLink {
   seriesTitle: string;
   bookId: string;
   bookTitle: string;
+  /** Loom's Book.order — the series' reading order. Present so books group
+   *  chronologically; sorting on the title is alphabetical order in disguise. */
+  bookOrder: number;
   chapterId: string;
   chapterTitle: string;
   /** Canon display number (0 = prologue), or null for a chapter with no canon

@@ -7,6 +7,7 @@ import type {
   ResyncPreviewResponse,
   WriterCharacter,
 } from "../types";
+import { LoomUnreachableError, type ChapterLinks } from "./writerEvents";
 
 export type PlanSSEEvent =
   | { type: "chunk"; content: string }
@@ -111,6 +112,23 @@ export async function approveResync(
 }
 
 // ── Writer characters ────────────────────────────────────────────────────────
+
+/**
+ * Which Loom chapters these characters appear in (LOOM-33).
+ *
+ * Mirrors fetchChapterLinks for events; same contract, same failure mode.
+ * Loom owns the join, so a 503 means Loom is closed rather than that the
+ * characters appear nowhere — the two must stay distinguishable.
+ */
+export async function fetchCharacterChapterLinks(ids: string[]): Promise<ChapterLinks> {
+  if (ids.length === 0) return {};
+  const res = await fetch(
+    `/api/plan/characters/chapter-links?ids=${encodeURIComponent(ids.join(","))}`,
+  );
+  if (res.status === 503) throw new LoomUnreachableError("Loom is not reachable");
+  if (!res.ok) throw new Error("Failed to fetch chapter links");
+  return res.json();
+}
 
 export async function fetchWriterCharacters(): Promise<WriterCharacter[]> {
   const data = await jsonFetch<{ characters: (Omit<WriterCharacter, "books"> & { books: (string | number)[] })[] }>(
