@@ -42,10 +42,26 @@ def card(cid, num, loom_id=None, summary="", source=None, notes=None, bullets=No
             "notes": notes, "loom_id": loom_id}
 
 
+def canon(num_to_loom, stubs=()):
+    """`book_sync_state`'s second return: manifest chapter number -> record.
+
+    Written by default; numbers listed in `stubs` get wordCount 0, which is what
+    makes them unwritten canon rather than merely un-ingested.
+    """
+    return {num: {"id": loom_id, "number": num, "label": str(num),
+                  "pov": "Jared", "date": "Thursday, August 19th",
+                  "wordCount": 0 if num in stubs else 1200}
+            for num, loom_id in num_to_loom.items()}
+
+
 class ReconcileCollisionTest(unittest.TestCase):
-    def reconcile(self, cards, extracted, num_to_loom):
+    def reconcile(self, cards, extracted, num_to_loom, stubs=None):
+        # A canon chapter the index has nothing for is a stub unless the caller
+        # says otherwise — that is what it means in every real book.
+        if stubs is None:
+            stubs = set(num_to_loom) - set(extracted)
         with mock.patch.object(plan, "_extracted_chapters", return_value=extracted):
-            changed = plan._auto_reconcile(3, cards, True, num_to_loom)
+            changed = plan._auto_reconcile(3, cards, True, canon(num_to_loom, stubs))
         return changed, cards
 
     def test_production_scenario_duplicate_is_removed(self):
@@ -192,10 +208,6 @@ class ReconcileCollisionTest(unittest.TestCase):
         self.assertEqual(cards[1]["loom_id"], "L2")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class StubbedChapterTest(unittest.TestCase):
     """A stubbed chapter (wordCount 0, written later) produces no chunks, so it
     can never appear in the index. Demanding index == canon meant one stub
@@ -203,9 +215,7 @@ class StubbedChapterTest(unittest.TestCase):
     forever — its outline could not self-heal. Observed on The Secrets We Keep,
     stubs at chapters 32 and 43."""
 
-    def reconcile(self, cards, extracted, num_to_loom):
-        with mock.patch.object(plan, "_extracted_chapters", return_value=extracted):
-            return plan._auto_reconcile(3, cards, True, num_to_loom), cards
+    reconcile = ReconcileCollisionTest.reconcile
 
     def test_reconcile_runs_when_canon_has_an_unwritten_stub(self):
         cards = [card("ch-3-1", 1, loom_id="L1", summary="", source=None)]
@@ -229,3 +239,126 @@ class StubbedChapterTest(unittest.TestCase):
         changed, cards = self.reconcile(cards, {1: ext(1), 9: ext(9)}, {1: "L1"})
         self.assertFalse(changed)
         self.assertEqual(len(cards), 1)
+
+
+class StubGetsACardTest(unittest.TestCase):
+    """LOOM-64: a stubbed chapter must get an outline card.
+
+    The loop used to iterate the chapters the INDEX knew about. A stub produces
+    no chunks, so it was never visited and no card was ever created for it —
+    every later card renumbered correctly and the new chapter was simply
+    missing. Iterating the manifest instead covers written and unwritten
+    chapters in one pass.
+    """
+
+    reconcile = ReconcileCollisionTest.reconcile
+
+    def test_a_stub_gets_a_blank_card(self):
+        cards = [card("ch-3-1", 1, loom_id="L1", summary="<p>one</p>",
+                      source="<p>one</p>")]
+        changed, cards = self.reconcile(cards, {1: ext(1)}, {1: "L1", 2: "L2"})
+
+        self.assertTrue(changed)
+        self.assertEqual(len(cards), 2)
+        stub = cards[1]
+        self.assertEqual(stub["loom_id"], "L2")
+        self.assertEqual(stub["chapter"], 2)
+        self.assertEqual(stub["heading"], "Chapter 2")
+        self.assertEqual(stub["writer_summary"], "")
+        self.assertEqual(stub["extracted_bullets"], [])
+        # A stub IS canon — the chapter exists in Loom, it just has no words.
+        # "Unsynced" would claim the outline disagrees with the book.
+        self.assertEqual(stub["status"], "synced")
+
+    def test_the_secrets_we_keep_shape(self):
+        """The production case: 71 canon chapters, stubs at 32 and 43, 69
+        cards. All 71 must end up carded, and no existing summary may move."""
+        num_to_loom = {n: f"L{n}" for n in range(0, 71)}
+        extracted = {n: ext(n) for n in range(0, 71) if n not in (32, 43)}
+        cards = [card(f"ch-3-{n}", n, loom_id=f"L{n}",
+                      summary=f"<p>summary {n}</p>", source=f"<p>summary {n}</p>")
+                 for n in extracted]
+        self.assertEqual(len(cards), 69)
+
+        _, cards = self.reconcile(cards, extracted, num_to_loom)
+
+        self.assertEqual(len(cards), 71)
+        by_num = {c["chapter"]: c for c in cards}
+        self.assertEqual(sorted(by_num), list(range(0, 71)))
+        self.assertEqual(by_num[32]["writer_summary"], "")
+        self.assertEqual(by_num[43]["writer_summary"], "")
+        for n in extracted:
+            self.assertEqual(by_num[n]["writer_summary"], f"<p>summary {n}</p>",
+                             f"chapter {n}'s summary must not have moved")
+            self.assertEqual(by_num[n]["loom_id"], f"L{n}")
+
+    def test_prologue_stub_is_labelled_prologue(self):
+        cards = []
+        _, cards = self.reconcile(cards, {}, {0: "L0"})
+        self.assertEqual(cards[0]["heading"], "Prologue")
+
+    def test_stub_inherits_pov_and_date_from_the_manifest(self):
+        """The index has nothing to describe a stub with — the manifest does,
+        and Loom seeds both fields from the preceding chapter on insert."""
+        _, cards = self.reconcile([], {}, {5: "L5"})
+        self.assertEqual(cards[0]["pov"], "Jared")
+        self.assertEqual(cards[0]["date"], "Thursday, August 19th")
+
+    def test_a_stub_that_gains_prose_updates_its_own_card(self):
+        """No second card: matched by loom_id, which is why stamping matters."""
+        _, cards = self.reconcile([], {}, {2: "L2"})
+        self.assertEqual(len(cards), 1)
+        stub_id = cards[0]["id"]
+
+        _, cards = self.reconcile(
+            cards, {2: ext(2, bullets=["he arrives"])}, {2: "L2"})
+        self.assertEqual(len(cards), 1, "the stub must not be duplicated")
+        self.assertEqual(cards[0]["id"], stub_id)
+        self.assertEqual(cards[0]["extracted_bullets"], ["he arrives"])
+
+    def test_insert_renumbers_and_adds_in_one_pass(self):
+        """The user-facing scenario: a new stubbed Chapter 2 is inserted, so the
+        old 2 and 3 become 3 and 4. Summaries must follow their own chapters."""
+        cards = [card("ch-3-1", 1, loom_id="L1", summary="<p>A</p>", source="<p>A</p>"),
+                 card("ch-3-2", 2, loom_id="L2", summary="<p>B</p>", source="<p>B</p>"),
+                 card("ch-3-3", 3, loom_id="L3", summary="<p>C</p>", source="<p>C</p>")]
+        # NEW is the inserted stub at 2; L2 and L3 shifted up one.
+        _, cards = self.reconcile(
+            cards,
+            {1: ext(1), 3: ext(3), 4: ext(4)},
+            {1: "L1", 2: "LNEW", 3: "L2", 4: "L3"})
+
+        by_num = {c["chapter"]: c for c in cards}
+        self.assertEqual(sorted(by_num), [1, 2, 3, 4])
+        self.assertEqual(by_num[2]["loom_id"], "LNEW")
+        self.assertEqual(by_num[2]["writer_summary"], "")
+        self.assertEqual(by_num[3]["writer_summary"], "<p>B</p>",
+                         "B belongs to the chapter now numbered 3")
+        self.assertEqual(by_num[4]["writer_summary"], "<p>C</p>")
+        self.assertEqual(by_num[3]["heading"], "Chapter 3")
+
+    def test_written_chapter_missing_from_the_index_is_left_alone(self):
+        """If wordCount and the index ever disagree, the safe move is to skip:
+        treating a written chapter as a stub would blank real bullets."""
+        cards = [card("ch-3-2", 2, loom_id="L2", summary="<p>real</p>",
+                      source="<p>real</p>", bullets=["a", "b"])]
+        _, cards = self.reconcile(cards, {}, {2: "L2"}, stubs=set())
+
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]["writer_summary"], "<p>real</p>")
+        self.assertEqual(cards[0]["extracted_bullets"], ["a", "b"])
+
+    def test_writer_content_on_a_stub_card_is_never_touched(self):
+        """The invariant that protects writing: a card whose loom_id is
+        unchanged never has its summary or notes rewritten."""
+        cards = [card("ch-3-2", 2, loom_id="L2", summary="<p>MY PLAN</p>",
+                      source=None, notes="figure out the ending")]
+        _, cards = self.reconcile(cards, {}, {2: "L2"})
+
+        self.assertEqual(len(cards), 1)
+        self.assertEqual(cards[0]["writer_summary"], "<p>MY PLAN</p>")
+        self.assertEqual(cards[0]["notes"], "figure out the ending")
+
+
+if __name__ == "__main__":
+    unittest.main()

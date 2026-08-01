@@ -87,16 +87,35 @@ def _bullets_html(bullets: list[str]) -> str:
     return f"<ul>{items}</ul>" if items else ""
 
 
-def _sync_state(in_sync: bool, num_to_loom: dict[int, str]) -> str:
+def _sync_state(in_sync: bool, canon: dict[int, dict]) -> str:
     """Classify a book's index-vs-manifest state for the outline response.
 
     "unknown" means no readable Loom manifest, so `_auto_reconcile` is inert —
     the outline's chapter numbering will NOT self-correct after edits. Callers
     surface this so the silent no-op is visible instead of looking like drift.
     """
-    if not num_to_loom:
+    if not canon:
         return "unknown"
     return "synced" if in_sync else "behind"
+
+
+def _stub_view(num: int, rec: dict) -> dict:
+    """An `_extracted_chapters`-shaped view of a canon chapter with no prose.
+
+    A stubbed chapter — created in Loom to write later, `wordCount` 0 — produces
+    no chunks, so the index can never describe it and `_extracted_chapters`
+    never returns it. Everything the reconcile loop needs is in the manifest
+    instead, so this adapts one manifest record into the same shape and lets a
+    single loop handle written and unwritten chapters alike.
+
+    The heading is derived exactly as `_extracted_chapters` derives it rather
+    than taken from the manifest's `label` (which is the bare number "32" for a
+    numbered chapter), so a stub's card is indistinguishable from a written
+    one's until the moment prose arrives.
+    """
+    return {"chapter": num,
+            "heading": "Prologue" if num == 0 else f"Chapter {num}",
+            "pov": rec.get("pov"), "date": rec.get("date"), "bullets": []}
 
 
 def _is_machine_written(card: dict) -> bool:
@@ -118,7 +137,7 @@ def _is_machine_written(card: dict) -> bool:
 
 
 def _auto_reconcile(book: int, cards: list[dict],
-                    in_sync: bool, num_to_loom: dict[int, str]) -> bool:
+                    in_sync: bool, canon: dict[int, dict]) -> bool:
     """Fold newly written / renumbered chapters into the outline without ever
     touching writer-authored content. Runs only when the index matches Loom's
     manifest ("no drift") — under drift the numbering is about to change
@@ -126,8 +145,17 @@ def _auto_reconcile(book: int, cards: list[dict],
     remains for conflicts. Cards are matched by the manifest's stable Loom
     chapter id once stamped (so a mid-book insertion renumbers cards instead
     of cross-wiring their content); plain number match is the first-time
-    fallback. Returns True when cards changed."""
-    if not in_sync or not num_to_loom:
+    fallback. Returns True when cards changed.
+
+    `canon` is the MANIFEST's chapter set (number -> record), not the index's.
+    That distinction is the whole of LOOM-64: this loop used to iterate the
+    chapters the index knew about, and since a stubbed chapter produces no
+    chunks it was never visited, so no card was ever created for one. Inserting
+    two stubs into The Secrets We Keep renumbered every later card correctly and
+    left the two new chapters missing entirely. The manifest describes canon —
+    stubs included — so iterating it covers both cases with one pass.
+    """
+    if not in_sync or not canon:
         return False
     extracted = _extracted_chapters(book)
     # Subset, not equality: canon may legitimately contain chapters the index
@@ -136,7 +164,7 @@ def _auto_reconcile(book: int, cards: list[dict],
     # forever. `in_sync` above is the authoritative freshness signal and is
     # already stub-aware (see book_sync_state); this guard only needs to catch
     # the genuine inconsistency — the index holding chapters canon does not.
-    if not set(extracted) <= set(num_to_loom):  # ingest raced the check — skip
+    if not set(extracted) <= set(canon):  # ingest raced the check — skip
         return False
 
     by_loom = {c["loom_id"]: c for c in cards if c.get("loom_id")}
@@ -157,9 +185,25 @@ def _auto_reconcile(book: int, cards: list[dict],
     # is on its way to fix.
     claimed: set[int] = set()
 
-    for num in sorted(extracted):
-        loom_id = num_to_loom[num]
-        ext = extracted[num]
+    for num in sorted(canon):
+        rec = canon[num]
+        loom_id = rec["id"]
+        ext = extracted.get(num)
+        if ext is None:
+            # No prose in the index for a canon chapter. That is legitimate for
+            # a stub and ONLY for a stub: `in_sync` is computed as "every canon
+            # chapter with a wordCount is indexed", so a written chapter missing
+            # here would have failed that check and we would never have got this
+            # far. Re-testing wordCount rather than trusting that is deliberate
+            # — if the two ever disagree, skipping the chapter leaves its card
+            # untouched, where treating it as a stub would blank real bullets
+            # and clear a machine summary that is about to come straight back.
+            if rec.get("wordCount"):
+                log.warning(
+                    "outline book %d: chapter %s has prose in canon but nothing "
+                    "in the index — leaving its card alone", book, num)
+                continue
+            ext = _stub_view(num, rec)
         card = by_loom.get(loom_id) or by_num.get(num)
         twin = by_num.get(num)
         if twin is not None and twin is not card:
@@ -213,19 +257,18 @@ def _auto_reconcile(book: int, cards: list[dict],
             card["status"] = "synced"
             changed = True
 
-    # Cards the loop never claimed and whose number is not in canon. The loop
-    # only visits numbers present in `extracted`, so these are never inspected
-    # and survive forever -- reconcile adds and updates but has never pruned.
-    # Faded carried a phantom `ch-2-93` this way: canon ran 0..92, the outline
-    # had 94 cards, and the extra one rendered with a bullets fallback because
-    # no chapter summary existed for it.
+    # Cards the loop never claimed and whose number is not in canon. Such cards
+    # survive forever otherwise -- reconcile adds and updates but has never
+    # pruned. Faded carried a phantom `ch-2-93` this way: canon ran 0..92, the
+    # outline had 94 cards, and the extra one rendered with a bullets fallback
+    # because no chapter summary existed for it.
     #
-    # Safe because of the guard above: `extracted` is asserted equal to the
-    # manifest's chapter set before we get here, so "not in canon" means the
-    # chapter is genuinely gone -- not that the ingest is lagging. Planned cards
-    # (chapter=None) are skipped: authorial intent, never derived.
-    canon_numbers = set(extracted)
-    canon_ids = set(num_to_loom.values())
+    # Judged against the MANIFEST, which is canon by definition, so "not in
+    # canon" means the chapter is genuinely gone -- not that the ingest is
+    # lagging behind a chapter that exists. Planned cards (chapter=None) are
+    # skipped: authorial intent, never derived.
+    canon_numbers = set(canon)
+    canon_ids = {r["id"] for r in canon.values()}
 
     def _left_canon(c: dict) -> bool:
         """An unclaimed card that no longer corresponds to a canon chapter.
@@ -281,14 +324,22 @@ def get_outline(book: int):
     if key not in outlines:
         outlines[key] = _seed_outline(book)
         outline_store.save_outlines(outlines)
-    in_sync, num_to_loom = book_sync_state(get_state(), book)
-    sync_state = _sync_state(in_sync, num_to_loom)
+    in_sync, canon = book_sync_state(get_state(), book)
+    sync_state = _sync_state(in_sync, canon)
     if sync_state == "unknown":
         log.warning(
             "outline book %d: no readable Loom manifest — auto-reconcile is "
             "inert, so chapter numbering will not self-correct after edits", book)
-    if _auto_reconcile(book, outlines[key], in_sync, num_to_loom):
+    if _auto_reconcile(book, outlines[key], in_sync, canon):
         outline_store.save_outlines(outlines)
+    # Canon chapters with no prose yet. Their cards are deliberately blank, and
+    # the backfill below must skip them: `chapter_summaries` is keyed by
+    # (book_number, chapter_number) with no chapter identity, so a stub inserted
+    # mid-book would inherit whatever summary the previous occupant of its
+    # number left behind — the card would describe a chapter that isn't there.
+    # LOOM-65 fixes the keying; this guard is correct either way, because a
+    # chapter with no words has no summary to show.
+    stub_numbers = {n for n, r in canon.items() if not r.get("wordCount")}
     # Backfill: cards display writer_summary; where the writer hasn't written
     # one, show the enriched prose chapter summary (falling back to key
     # events as bullets). `summary_source` records exactly what the machine
@@ -310,6 +361,8 @@ def get_outline(book: int):
                    or ws == (c.get("summary_source") or "").strip()
                    or ws == _bullets_html(c.get("extracted_bullets") or []))
         if not machine:
+            continue
+        if c.get("chapter") in stub_numbers:
             continue
         if c.get("chapter") in prose:
             new = f"<p>{_html.escape(prose[c['chapter']])}</p>"
