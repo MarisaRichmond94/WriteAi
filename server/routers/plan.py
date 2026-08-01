@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from collections import defaultdict
 from pathlib import Path
@@ -602,10 +603,32 @@ def put_writer_character(char_id: str, body: dict):
     return body
 
 
+def _safe_photo_stem(char_id: str) -> str:
+    """Reject any id that is not a plain filename component.
+
+    This id is interpolated into a GLOB and the matches are then unlinked, so
+    a metacharacter does not merely fail — it widens. `*` turns the pattern
+    into `*.*`, which matches every portrait in the directory and deletes all
+    of them. Verified, not theoretical.
+
+    Deliberately checks filename SAFETY, not id FORMAT: ids are mostly
+    `wc-<hex>` but at least one real character predates that (`draft-<ms>`),
+    so pinning the `wc-` shape would break a live record while adding nothing
+    — `*` is no more allowed in one shape than the other.
+
+    settings.py's `_safe_slug` guards the book-cover routes the same way; this
+    is the one glob that was missed.
+    """
+    if not char_id or not re.fullmatch(r"[A-Za-z0-9_-]+", char_id):
+        raise HTTPException(400, "invalid character id")
+    return char_id
+
+
 @router.post("/characters/{char_id}/photo")
 async def upload_character_photo(char_id: str, file: UploadFile):
     """Store a character portrait under writer_data/photos/ (writer data,
     never touched by AI or re-indexing)."""
+    char_id = _safe_photo_stem(char_id)
     suffix = Path(file.filename or "photo.png").suffix.lower() or ".png"
     if suffix not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
         raise HTTPException(400, "unsupported image type")
