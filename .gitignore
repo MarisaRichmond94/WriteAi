@@ -25,3 +25,6 @@ __pycache__/
 .venv/
 
 graphify-out/*
+
+# WriteAi.app launcher's freshness marker for the last backend restart
+.last-backend-restart

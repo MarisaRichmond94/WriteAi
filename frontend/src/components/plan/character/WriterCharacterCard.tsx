@@ -372,11 +372,30 @@ export default function WriterCharacterCard({
     return () => document.removeEventListener("mousedown", handler);
   }, [relDropdownOpen]);
 
-  const openRelDropdown = () => {
+  const positionRelDropdown = () => {
     const rect = relTargetRef.current?.getBoundingClientRect();
     if (rect) setRelDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width });
+  };
+
+  const openRelDropdown = () => {
+    positionRelDropdown();
     setRelDropdownOpen(true);
   };
+
+  // `fixed` positioning is computed from the input's viewport coordinates, so
+  // any ancestor scroll (the relationships list scrolls independently of the
+  // page) has to be tracked explicitly or the panel drifts away from the
+  // input instead of following it. `capture: true` catches scroll events from
+  // nested scrollable ancestors, which don't bubble to window/document.
+  useEffect(() => {
+    if (!relDropdownOpen) return;
+    window.addEventListener("scroll", positionRelDropdown, true);
+    window.addEventListener("resize", positionRelDropdown);
+    return () => {
+      window.removeEventListener("scroll", positionRelDropdown, true);
+      window.removeEventListener("resize", positionRelDropdown);
+    };
+  }, [relDropdownOpen]);
 
   const selectRelTarget = (c: { id: string; name: string }) => {
     setNewRelTarget(c.name);
@@ -706,7 +725,11 @@ export default function WriterCharacterCard({
                         </button>
                       ))}
                     </div>,
-                    document.body
+                    // Light mode is applied via `.light-body` on <main>, not
+                    // html/body (see index.css) — portaling past it drops the
+                    // theme's CSS variables, so the panel renders with the
+                    // dark defaults regardless of the active theme.
+                    relTargetRef.current?.closest(".light-body") ?? document.body
                   )}
                 </div>
                 <input
