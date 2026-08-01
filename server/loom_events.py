@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import time
 import urllib.error
 import urllib.request
@@ -28,12 +27,12 @@ from src.discovery import discover_books
 
 from . import audit, writer_store
 from .deps import get_state
+from .loom_client import LOOM_URL
 from .routers.books import ingest_run
 from .writer_store import WRITER_DATA_DIR
 
 log = logging.getLogger(__name__)
 
-LOOM_URL = os.environ.get("LOOM_URL", "http://localhost:3000")
 _POLL_SECONDS = 120
 # A writing session produces an export per blur/chapter-switch; waiting for
 # a quiet stretch turns that stream into one ingest at the session's end.
