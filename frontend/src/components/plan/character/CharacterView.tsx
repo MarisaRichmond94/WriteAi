@@ -61,7 +61,7 @@ type PanelMode = "compare" | "review" | null;
 
 interface CharacterViewProps {
   addTrigger?: number;
-  selectedBook: string;
+  selectedBook: string | null;
 }
 
 export default function CharacterView({ addTrigger, selectedBook }: CharacterViewProps) {

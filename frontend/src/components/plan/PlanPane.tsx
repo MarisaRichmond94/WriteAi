@@ -94,12 +94,13 @@ export default function PlanPane() {
     }
   };
 
-  // Default to first book
+  // Default to first book. Outline always needs a concrete book selected;
+  // the character view is allowed to sit on "All" (selectedBook === null).
   useEffect(() => {
-    if (!selectedBook && books.length > 0) {
+    if (selectedBook === null && planView === "outline" && books.length > 0) {
       setSelectedBook(books[0].id);
     }
-  }, [books, selectedBook, setSelectedBook]);
+  }, [books, selectedBook, planView, setSelectedBook]);
 
   // Check whether the extraction pipeline is currently running
   useEffect(() => {
@@ -121,6 +122,17 @@ export default function PlanPane() {
       .catch(() => setOutlineForBook(selectedBook, []));
   }, [selectedBook, setOutlineForBook]);
 
+  // Per-book character counts for the pill badges. writerCharacters is
+  // already loaded series-wide, so this is computed client-side rather
+  // than fetched (unlike CharactersPane, which re-fetches per book).
+  const characterCountMap: Record<string, number> = { all: writerCharacters.length };
+  for (const c of writerCharacters) {
+    for (const bookName of c.books) {
+      const book = books.find((bk) => bk.name.toLowerCase() === bookName.toLowerCase());
+      if (book) characterCountMap[book.id] = (characterCountMap[book.id] ?? 0) + 1;
+    }
+  }
+
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
 
@@ -130,7 +142,12 @@ export default function PlanPane() {
           {(["outline", "character"] as const).map((v) => (
             <button
               key={v}
-              onClick={() => setPlanView(v)}
+              onClick={() => {
+                setPlanView(v);
+                // Characters tab always starts on "All" rather than
+                // carrying over whatever book was selected in Outline.
+                if (v === "character" && planView !== "character") setSelectedBook(null);
+              }}
               className={clsx(
                 "px-3 py-1 text-[11px] font-medium capitalize transition-colors",
                 planView === v
@@ -147,20 +164,36 @@ export default function PlanPane() {
       {/* Row 2 — book filter pills + review / sync / add button */}
       <div className="flex-shrink-0 flex items-center gap-2 px-6 pb-3 pt-px">
         <div className="flex flex-1 items-center gap-1 overflow-x-auto scrollbar-hide py-0.5 px-0.5">
-          {books.map((b) => (
-            <button
-              key={b.id}
-              onClick={() => setSelectedBook(b.id)}
-              className={clsx(
-                "flex-shrink-0 rounded-full px-3 py-1 text-xs transition-colors",
-                selectedBook === b.id
-                  ? "bg-accent/20 text-accent ring-1 ring-accent/40"
-                  : "text-ink-secondary hover:bg-surface-hover"
-              )}
-            >
-              {b.name}
-            </button>
-          ))}
+          {(planView === "character"
+            ? [{ id: null as string | null, name: "All" }, ...books]
+            : books
+          ).map((b) => {
+            const count = planView === "character"
+              ? (b.id === null ? characterCountMap.all : characterCountMap[b.id])
+              : undefined;
+            return (
+              <button
+                key={b.id ?? "all"}
+                onClick={() => setSelectedBook(b.id)}
+                className={clsx(
+                  "flex-shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors",
+                  selectedBook === b.id
+                    ? "bg-accent/20 text-accent ring-1 ring-accent/40"
+                    : "text-ink-secondary hover:bg-surface-hover"
+                )}
+              >
+                {b.name}
+                {count != null && (
+                  <span className={clsx(
+                    "rounded-full px-1.5 py-0.5 text-[10px] font-medium",
+                    selectedBook === b.id ? "bg-accent/20 text-accent" : "bg-surface-border text-ink-muted"
+                  )}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
 
         {planView === "outline" && (
@@ -238,12 +271,12 @@ export default function PlanPane() {
         />
       )}
 
-      {planView === "outline" && <OutlineView bookId={selectedBook} bookName={books.find(b => b.id === selectedBook)?.name ?? ""} />}
+      {planView === "outline" && <OutlineView bookId={selectedBook ?? ""} bookName={books.find(b => b.id === selectedBook)?.name ?? ""} />}
       {planView === "character" && <CharacterView addTrigger={addCharacterTrigger} selectedBook={selectedBook} />}
 
       <ChapterSelectModal
         open={reviewModalOpen}
-        chapters={outlineByBook[selectedBook] ?? []}
+        chapters={outlineByBook[selectedBook ?? ""] ?? []}
         onReview={(ids) => {
           setSelectedChapterIds(ids);
           setReviewOpen(true);

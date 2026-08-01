@@ -10,8 +10,8 @@ interface PlanState {
   planView: PlanView;
   setPlanView: (v: PlanView) => void;
 
-  selectedBook: string;
-  setSelectedBook: (b: string) => void;
+  selectedBook: string | null;
+  setSelectedBook: (b: string | null) => void;
 
   outlineByBook: Record<string, OutlineChapter[]>;
   setOutlineForBook: (book: string, chapters: OutlineChapter[]) => void;
@@ -41,7 +41,7 @@ export const usePlanStore = create<PlanState>((set) => ({
   planView: "outline",
   setPlanView: (v) => set({ planView: v }),
 
-  selectedBook: "",
+  selectedBook: null,
   setSelectedBook: (b) => set({ selectedBook: b, selectedChapterIds: new Set() }),
 
   outlineByBook: {},
