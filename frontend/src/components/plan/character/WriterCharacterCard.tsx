@@ -6,6 +6,8 @@ import { useAppStore } from "../../../store/useAppStore";
 import { usePlanStore } from "../../../store/usePlanStore";
 import { uploadWriterCharacterPhoto } from "../../../api/plan";
 import type { WriterCharacter, CharacterCategory } from "../../../types";
+import { ChapterAppearances } from "./ChapterAppearances";
+import type { ChapterLink } from "../../../api/writerEvents";
 
 const POV_PALETTE = [
   { bg: "bg-rose-500/20",    text: "text-rose-300"    },
@@ -179,6 +181,11 @@ interface WriterCharacterCardProps {
   onRelationshipsChange: (relationships: { target: string; nature: string }[]) => void;
   onPhotoChange: (photoUrl: string) => void;
   onAliasesChange: (aliases: string | null) => void;
+  /** Loom chapters this character appears in, and whether Loom could be asked
+   *  at all — an empty list and an unanswerable question look identical
+   *  otherwise, and only one means "appears nowhere". */
+  chapterLinks: ChapterLink[];
+  loomUnreachable: boolean;
 }
 
 function Avatar({
@@ -304,6 +311,8 @@ export default function WriterCharacterCard({
   onRelationshipsChange,
   onPhotoChange,
   onAliasesChange,
+  chapterLinks,
+  loomUnreachable,
 }: WriterCharacterCardProps) {
   const { books: allBooks } = useAppStore();
   const cat = character.category ?? null;
@@ -543,12 +552,17 @@ export default function WriterCharacterCard({
 
       {/* Traits */}
       <div className="mt-1">
-        <div className="h-[52px] overflow-y-auto flex flex-wrap gap-1.5 content-start pb-0.5">
+        {/* One row tall, fixed. Two rows were reserved, which left a dead band
+            above the divider for every character with only a handful of traits
+            — which is most of them. Still fixed rather than auto so cards in a
+            grid row keep the same height; overflow scrolls. Pills carry an
+            explicit height so the row and its contents can't disagree. */}
+        <div className="h-[24px] overflow-y-auto flex flex-wrap gap-1.5 content-start pb-0.5">
           {localTraits.map((t) => (
             <span
               key={t}
               title={t}
-              className="flex items-center gap-1 w-24 flex-shrink-0 rounded-full bg-surface border border-surface-border px-2 py-0.5"
+              className="flex h-[22px] items-center gap-1 w-24 flex-shrink-0 rounded-full bg-surface border border-surface-border px-2 py-0.5"
             >
               <span className="flex-1 min-w-0 truncate text-[10px] text-ink-muted">{t}</span>
               <button
@@ -560,7 +574,7 @@ export default function WriterCharacterCard({
             </span>
           ))}
           {addingTrait ? (
-            <span className="flex items-center w-24 flex-shrink-0 rounded-full bg-surface border border-accent/40 px-2 py-0.5">
+            <span className="flex h-[22px] items-center w-24 flex-shrink-0 rounded-full bg-surface border border-accent/40 px-2 py-0.5">
               <input
                 ref={newTraitInputRef}
                 value={newTraitValue}
@@ -577,7 +591,7 @@ export default function WriterCharacterCard({
           ) : (
             <button
               onClick={() => setAddingTrait(true)}
-              className="flex flex-shrink-0 items-center gap-0.5 rounded-full border border-dashed border-surface-border px-2 py-0.5 text-[10px] text-ink-muted hover:border-accent/50 hover:text-accent transition-colors"
+              className="flex h-[22px] flex-shrink-0 items-center gap-0.5 rounded-full border border-dashed border-surface-border px-2 py-0.5 text-[10px] text-ink-muted hover:border-accent/50 hover:text-accent transition-colors"
             >
               <Plus className="h-2.5 w-2.5" />
               Add Trait
@@ -690,6 +704,17 @@ export default function WriterCharacterCard({
           </>
         )}
         </div>
+      </div>
+
+      {/* Chapters, from Loom. Sits above the book toggles because it is the
+          finer grain of the same question — and unlike them, it is not
+          editable here: tagging happens in Loom's Characters tab, keyed by
+          chapter cuid so it survives renumbering. */}
+      {/* Unconditional: an untagged character must still reserve the block, or
+          cards in the same grid row end up different heights. The component
+          renders its own empty state. */}
+      <div className="mt-3 border-t border-surface-border pt-3">
+        <ChapterAppearances links={chapterLinks} loomUnreachable={loomUnreachable} />
       </div>
 
       {/* Book toggles */}

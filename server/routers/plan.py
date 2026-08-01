@@ -10,13 +10,16 @@ import uuid
 from collections import defaultdict
 from pathlib import Path
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from src.discovery import loom_book_id_for
 from src.query_router import QueryPlan, Scope
 
-from .. import outline_store, writer_store
+from .. import loom_client, outline_store, writer_store
 from ..deps import get_state
 from ..sse import citations_payload, stream_response
 
@@ -491,6 +494,37 @@ def _seed_writer_characters() -> list[dict]:
             "photo_url": None,
         })
     return seeded
+
+
+@router.get("/characters/chapter-links")
+def character_chapter_links(ids: str = ""):
+    """Which Loom chapters these writer-characters appear in (LOOM-33).
+
+    The reverse of the tagging Loom's Characters tab does. Loom owns the join,
+    keyed by chapter cuid — which is what makes a tag survive a chapter being
+    inserted above it — so this is a pass-through, not a second source of
+    truth.
+
+    Deliberately NOT cached: the point of the seam is that these numbers track
+    Loom, and a mirror would reintroduce exactly the drift it removes.
+
+    WriteAI can already say which BOOKS a character is in (`books`, matched by
+    title). Chapters are the thing it cannot know, because nothing here is
+    chapter-aware.
+
+    Declared before /characters/{char_id} so the literal path wins.
+    """
+    ids = ids.strip()
+    if not ids:
+        return {}
+    try:
+        return loom_client.get_json(f"/api/chapter-characters?characterIds={quote(ids)}")
+    except loom_client.LoomUnreachable as exc:
+        # 503, not 502: nothing is broken, Loom is simply not running.
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Loom is not reachable", "unreachable": True, "detail": str(exc)},
+        )
 
 
 @router.get("/characters")

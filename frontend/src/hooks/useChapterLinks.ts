@@ -18,14 +18,20 @@ import {
  * and "this event is referenced nowhere" look identical as an absent chip, and
  * only one of them is a fact about the story.
  */
-export function useChapterLinks(eventIds: string[]) {
+export function useChapterLinks(
+  ids: string[],
+  /** Which side of the seam to ask. Events and characters have identical
+   *  shapes and identical failure modes, so they share this hook rather than
+   *  growing two copies that drift. */
+  fetcher: (ids: string[]) => Promise<ChapterLinks> = fetchChapterLinks,
+) {
   const [links, setLinks] = useState<ChapterLinks>({});
   const [unreachable, setUnreachable] = useState(false);
   const [loading, setLoading] = useState(false);
 
   // Joined so the effect re-runs when the SET changes, not on every render
   // that happens to rebuild the array.
-  const key = eventIds.join(",");
+  const key = ids.join(",");
 
   const load = useCallback(async () => {
     if (!key) {
@@ -35,7 +41,7 @@ export function useChapterLinks(eventIds: string[]) {
     }
     setLoading(true);
     try {
-      setLinks(await fetchChapterLinks(key.split(",")));
+      setLinks(await fetcher(key.split(",")));
       setUnreachable(false);
     } catch (err) {
       if (err instanceof LoomUnreachableError) {
@@ -47,7 +53,7 @@ export function useChapterLinks(eventIds: string[]) {
     } finally {
       setLoading(false);
     }
-  }, [key]);
+  }, [key, fetcher]);
 
   useEffect(() => {
     void load();

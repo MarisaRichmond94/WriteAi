@@ -3,6 +3,8 @@ import { Loader2, Users, Search, X, Plus } from "lucide-react";
 import { clsx } from "clsx";
 import { usePlanStore } from "../../../store/usePlanStore";
 import { useAppStore } from "../../../store/useAppStore";
+import { useChapterLinks } from "../../../hooks/useChapterLinks";
+import { fetchCharacterChapterLinks } from "../../../api/plan";
 import {
   fetchWriterCharacters,
   replaceAllWriterCharacters,
@@ -66,6 +68,17 @@ export default function CharacterView({ addTrigger, selectedBook }: CharacterVie
   const { showToast, books } = useAppStore();
   const { writerCharacters, setWriterCharacters } = usePlanStore();
 
+  // One request covering every card. The hook re-fetches when the SET of ids
+  // changes, so creating or deleting a character refreshes the appearances
+  // without a manual invalidation.
+  const chapterLinks = useChapterLinks(
+    writerCharacters.map((c) => c.id),
+    fetchCharacterChapterLinks,
+  );
+
+  // One request covering every card. The hook re-fetches when the set of ids
+  // changes, so creating or deleting a character refreshes the appearances
+  // without a manual invalidation.
   // Resolve selected book ID → name for filtering (WriterCharacter.books stores names)
   const selectedBookName = books.find((b) => b.id === selectedBook)?.name ?? null;
 
@@ -348,6 +361,8 @@ export default function CharacterView({ addTrigger, selectedBook }: CharacterVie
                   onRelationshipsChange={(rels) => handleRelationshipsChange(c, rels)}
                   onPhotoChange={(url) => handlePhotoChange(c, url)}
                   onAliasesChange={(aliases) => handleAliasesChange(c, aliases)}
+                  chapterLinks={chapterLinks.links[c.id] ?? []}
+                  loomUnreachable={chapterLinks.unreachable}
                 />
               ))}
             </div>
