@@ -49,10 +49,20 @@ def _indexed_chapters(s, book) -> set[int]:
         (book.number,))}
 
 
-def book_sync_state(s, book_number: int) -> tuple[bool, dict[int, str]]:
-    """(index matches the manifest?, manifest chapter number -> Loom chapter
-    id) for one book. (False, {}) when no manifest is readable — callers must
-    treat that as "unknown", not as drift."""
+def book_sync_state(s, book_number: int) -> tuple[bool, dict[int, dict]]:
+    """(index matches the manifest?, manifest chapter number -> chapter record)
+    for one book. (False, {}) when no manifest is readable — callers must
+    treat that as "unknown", not as drift.
+
+    The record is the manifest entry itself: `{id, number, label, pov, date,
+    wordCount, contentHash}`. It used to be just the id, which meant the ONLY
+    thing a caller could learn about a chapter was its identity — everything
+    else had to come from the `chunks` table, and a chapter with no prose has
+    no chunks. That is why a stubbed chapter could never get an outline card
+    (LOOM-64): it exists in canon, the manifest describes it fully, and the
+    index will never hold it. Callers that need to render an unwritten chapter
+    need `label`/`pov`/`date` from here, and `wordCount` to know it IS one.
+    """
     for b in discover_books(s.cfg):
         if b.number != book_number:
             continue
@@ -63,7 +73,7 @@ def book_sync_state(s, book_number: int) -> tuple[bool, dict[int, str]]:
             return (False, {})
         chapters = [c for c in m.get("chapters", [])
                     if c.get("number") is not None and c.get("id")]
-        num_to_id = {c["number"]: c["id"] for c in chapters}
+        num_to_id = {c["number"]: c for c in chapters}
         # Compare the index against canon chapters that HAVE PROSE. A stubbed
         # chapter -- created to write later, wordCount 0 -- produces no chunks,
         # so it can never appear in the index. Requiring equality against all
@@ -74,7 +84,8 @@ def book_sync_state(s, book_number: int) -> tuple[bool, dict[int, str]]:
         #
         # num_to_id still carries EVERY canon chapter, stubs included, because
         # it is also the canon identity set used to decide which outline cards
-        # have left canon. Dropping stubs from it would delete their cards.
+        # have left canon. Dropping stubs from it would delete their cards —
+        # and since LOOM-64 it is also what CREATES them.
         written = {c["number"] for c in chapters if c.get("wordCount")}
         index_ch = _indexed_chapters(s, b)
         return (written == index_ch, num_to_id)
