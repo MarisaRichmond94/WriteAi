@@ -103,6 +103,75 @@ displays at the point of action.
 
 WriteAI's own review pane is unchanged and remains fully usable.
 
+### Chapter insights (LOOM-91)
+
+Loom's chapter dock has an Insights tab rendering WriteAI's extraction for the
+open chapter. It reads one endpoint, through a Loom-side proxy:
+
+| WriteAI endpoint | Read by | Carries |
+|---|---|---|
+| `GET /api/books/{book}/chapters/{chapter}/extracted` | Loom's `GET /api/writeai/insights` | `summary_text`, `summary`, `facts` |
+
+Three obligations on this side:
+
+- **Keep it a pure read.** `chapter_extracted` seeds nothing, prunes nothing and
+  writes nothing today, and Loom calls it on tab open on that assumption. Giving
+  it a seed-or-save — the pattern `GET /api/plan/characters` uses — would turn an
+  idle editor into a writer of this store.
+- **`{book}` is the positional `book_number`.** Loom resolves it by matching the
+  book title against `GET /api/books`. Rename a book on one side only and
+  insights go quiet for it; that is the title-coupling LOOM-12 moves away from,
+  and the reason the match is normalised (NFC, curly apostrophes) rather than
+  compared raw.
+- **A 404 here means "not ingested yet", not "error".** Loom renders it as an
+  ordinary empty state, so keep 404 for the missing-chapter case rather than
+  promoting it to a 500.
+
+Two keys this endpoint returns are deliberately **not** consumed. `characters`,
+because Loom's Characters tab shows the writer's own tags and the chunk-derived
+roster would contradict it; and `locations`, which Loom rendered briefly and
+dropped as not worth its space. Both stay in the response for WriteAI's own book
+drawer — nothing here asks WriteAI to stop returning them.
+
+### Plan outline (LOOM-95)
+
+Loom's book page edits the same outline as the plan pane, through four proxied
+endpoints:
+
+| WriteAI endpoint | Loom route |
+|---|---|
+| `GET /api/plan/outline/{book}` | `GET /api/writeai/outline` |
+| `PUT /api/plan/outline/{book}` | `PUT /api/writeai/outline` |
+| `POST /api/plan/outline/{book}/chapter` | `POST /api/writeai/outline/chapter` |
+| `DELETE /api/plan/outline/{book}/chapter/{id}` | `DELETE /api/writeai/outline/chapter?cardId=` |
+
+This works because `plan_outline.json` is keyed by Loom's book cuid (KAN-24), so
+both apps address the same outline the same way even after a book is inserted or
+reordered. `{book}` in the route is still the positional number; Loom resolves it
+by title, as it does for insights.
+
+Four obligations on this side:
+
+- **`get_outline` seeds, reconciles and saves on a GET.** Loom knows, and only
+  calls it on section open and after mutations. Worth keeping in mind before
+  adding more write-on-read behaviour to it — the cost is now paid by two UIs.
+- **Keep `put_outline` refusing nothing and replacing everything, or change it
+  deliberately.** Loom validates every card before sending, because the endpoint
+  cannot tell an intentional deletion from a client that forgot a field. If
+  per-card updates ever land, say so here — Loom would drop a whole layer of
+  guard code.
+- **`loom_id` and `summary_source` are load-bearing but appear in no published
+  type.** `_auto_reconcile` keys on the first; the second is how a hand-edited
+  summary is told apart from generated text. Anything that rewrites cards on
+  either side must carry them.
+- **`writer_summary` holds HTML.** Every card in the live store does. A client
+  writing plain text into it destroys the writer's paragraph breaks.
+
+> ⚠️ **Two editors, no locking.** Loom and the plan pane can both write this
+> store, and the second save silently wins. Accepted deliberately for a
+> single-writer setup rather than mitigated — recorded so missing cards are
+> recognised rather than debugged.
+
 ---
 
 #### Legacy: the review deep link (Loom → WriteAI)
