@@ -234,6 +234,11 @@ export default function ChapterCard({
               >
                 <StoryDatePicker
                   value={inlineDate}
+                  // Outline cards carry STORY dates: yearless, like the
+                  // manuscript's own date lines, and every dated card in the
+                  // store is. Without this a newly picked date would arrive
+                  // stamped with the current real year.
+                  defaultIncludeYear={false}
                   onChange={(val) => {
                     setInlineDate(val);
                     onSave({ ...chapter, date: val || null });

@@ -25,6 +25,28 @@ function formatDate(year: number | null, month: number, day: number): string {
   return s;
 }
 
+/**
+ * Do two date strings name the same day? Compares month/day/year and IGNORES
+ * the weekday.
+ *
+ * That omission is the point. This picker serves two conventions at once:
+ * writer-events carry real dates with real years ("Saturday, January 2nd,
+ * 1943" — and all 157 of them have the weekday a real calendar gives), while
+ * outline cards carry YEARLESS story dates whose weekday belongs to the
+ * story's own calendar, not to any real one. For those, `formatDate` can only
+ * guess, and it guesses 2001.
+ *
+ * So re-picking the day a card already holds would rewrite "Friday, December
+ * 4th" as "Tuesday, December 4th" — silently contradicting the prose. Asking
+ * this first is what stops that.
+ */
+export function isSameStoryDay(a: string, b: string): boolean {
+  const x = parseDateString(a);
+  const y = parseDateString(b);
+  if (x.month === null || y.month === null) return false;
+  return x.month === y.month && x.day === y.day && x.year === y.year;
+}
+
 export function parseDateString(s: string): {
   year: number | null;
   month: number | null;
@@ -63,9 +85,26 @@ export function parseDateString(s: string): {
 interface StoryDatePickerProps {
   value: string;
   onChange: (value: string) => void;
+  /**
+   * Should a date picked from an EMPTY field carry a year?
+   *
+   * The two callers disagree, and both are right. Writer-events are real dates
+   * on the real calendar and want one; outline cards are story dates and want
+   * none — every one of the 332 dated cards in the store is yearless, because
+   * the manuscript's date lines are.
+   *
+   * Only consulted when the field is empty. A field that already holds a date
+   * keeps whatever that date does, so editing never adds or removes a year the
+   * writer did not ask for.
+   */
+  defaultIncludeYear?: boolean;
 }
 
-export default function StoryDatePicker({ value, onChange }: StoryDatePickerProps) {
+export default function StoryDatePicker({
+  value,
+  onChange,
+  defaultIncludeYear = true,
+}: StoryDatePickerProps) {
   const parsed = parseDateString(value);
 
   const today = new Date();
@@ -79,6 +118,14 @@ export default function StoryDatePicker({ value, onChange }: StoryDatePickerProp
   const [selectedYear, setSelectedYear] = useState<number | null>(parsed.year ?? null);
   const [editingYear, setEditingYear] = useState(false);
   const [yearInput, setYearInput] = useState(String(initYear));
+  // Set once the writer edits the year field, which is them asking for a year
+  // on a date that did not have one.
+  const [yearTouched, setYearTouched] = useState(false);
+
+  // Whether the string this picker emits should carry a year at all. The
+  // existing value decides; an empty field falls back to the caller's
+  // convention; editing the year field overrides both.
+  const includeYear = yearTouched || (value.trim() ? parsed.year !== null : defaultIncludeYear);
 
   const firstDayOfMonth = new Date(viewYear, viewMonth, 1).getDay();
   const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
@@ -96,8 +143,14 @@ export default function StoryDatePicker({ value, onChange }: StoryDatePickerProp
   const selectDay = (day: number) => {
     setSelectedDay(day);
     setSelectedMonth(viewMonth);
-    setSelectedYear(viewYear);
-    onChange(formatDate(viewYear, viewMonth, day));
+    setSelectedYear(includeYear ? viewYear : null);
+
+    const formatted = formatDate(includeYear ? viewYear : null, viewMonth, day);
+    // Picking the day the field already holds must not rewrite it. For a
+    // yearless story date our weekday is a guess against 2001 and the
+    // manuscript's is not, so reformatting would relabel the writer's
+    // "Friday, December 4th" as Tuesday. Emit the original untouched.
+    onChange(value && isSameStoryDay(formatted, value) ? value : formatted);
   };
 
   const isSelected = (day: number) =>
@@ -136,8 +189,13 @@ export default function StoryDatePicker({ value, onChange }: StoryDatePickerProp
               onChange={(e) => setYearInput(e.target.value)}
               onBlur={() => {
                 const y = parseInt(yearInput);
-                if (y > 0 && y < 10000) setViewYear(y);
-                else setYearInput(String(viewYear));
+                if (y > 0 && y < 10000) {
+                  setViewYear(y);
+                  // Typing a year is the writer asking for one, even on a date
+                  // that had none. Without this a story date could never gain
+                  // a year through this control.
+                  setYearTouched(true);
+                } else setYearInput(String(viewYear));
                 setEditingYear(false);
               }}
               onKeyDown={(e) => {
@@ -199,12 +257,19 @@ export default function StoryDatePicker({ value, onChange }: StoryDatePickerProp
         ))}
       </div>
 
-      {/* Selected date preview */}
-      {selectedDay !== null && selectedMonth !== null && (
-        <div className="mt-2 pt-2 border-t border-surface-border text-center text-[11px] text-accent/80">
-          {formatDate(selectedYear, selectedMonth, selectedDay)}
-        </div>
-      )}
+      {/* Selected date preview — the string that will actually be stored, not
+          a fresh formatting of it. Those differ for an unchanged story date,
+          and a preview that disagrees with the card behind it is worse than no
+          preview. */}
+      {selectedDay !== null && selectedMonth !== null && (() => {
+        const formatted = formatDate(selectedYear, selectedMonth, selectedDay);
+        const shown = value && isSameStoryDay(formatted, value) ? value : formatted;
+        return (
+          <div className="mt-2 pt-2 border-t border-surface-border text-center text-[11px] text-accent/80">
+            {shown}
+          </div>
+        );
+      })()}
     </div>
   );
 }
