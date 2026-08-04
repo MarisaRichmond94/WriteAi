@@ -71,6 +71,17 @@ def _find_manuscript(folder: Path, title: str) -> Path | None:
     return None
 
 
+def manifest_path(folder: Path, title: str) -> Path:
+    """Where a book's manifest sidecar lives.
+
+    One formula, three callers. It used to be spelled out at each of them, and
+    a fourth copy was about to be added by the freshness check in
+    `server.enrich` — which needs to stat exactly the file the readers below
+    parse, or it would be watching the wrong path for changes.
+    """
+    return folder / f"{title}.manifest.json"
+
+
 def _read_loom_identity(folder: Path, title: str) -> tuple[str | None, str | None]:
     """Pull (loom_book_id, loom_series_id) out of the manifest sidecar.
 
@@ -82,7 +93,7 @@ def _read_loom_identity(folder: Path, title: str) -> tuple[str | None, str | Non
     The manifest is still LOCATED by folder and title. Locating it is the last
     title-dependent step; once it is open, identity is stable.
     """
-    path = folder / f"{title}.manifest.json"
+    path = manifest_path(folder, title)
     if not path.exists():
         return (None, None)
     try:
@@ -111,7 +122,7 @@ def read_manifest_chapters(folder: Path, title: str) -> list[dict]:
     caller treats an empty result as "unknown identity" and falls back to
     chapter numbers, which is the pre-LOOM-12 behaviour.
     """
-    path = folder / f"{title}.manifest.json"
+    path = manifest_path(folder, title)
     if not path.exists():
         return []
     try:

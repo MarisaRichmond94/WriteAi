@@ -38,14 +38,25 @@ class Reposition(unittest.TestCase):
         ensure_tables(self.db)
         self.db.execute("""CREATE TABLE chunks (chunk_id TEXT PRIMARY KEY,
                            book_number INTEGER, chapter_number INTEGER)""")
-        self.db.execute("INSERT INTO chunks VALUES ('c', 2, 40)")
         self.db.commit()
-        self.addCleanup(enrich._LOOM_ID_CACHE.clear)
+        self.addCleanup(enrich.forget_loom_ids)
 
-    def manifest(self, numbers_to_ids):
-        """Pretend the book's manifest maps these chapter numbers to cuids."""
-        enrich._LOOM_ID_CACHE.clear()
+    def manifest(self, numbers_to_ids, indexed=None):
+        """Pretend the book's manifest maps these chapter numbers to cuids.
+
+        Also stocks `chunks`, because reposition now refuses to move rows for a
+        book whose manifest and indexed prose disagree (LOOM-100) — so a
+        fixture that describes a manifest without the matching prose describes
+        a book that could not exist. `indexed` overrides for the tests that are
+        *about* that disagreement; by default the prose matches the manifest.
+        """
+        enrich.forget_loom_ids()
         enrich._LOOM_ID_CACHE[2] = ("bk", "sr", dict(numbers_to_ids))
+        numbers = sorted(numbers_to_ids) if indexed is None else sorted(indexed)
+        self.db.execute("DELETE FROM chunks")
+        self.db.executemany("INSERT INTO chunks VALUES (?, 2, ?)",
+                            [(f"c{n}", n) for n in numbers])
+        self.db.commit()
 
     def summaries(self):
         return dict(self.db.execute(
@@ -146,6 +157,76 @@ class Reposition(unittest.TestCase):
         self.manifest({41: "cu_a"})
         self.assertEqual(reposition_renumbered_chapters(self.db, None), 1)
         self.assertEqual(reposition_renumbered_chapters(self.db, None), 0)
+        self.assertEqual(self.summaries(), {41: "A"})
+
+    # ── LOOM-100: the sweep must not delete a live chapter's only row ────────
+    #
+    # Book 3's rows were stamped one chapter late, so every row wanted to move
+    # up by one. This pass moved 56 of them and deleted two more on the way
+    # out — including chapter 43's summary, whose cuid the manifest still
+    # listed. That deletion is the part no later pass can undo, and the part
+    # that is decidable from the rows alone.
+    #
+    # What is NOT decidable here: a uniform shift is structurally identical to
+    # a mid-book insert. Both move a suffix by one with each row keeping its
+    # own cuid. That distinction lives in LOOM-98 (were the stamps written
+    # against a current manifest?), and the insert tests above must keep
+    # passing untouched — they do.
+
+    def test_a_swap_is_still_applied(self):
+        """Two rows exchanging numbers both move; the parking phase is what
+        makes that safe, and the collision guard must not veto it."""
+        self.seed_summary(40, "A", "cu_a")
+        self.seed_summary(41, "B", "cu_b")
+        self.manifest({40: "cu_b", 41: "cu_a"})
+        self.assertEqual(reposition_renumbered_chapters(self.db, None), 2)
+        self.assertEqual(self.summaries(), {40: "B", 41: "A"})
+
+    def test_an_orphaned_occupant_is_still_swept(self):
+        """The behaviour the guard must not cost us: a row whose cuid the
+        manifest no longer lists is genuinely stale and still gets displaced."""
+        self.seed_summary(41, "from a chapter that no longer exists", "cu_gone")
+        self.seed_summary(40, "A", "cu_a")
+        self.manifest({41: "cu_a"})
+        self.assertEqual(reposition_renumbered_chapters(self.db, None), 1)
+        self.assertEqual(self.summaries(), {41: "A"})
+
+    def test_a_twin_already_in_the_target_slot_does_not_raise(self):
+        """Pre-existing crash, found while writing these guards. Two rows share
+        cu_a; the one at 41 is already where cu_a belongs, so it is neither a
+        mover nor stale and nothing displaces it — and the other then UPDATEs
+        straight into its primary key.
+
+        That raised IntegrityError out of the middle of the enrichment run,
+        which aborts the pass with a write transaction open. Refusing the move
+        leaves the duplicate visible and the run alive."""
+        self.seed_summary(41, "duplicate of A", "cu_a")
+        self.seed_summary(40, "A", "cu_a")
+        self.manifest({41: "cu_a"})
+        self.assertEqual(reposition_renumbered_chapters(self.db, None), 0)
+        self.assertEqual(self.summaries(), {40: "A", 41: "duplicate of A"})
+        self.assertFalse(self.db.in_transaction)
+
+    def test_a_manifest_behind_the_prose_blocks_the_whole_book(self):
+        """LOOM-98's incident, contained. The index holds chapter 44; the
+        manifest still describes a 43-chapter book, so every stamp in it was
+        written against different numbering and none of it can be moved by."""
+        self.seed_summary(42, "chapter 42's summary", "cu_43")   # mis-stamped
+        self.seed_summary(43, "chapter 43's summary", "cu_44")   # mis-stamped
+        self.manifest({42: "cu_42", 43: "cu_43", 44: "cu_44"},
+                      indexed=[42, 43, 44, 45])
+
+        self.assertEqual(reposition_renumbered_chapters(self.db, None), 0)
+        self.assertEqual(self.summaries(),
+                         {42: "chapter 42's summary", 43: "chapter 43's summary"},
+                         "nothing moved, so nothing landed where gc could reap it")
+
+    def test_a_stub_chapter_does_not_block_the_book(self):
+        """A canonised chapter with no words yet has a manifest entry and no
+        chunks. That is the healthy direction and must not stop a real move."""
+        self.seed_summary(40, "A", "cu_a")
+        self.manifest({41: "cu_a", 42: "cu_stub"}, indexed=[41])
+        self.assertEqual(reposition_renumbered_chapters(self.db, None), 1)
         self.assertEqual(self.summaries(), {41: "A"})
 
     def test_no_write_lock_is_left_open_on_the_no_op_path(self):

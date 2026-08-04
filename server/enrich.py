@@ -17,6 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import sqlite3
 import threading
@@ -235,6 +236,55 @@ def ensure_tables(db: sqlite3.Connection) -> None:
     db.commit()
 
 
+def _moves_would_collide(book: int, table: str, rows, movers, doomed) -> bool:
+    """Whether applying these moves would land two rows on one chapter number.
+
+    Reachable whenever two rows carry the SAME cuid — a duplicate, which the
+    displacement sweep below exists to clean up. If the twin is already sitting
+    correctly at that cuid's number it is neither a mover nor stale, so nothing
+    displaces it, and the other twin then updates straight into its primary
+    key. That raised `IntegrityError` out of the middle of the enrichment run,
+    which aborts the pass with a write transaction open — the hazard
+    `gc_orphans` documents, reached by a different road.
+
+    Refusing is strictly better than raising: the rows stay where they are, the
+    run continues, and the duplicate is still visible to be dealt with.
+
+    This is deliberately NOT an attempt to detect a wholesale mis-stamp. A
+    uniform shift is structurally identical to a legitimate mid-book insert —
+    rows move by one, each keeping its own cuid, either way. That distinction
+    is decidable only from whether the stamps were written against a current
+    manifest, which is the gate in the caller, not a property of these rows.
+    """
+    moving = {rowid for rowid, _, _ in movers}
+    after: dict[int, int] = {}
+    for rowid, at, _cid in rows:
+        if rowid in doomed or rowid in moving:
+            continue
+        after[at] = rowid
+    collisions = sorted(to for _, _, to in movers if to in after)
+    for _, _, to in movers:
+        if to in after:
+            continue
+        after[to] = -1
+
+    seen: set[int] = set()
+    for _, _, to in movers:
+        if to in seen:
+            collisions.append(to)
+        seen.add(to)
+
+    if not collisions:
+        return False
+    log.error(
+        "book %s: refusing to reposition %s — %d row(s) would land on chapter "
+        "number(s) %s that another row already holds. Two rows claiming one "
+        "chapter is a duplicated stamp, not a renumbering; moving them would "
+        "raise out of the middle of the run. Leaving every row where it is.",
+        book, table, len(collisions), sorted(set(collisions))[:10])
+    return True
+
+
 def reposition_renumbered_chapters(db: sqlite3.Connection, cfg) -> int:
     """Move enrichment rows to the chapter number their chapter now holds.
 
@@ -278,6 +328,24 @@ def reposition_renumbered_chapters(db: sqlite3.Connection, cfg) -> int:
         hit = _LOOM_ID_CACHE.get(book)
         if hit is None or not hit[0] or not hit[2]:
             continue  # unknown identity: leave every row exactly as it is
+        # The gate that would have contained LOOM-98 (see LOOM-100). A move is
+        # only as trustworthy as the stamps it reads, and a manifest that does
+        # not describe the prose already indexed is the one case where we can
+        # PROVE the stamps were written against a different book. Book 3's
+        # index held 72 chapters while its manifest still described 71; every
+        # row shifted by one, and the tail row landed on a prose-less stub
+        # where gc_orphans then collected it.
+        #
+        # A uniform shift on its own proves nothing — it is exactly what a
+        # legitimate mid-book insert looks like, which is why this pass cannot
+        # simply refuse to move a whole tail. The manifest/prose disagreement
+        # is the part that is decidable, so it is the part we act on.
+        if not identity_matches_prose(db, cfg, book):
+            log.warning(
+                "book %s: skipping reposition — its manifest and its indexed "
+                "prose disagree, so the chapter stamps cannot be trusted to "
+                "move rows by. Re-export canon from Loom.", book)
+            continue
         # number -> cuid, inverted. A manifest maps each number to one id, so
         # `desired` is injective — no two rows can want the same slot.
         desired = {cuid: number for number, cuid in hit[2].items()}
@@ -295,10 +363,19 @@ def reposition_renumbered_chapters(db: sqlite3.Connection, cfg) -> int:
             # previous occupant's stale row — the exact row that would
             # otherwise be served under the wrong chapter.
             keep = {rowid for rowid, _, _ in movers}
-            for rowid, at, cid in rows:
-                if at in targets and rowid not in keep and (
-                        not cid or cid not in desired or desired[cid] != at):
-                    db.execute(f"DELETE FROM {table} WHERE rowid = ?", (rowid,))
+            doomed = {rowid for rowid, at, cid in rows
+                      if at in targets and rowid not in keep and (
+                          not cid or cid not in desired or desired[cid] != at)}
+
+            # Only chapter_summaries can collide: it is keyed UNIQUE on (book,
+            # chapter), while events holds many rows per chapter by design and
+            # several movers sharing a target is its normal shape.
+            if table == "chapter_summaries" and _moves_would_collide(
+                    book, table, rows, movers, doomed):
+                continue
+
+            for rowid in doomed:
+                db.execute(f"DELETE FROM {table} WHERE rowid = ?", (rowid,))
             # Two-phase, because chapter_summaries has a UNIQUE (book,
             # chapter) primary key and a shift moves rows THROUGH each other:
             # 41->42 while 42->43 collides head-on if applied in place. Park
@@ -389,6 +466,98 @@ def gc_orphans(db: sqlite3.Connection,
 
 _LOOM_ID_CACHE: dict[int, tuple[str | None, str | None, dict[int, str]]] = {}
 
+# Per book: (manifest path, stat signature) as of the cached entry above.
+# Kept alongside rather than folded into the tuple so the cache stays the
+# 3-tuple every other reader — and every test that seeds it — already indexes.
+_LOOM_ID_STAMP: dict[int, tuple[str, tuple[int, int]]] = {}
+
+
+def _manifest_stamp(path) -> tuple[int, int] | None:
+    """(mtime_ns, size) for a manifest, or None if it cannot be stat'd.
+
+    Loom rewrites the manifest by atomic rename, so a change always moves both
+    fields and the file is never observed half-written. None means "could not
+    look" — a missing file is the rename window, not evidence of a change.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _cached_map_is_current(book_number: int) -> bool:
+    """Whether the cached number->cuid map still matches the manifest on disk.
+
+    A stat per call, against a directory walk plus a JSON parse to rebuild — so
+    this is affordable on the hot path in a way that re-resolving is not.
+
+    Two cases deliberately answer True:
+
+    * **No stamp recorded.** Nothing to compare against, so the cache is all we
+      have; this is also what lets callers seed `_LOOM_ID_CACHE` directly.
+    * **The manifest cannot be stat'd.** That is the atomic-rename window, and
+      the whole point of `test_loom_identity_cache` is that a TRANSIENT miss
+      must never poison a run. Only an OBSERVED change invalidates.
+    """
+    stamp = _LOOM_ID_STAMP.get(book_number)
+    if stamp is None:
+        return True
+    path, seen = stamp
+    now = _manifest_stamp(path)
+    return now is None or now == seen
+
+
+def forget_loom_ids(book_number: int | None = None) -> None:
+    """Drop cached identity maps, forcing the next lookup to re-resolve."""
+    if book_number is None:
+        _LOOM_ID_CACHE.clear()
+        _LOOM_ID_STAMP.clear()
+    else:
+        _LOOM_ID_CACHE.pop(book_number, None)
+        _LOOM_ID_STAMP.pop(book_number, None)
+
+
+def identity_matches_prose(db: sqlite3.Connection, cfg,
+                           book_number: int) -> bool:
+    """Whether the manifest describes the same chapters the index holds.
+
+    The belt to the freshness check's braces, and it catches what a stat
+    cannot: a manifest that is current on disk but describes a DIFFERENT book
+    than the prose already ingested — an export that has not run yet, or one
+    that failed after the manuscript landed.
+
+    The healthy relation is one-way. The manifest may legitimately carry
+    numbers the index does not: a canonised chapter with no prose yet is a stub
+    with a manifest entry and no chunks. Prose the manifest has never heard of
+    is the unhealthy direction, and it is exactly the shape a book takes on
+    when a chapter is inserted before the export catches up.
+
+    False means "do not stamp identity this run". An unstamped row degrades to
+    number matching, which every reader already handles; a MIS-stamped row is
+    silent corruption that survives a resync.
+    """
+    _loom_ids(cfg, book_number, 0)          # resolve (and refresh) the map
+    hit = _LOOM_ID_CACHE.get(book_number)
+    if hit is None or not hit[0] or not hit[2]:
+        return False        # unknown identity: nothing to stamp with anyway
+    try:
+        indexed = {n for (n,) in db.execute(
+            "SELECT DISTINCT chapter_number FROM chunks WHERE book_number = ?",
+            (book_number,))}
+    except sqlite3.OperationalError:
+        return True         # no chunks table: ingest has never run
+    unknown = indexed - set(hit[2])
+    if unknown:
+        log.warning(
+            "book %s: the canon manifest does not describe chapter(s) %s that "
+            "the index holds — its numbering is behind the prose, so this run "
+            "will write rows WITHOUT stable ids rather than stamp them wrongly. "
+            "Re-export canon from Loom to restore identity.",
+            book_number, sorted(unknown)[:10])
+        return False
+    return True
+
 
 def _loom_ids(cfg, book_number: int,
               chapter_number: int) -> tuple[str | None, str | None, str | None]:
@@ -405,17 +574,30 @@ def _loom_ids(cfg, book_number: int,
     out: Loom writes the manifest atomically (temp file, then rename), so there
     is a window where it does not exist, and caching that miss would strip
     identity from every chapter enriched afterwards.
+
+    A HIT is cached only until the manifest changes underneath it (LOOM-98). It
+    used to be cached for the life of the process, and that is not a
+    performance detail — this map is the only thing that says which chapter a
+    number means. Canonising a bonus chapter renumbers the book and rewrites
+    the manifest; a server that had already resolved the book kept answering
+    from the old map, and enrichment stamped fresh summaries with the cuids of
+    the chapters they had displaced. Book 3 lost the text/identity link for 56
+    chapters that way, and nothing downstream could tell:
+    `reposition_renumbered_chapters` then made number and id agree again, which
+    is the only thing any consistency check looks at.
     """
-    from src.discovery import discover_books, read_manifest_chapters
+    from src.discovery import discover_books, manifest_path, read_manifest_chapters
 
     hit = _LOOM_ID_CACHE.get(book_number)
-    if hit is None or not hit[0]:
+    if hit is None or not hit[0] or not _cached_map_is_current(book_number):
         book_id = series_id = None
         chapter_ids: dict[int, str] = {}
+        path = None
         try:
             for b in discover_books(cfg):
                 if b.number == book_number:
                     book_id, series_id = b.loom_book_id, b.loom_series_id
+                    path = manifest_path(b.folder, b.title)
                     chapter_ids = {c["number"]: c["id"]
                                    for c in read_manifest_chapters(b.folder, b.title)}
                     break
@@ -426,6 +608,14 @@ def _loom_ids(cfg, book_number: int,
         hit = (book_id, series_id, chapter_ids)
         if book_id:
             _LOOM_ID_CACHE[book_number] = hit
+            # Stamped from a stat taken AFTER the parse, so a manifest rewritten
+            # mid-read is seen as changed on the next call rather than being
+            # trusted as the version we actually read.
+            stamp = _manifest_stamp(path) if path is not None else None
+            if stamp is None:
+                _LOOM_ID_STAMP.pop(book_number, None)
+            else:
+                _LOOM_ID_STAMP[book_number] = (str(path), stamp)
     return (hit[0], hit[1], hit[2].get(chapter_number))
 
 
@@ -893,6 +1083,13 @@ class EnrichmentRunner:
 
             # events + chapter summary — one call per chapter, with prose
             processed_books: set[int] = set()  # books actually (re)enriched
+            # Resolved once per book, before any prose is enriched: a manifest
+            # that does not describe the chapters we are about to enrich cannot
+            # be used to stamp them (LOOM-98). Computing it up front also means
+            # every chapter of a book makes the same decision, so a run cannot
+            # stamp half a book and leave the other half bare.
+            can_stamp = {b: identity_matches_prose(db, cfg, b)
+                         for b in sorted({c["book_number"] for c in chapters})}
             for c in chapters:
                 try:
                     data = call(EVENTS_PROMPT, json.dumps(
@@ -907,6 +1104,12 @@ class EnrichmentRunner:
                             ev["quote"] = None
                     book_id, series_id, chapter_id = _loom_ids(
                         cfg, c["book_number"], c["chapter_number"])
+                    if not can_stamp.get(c["book_number"], True):
+                        # The book's numbering is ahead of its manifest. Write
+                        # the row, but without an identity we cannot vouch for:
+                        # unstamped degrades to number matching, mis-stamped is
+                        # corruption that outlives every resync.
+                        chapter_id = None
                     self._store_events(db, c, data.get("events", []), chapter_id)
                     summary = (data.get("chapter_summary") or "").strip()
                     if summary:
