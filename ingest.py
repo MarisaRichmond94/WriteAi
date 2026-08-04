@@ -40,9 +40,10 @@ def _notify(title: str, body: str, ok: bool = True) -> None:
 
 from src.discovery import discover_books
 from src.extractor import estimate_extraction_cost
-from src.ingestion import (BookDiff, chunk_text_hash, clear_staging,
-                           diff_chunks, ingest_chunks, load_and_chunk_book,
-                           load_hash_index, reextract_chunks, save_hash_index)
+from src.ingestion import (BookDiff, carry_chunks, chunk_text_hash,
+                           clear_staging, detect_moved_chunks, diff_chunks,
+                           ingest_chunks, load_and_chunk_book, load_hash_index,
+                           reextract_chunks, save_hash_index)
 
 log = logging.getLogger("ingest")
 
@@ -124,18 +125,31 @@ def main() -> int:
         for num in diffs:
             _, chunks, d = diffs[num]
             d.new, d.updated, d.unchanged = [], list(chunks), []
+    else:
+        # Recognise position-only changes before they are priced as new work.
+        # Deliberately skipped for --re-extract (which exists to re-run the
+        # model over everything) and a no-op for --full (an empty index has
+        # nothing to move FROM).
+        for num in diffs:
+            detect_moved_chunks(diffs[num][2], index, num)
 
     changed = [c for _, _, d in diffs.values() for c in d.changed]
     deleted = [cid for _, _, d in diffs.values() for cid in d.deleted_ids]
     unchanged = sum(len(d.unchanged) for _, _, d in diffs.values())
 
+    moved = sum(len(d.moved) for _, _, d in diffs.values())
     print(f"\nPlan: {sum(len(d.new) for _, _, d in diffs.values())} new, "
           f"{sum(len(d.updated) for _, _, d in diffs.values())} updated, "
-          f"{unchanged} unchanged, {len(deleted)} deleted")
+          f"{moved} moved, {unchanged} unchanged, {len(deleted)} deleted")
     for num in sorted(diffs):
         b, chunks, d = diffs[num]
         print(f"  {num}. {b.title}: +{len(d.new)} ~{len(d.updated)} "
-              f"={len(d.unchanged)} -{len(d.deleted_ids)}")
+              f"->{len(d.moved)} ={len(d.unchanged)} -{len(d.deleted_ids)}")
+    if moved:
+        print(f"\n{moved} chunk(s) only changed position (a chapter was "
+              f"inserted, removed or reordered above them). Their prose is "
+              f"byte-identical, so their metadata is carried over and they "
+              f"cost nothing to re-home.")
 
     est = estimate_extraction_cost(changed, cfg.extraction_model)
     print(f"\nEstimated extraction cost for {len(changed)} chunk(s): "
@@ -206,14 +220,35 @@ def main() -> int:
     new_index = dict(stored_index)
     book_reports: list[str] = []
     total_failed = 0
+    total_carried = 0
+    # Counted here rather than reused from the pre-run `changed` list: a
+    # refused donor is added to d.new inside the loop, after the plan was
+    # printed, so the plan's number would understate what actually ran.
+    total_processed = 0
     for num in sorted(diffs):
         b, chunks, d = diffs[num]
         if not d.changed and not d.deleted_ids:
             continue
+        # Re-home moved chunks first, while their donors are still in the
+        # store — the deletion below is what removes them. Donors that turn
+        # out to have no usable metadata fall through to a real extraction
+        # rather than landing as metadata-less chunks.
+        if d.moved:
+            res = carry_chunks(cfg, d.moved, embedder, store)
+            total_carried += res["carried"]
+            print(f"\n== book {num}: {b.title} — carried metadata for "
+                  f"{res['carried']} moved chunk(s), no API cost ==")
+            if res["refused"]:
+                print(f"  {len(res['refused'])} donor(s) had no stored "
+                      f"metadata — extracting those normally")
+                d.new.extend(res["refused"])
         print(f"\n== book {num}: {b.title} "
               f"({len(d.changed)} chunk(s) to process) ==")
-        book_reports.append(f"{b.title} ({len(d.changed)} chunk(s))")
+        book_reports.append(
+            f"{b.title} ({len(d.changed)} chunk(s)"
+            + (f", {len(d.moved)} moved" if d.moved else "") + ")")
         ingest_fn = reextract_chunks if args.re_extract else ingest_chunks
+        total_processed += len(d.changed)
         summary = ingest_fn(cfg, d.changed, extractor, embedder, store)
         if d.deleted_ids:
             store.delete_chunks(d.deleted_ids)
@@ -240,8 +275,9 @@ def main() -> int:
     elapsed = time.time() - started
     u = extractor.usage
     print(f"\n== run summary ==")
-    print(f"  processed: {len(changed)} chunk(s) "
+    print(f"  processed: {total_processed} chunk(s) "
           f"({total_failed} with null metadata, will retry next run)")
+    print(f"  moved:     {total_carried} (metadata reused, no API cost)")
     print(f"  deleted:   {len(deleted)}")
     print(f"  unchanged: {unchanged}")
     print(f"  api calls: {u['api_calls']}  "
@@ -256,8 +292,8 @@ def main() -> int:
     log_cost(cfg, surface="ingest", model=extractor.model, usage=u,
              cost_usd=extractor.actual_cost_usd,
              latency_ms=int(elapsed * 1000),
-             extra={"api_calls": u["api_calls"], "chunks": len(changed),
-                    "failed_chunks": total_failed,
+             extra={"api_calls": u["api_calls"], "chunks": total_processed,
+                    "failed_chunks": total_failed, "moved_chunks": total_carried,
                     "quotes_kept": extractor.quote_stats["kept"],
                     "quotes_rejected": extractor.quote_stats["rejected"]})
     failures = (f" {total_failed} chunk(s) failed and will retry next run."

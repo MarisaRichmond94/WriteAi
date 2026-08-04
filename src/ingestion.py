@@ -168,6 +168,11 @@ class BookDiff:
     updated: list[Chunk] = field(default_factory=list)
     unchanged: list[Chunk] = field(default_factory=list)
     deleted_ids: list[str] = field(default_factory=list)
+    # Chunks whose PROSE is byte-identical to a chunk already in the index
+    # under a different id — the same words, moved. Split out of `new` and
+    # `updated` by detect_moved_chunks(); they are re-embedded and
+    # re-upserted, never re-extracted. [(chunk, donor chunk_id)]
+    moved: list[tuple[Chunk, str]] = field(default_factory=list)
 
     @property
     def changed(self) -> list[Chunk]:
@@ -192,6 +197,99 @@ def diff_chunks(chunks: list[Chunk], index: dict[str, str],
     diff.deleted_ids = [cid for cid in index
                         if cid.startswith(prefix) and cid not in current_ids]
     return diff
+
+
+def detect_moved_chunks(diff: BookDiff, index: dict[str, str],
+                        book_number: int) -> None:
+    """Split position-only changes out of `diff.new`/`diff.updated`, in place.
+
+    The chunk id is positional — `b02.c040.s01.k00` — so inserting a chapter
+    at 40 renumbers every chapter below it and every one of their chunks
+    arrives under the id that used to belong to the chunk before it. Compared
+    by ID that reads as "the entire tail of the book was rewritten", and the
+    ingest pays the model to re-read prose it has already read. Faded is 94
+    chapters and 368 chunks; an insert near the front rewrote ~215 of them.
+    Compared by CONTENT it is what it actually is: the same words, moved.
+
+    Note the shape this really takes. Almost nothing is `new` and nothing is
+    `deleted` — an insert makes the book LONGER, so every old id still exists
+    and simply holds its predecessor's prose. The tail lands in `updated`.
+    That is why matching is against the whole stored index for the book
+    rather than against `deleted_ids`: keying off deletions finds a
+    *shortened* book (a chapter removed) and misses the common case entirely.
+
+    A mover is paired with a *donor*: any stored chunk in the same book whose
+    text hashes identically. Not a heuristic — donor prose and mover prose
+    share a SHA-256, so the metadata being carried was extracted from exactly
+    these words. One donor may serve several movers (a book can hold two
+    byte-identical chunks); they are the same words, so they earn the same
+    reading. Donor choice is deterministic (lowest id) so a re-run is stable.
+
+    What legitimately differs is POSITION. Every positional field —
+    chapter_number, chunk_index, heading, part — comes from the new chunk on
+    write; only the model's reading of the prose is reused.
+    """
+    if not index:
+        return
+    prefix = f"b{book_number:02d}."
+    donors: dict[str, str] = {}
+    for cid, text_hash in index.items():
+        if cid.startswith(prefix):
+            current = donors.get(text_hash)
+            if current is None or cid < current:
+                donors[text_hash] = cid
+
+    def sift(chunks: list[Chunk]) -> list[Chunk]:
+        stays: list[Chunk] = []
+        for c in chunks:
+            donor = donors.get(chunk_text_hash(c))
+            # A chunk sitting on its own id with its own hash is `unchanged`
+            # and never reaches here; a donor equal to the chunk's own id
+            # would therefore be a contradiction. Guard anyway — carrying a
+            # chunk's metadata onto itself would skip a real re-extraction.
+            if donor is not None and donor != c.chunk_id:
+                diff.moved.append((c, donor))
+            else:
+                stays.append(c)
+        return stays
+
+    diff.new = sift(diff.new)
+    diff.updated = sift(diff.updated)
+
+
+def carry_chunks(cfg, moved: list[tuple[Chunk, str]], embedder, store) -> dict:
+    """Re-home chunks that only moved: reuse the donor's LLM metadata, embed
+    the prose locally, upsert under the new id. Zero API cost.
+
+    Embeddings are NOT reused even though the prose is identical, because
+    `embedding_text` folds in `context_prefix` — the tail of the preceding
+    chunk — and an insert changes exactly that for the chunk after the seam.
+    Re-embedding is a local model and costs nothing, so the correct vector is
+    cheaper than the reasoning needed to decide when the stale one is safe.
+
+    A donor whose metadata is missing (never extracted, or extraction failed
+    and left NULL) is NOT carried — those chunks are returned in `refused` for
+    the caller to run through the normal path, so a gap stays a gap rather
+    than becoming a silently metadata-less chunk.
+    """
+    if not moved:
+        return {"carried": 0, "refused": []}
+
+    stored = store.get_metadata([donor for _, donor in moved])
+    carried = [(c, stored[donor]) for c, donor in moved if donor in stored]
+    refused = [c for c, donor in moved if donor not in stored]
+    if not carried:
+        return {"carried": 0, "refused": refused}
+
+    embeddings = embedder.embed_documents([c.embedding_text for c, _ in carried])
+    records = [
+        {"chunk": c, "metadata": m, "embedding": e, "text_hash": chunk_text_hash(c)}
+        for (c, m), e in zip(carried, embeddings)
+    ]
+    store.upsert_chunks(records)
+    if cfg.enable_note_ranking:
+        sync_continuity_notes(records, embedder, store)
+    return {"carried": len(records), "refused": refused}
 
 
 def clear_staging(cfg) -> None:

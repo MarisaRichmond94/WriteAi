@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 import subprocess
 import sys
@@ -624,6 +625,33 @@ def _auto_enrich(reason: str = "re-ingest") -> None:
 
 
 @router.post("/ingest/run")
+def _ingest_env() -> dict:
+    """Environment for the ingest subprocess, with HuggingFace pinned offline
+    when the embedding model is already cached.
+
+    Every ingest loads the local embedder, and sentence-transformers revalidates
+    the model against huggingface.co on each load — a dozen HEAD requests before
+    a single chunk is read. With auto-sync running, that is several seconds of
+    network per sync for a model that has not changed since it was downloaded,
+    and with no network it is worse: the requests hang rather than fail fast.
+
+    Guarded, and deliberately fail-open. HF_HUB_OFFLINE=1 makes a cache MISS a
+    hard error, so it is set only once the snapshot is on disk; an empty or
+    cleared cache runs online exactly as before and repopulates it. Never
+    overrides an explicit setting.
+    """
+    env = os.environ.copy()
+    if env.get("HF_HUB_OFFLINE") or env.get("TRANSFORMERS_OFFLINE"):
+        return env
+    hub = Path(env.get("HF_HOME") or Path.home() / ".cache" / "huggingface")
+    hub = hub / "hub" if hub.name != "hub" else hub
+    model = env.get("EMBEDDING_MODEL") or "nomic-ai/nomic-embed-text-v1"
+    cached = hub / f"models--{model.replace('/', '--')}" / "snapshots"
+    if cached.is_dir() and any(cached.iterdir()):
+        env["HF_HUB_OFFLINE"] = "1"
+    return env
+
+
 def ingest_run(book: int | None = None, full: bool = False,
                enrich_after: bool = False):
     with _ingest_lock:
@@ -653,7 +681,8 @@ def ingest_run(book: int | None = None, full: bool = False,
             cmd.append("--full")
         with open(log_path, "w") as out:
             _ingest["proc"] = subprocess.Popen(
-                cmd, cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT)
+                cmd, cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT,
+                env=_ingest_env())
         _ingest["log_path"] = log_path
         _ingest["started_at"] = datetime.now().isoformat()
 

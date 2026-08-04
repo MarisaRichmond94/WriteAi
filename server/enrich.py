@@ -224,13 +224,25 @@ def ensure_tables(db: sqlite3.Connection) -> None:
     db.commit()
 
 
-def gc_orphans(db: sqlite3.Connection) -> int:
+def gc_orphans(db: sqlite3.Connection,
+               live_chapter_ids: set[str] | None = None) -> int:
     """Remove enrichment rows for (book, chapter) pairs no longer present in
     chunks. Enrichment only ever rewrites chapters that currently exist, so
     after a renumbering or a shrunk book the vanished chapter numbers would
     keep serving their old events/summaries forever — the same scenes under
     stale labels, which reviews then present as duplicate story material.
-    Returns the number of rows deleted. Safe on a DB with no chunks table yet."""
+    Returns the number of rows deleted. Safe on a DB with no chunks table yet.
+
+    `live_chapter_ids` is the set of Loom chapter cuids that currently exist.
+    Since `events_scope` keys enrich_state by cuid where it can, the numeric
+    sweep below MUST NOT see those rows: a cuid never matches
+    'events:<book>.<chapter>', so an unguarded sweep would delete every one of
+    them on every run and undo the whole point of keying by identity. Callers
+    that know the live set pass it and cuid rows are GC'd against it; callers
+    that don't (the post-ingest watcher, which has no cfg to resolve
+    manifests) pass None and cuid rows are left alone — a stale cache row is
+    inert, and deleting a live one costs a model call to rebuild.
+    """
     ensure_tables(db)
     total = 0
     try:
@@ -241,11 +253,22 @@ def gc_orphans(db: sqlite3.Connection) -> int:
                         WHERE k.book_number = {table}.book_number
                           AND k.chapter_number = {table}.chapter_number)"""
             ).rowcount
+        # GLOB, not LIKE: this must match ONLY the numeric form. '[0-9]*'
+        # anchors both halves to a digit, so 'events:cmd3xk9…' is untouched.
         total += db.execute(
-            """DELETE FROM enrich_state WHERE scope LIKE 'events:%'
+            """DELETE FROM enrich_state WHERE scope GLOB 'events:[0-9]*.[0-9]*'
                AND scope NOT IN (SELECT 'events:' || book_number || '.'
                                         || chapter_number FROM chunks)"""
         ).rowcount
+        if live_chapter_ids is not None:
+            rows = [r[0] for r in db.execute(
+                "SELECT scope FROM enrich_state "
+                "WHERE scope LIKE 'events:%' "
+                "AND NOT scope GLOB 'events:[0-9]*.[0-9]*'")]
+            stale = [s for s in rows if s[len("events:"):] not in live_chapter_ids]
+            for s in stale:
+                db.execute("DELETE FROM enrich_state WHERE scope = ?", (s,))
+            total += len(stale)
     except sqlite3.OperationalError:  # ingest has never run — nothing to GC
         db.rollback()
         return 0
@@ -308,6 +331,27 @@ def _loom_ids(cfg, book_number: int,
     return (hit[0], hit[1], hit[2].get(chapter_number))
 
 
+def live_chapter_ids(db, cfg) -> set[str] | None:
+    """Every Loom chapter cuid the indexed books currently have, for
+    `gc_orphans`. None means "identity could not be resolved for at least one
+    book" — the caller must then GC no cuid-keyed rows at all, because a
+    partial set is indistinguishable from a set of deletions and would throw
+    away live cache entries for the book that failed to resolve."""
+    try:
+        books = [r[0] for r in db.execute(
+            "SELECT DISTINCT book_number FROM chunks")]
+    except sqlite3.OperationalError:  # ingest has never run
+        return None
+    out: set[str] = set()
+    for b in books:
+        _loom_ids(cfg, b, 0)  # resolves and caches the whole book's map
+        hit = _LOOM_ID_CACHE.get(b)
+        if hit is None or not hit[0]:
+            return None
+        out.update(hit[2].values())
+    return out
+
+
 def norm_quote(s: str) -> str:
     """Normalize for verbatim-quote matching: models straighten curly quotes
     and collapse whitespace when copying, but the words must match exactly."""
@@ -322,6 +366,29 @@ def norm_quote(s: str) -> str:
 def _hash(payload) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True,
                                      ensure_ascii=False).encode()).hexdigest()
+
+
+def events_scope(cfg, book_number: int, chapter_number: int) -> str:
+    """The enrich_state key for one chapter's events+summary pass.
+
+    Prefer Loom's chapter cuid. The scope used to be `events:{book}.{chapter}`,
+    which is the same positional keying LOOM-65 removed from
+    `chapter_summaries` — and it failed the same way. Insert a chapter at 40
+    and chapter 41 now holds what 40 used to; its stored hash is chapter 40's,
+    the content hash no longer matches, and the chapter re-enriches. So does
+    every chapter below it, for the whole tail of the book, at a model call
+    each — for prose that did not change by one word.
+
+    Keyed by cuid the cache follows the chapter, so a renumbering is free and
+    only genuinely edited chapters re-run.
+
+    Falls back to the number when there is no cuid — a book that has never
+    been canon-exported has no manifest, exactly as `_loom_ids` documents.
+    That is the old behaviour, which is the correct floor, not a regression.
+    """
+    _book, _series, chapter_id = _loom_ids(cfg, book_number, chapter_number)
+    return f"events:{chapter_id}" if chapter_id \
+        else f"events:{book_number}.{chapter_number}"
 
 
 def _state(db, scope: str) -> str | None:
@@ -613,7 +680,8 @@ def label_relationships(call, bundle: dict) -> dict:
 def preview(db, cfg, canon) -> dict:
     ensure_tables(db)
     chapters = [c for c in _chapter_inputs(db, canon)
-                if _state(db, f"events:{c['book_number']}.{c['chapter_number']}")
+                if _state(db, events_scope(cfg, c["book_number"],
+                                           c["chapter_number"]))
                 != c["content_hash"]]
     profiles = [p for p in _profile_inputs(db, canon)
                 if _state(db, f"profile:{p['name']}") != p["content_hash"]]
@@ -675,7 +743,7 @@ class EnrichmentRunner:
             db.execute("PRAGMA busy_timeout = 30000")
             canon = canon_factory(db)
             ensure_tables(db)
-            removed = gc_orphans(db)
+            removed = gc_orphans(db, live_chapter_ids(db, cfg))
             if removed:
                 log.info("enrichment GC: removed %d stale row(s) for chapters "
                          "no longer in the index", removed)
@@ -684,7 +752,8 @@ class EnrichmentRunner:
             in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))
 
             chapters = [c for c in _chapter_inputs(db, canon)
-                        if _state(db, f"events:{c['book_number']}.{c['chapter_number']}")
+                        if _state(db, events_scope(cfg, c["book_number"],
+                                                   c["chapter_number"]))
                         != c["content_hash"]]
             profiles = [p for p in _profile_inputs(db, canon)
                         if _state(db, f"profile:{p['name']}") != p["content_hash"]]
@@ -761,7 +830,8 @@ class EnrichmentRunner:
                                              loom_chapter_id = excluded.loom_chapter_id""",
                             (c["book_number"], c["chapter_number"], summary,
                              book_id, series_id, chapter_id))
-                    _set_state(db, f"events:{c['book_number']}.{c['chapter_number']}",
+                    _set_state(db, events_scope(cfg, c["book_number"],
+                                                c["chapter_number"]),
                                c["content_hash"])
                     db.commit()
                     processed_books.add(c["book_number"])

@@ -165,8 +165,16 @@ def ensure_table(db: sqlite3.Connection) -> None:
             confidence      REAL,
             rationale       TEXT,
             manual_override INTEGER NOT NULL DEFAULT 0,
+            loom_chapter_id TEXT,
             PRIMARY KEY (book_number, chapter_number)
         )""")
+    # CREATE TABLE IF NOT EXISTS never alters an existing table, so stores
+    # built before the identity column need this. Same guarded, idempotent
+    # shape as src/storage.py's migrate_schema.
+    cols = {row[1] for row in
+            db.execute("SELECT * FROM pragma_table_info('chapter_timeline')")}
+    if "loom_chapter_id" not in cols:
+        db.execute("ALTER TABLE chapter_timeline ADD COLUMN loom_chapter_id TEXT")
     db.commit()
 
 
@@ -328,18 +336,48 @@ def _advance_anchor(chapters: list[dict],
 
 
 def _stored_assignments(db: sqlite3.Connection, book: int,
-                        chapters: list[dict]) -> dict[int, dict] | None:
+                        chapters: list[dict],
+                        chapter_ids: dict[int, str] | None = None
+                        ) -> dict[int, dict] | None:
     """Rebuild an `assigned` mapping for a book from its chapter_timeline
-    rows, or None when coverage is incomplete (book never fully resolved)."""
-    assigned = {ch: {"chapter_number": ch, "story_year": y,
-                     "temporal_mode": mode, "confidence": conf,
-                     "rationale": rat or ""}
-                for ch, y, mode, conf, rat in db.execute(
-                    """SELECT chapter_number, story_year, temporal_mode,
-                              confidence, rationale
-                       FROM chapter_timeline WHERE book_number = ?""", (book,))}
+    rows, or None when the rows cannot be trusted — coverage is incomplete
+    (book never fully resolved), or they describe different chapters.
+
+    That second case is what `chapter_ids` is for. The table is keyed
+    (book_number, chapter_number), and a chapter inserted in Loom renumbers
+    every chapter below it: row (2, 41) then holds the chronology of what is
+    now chapter 42, and every date in the tail of the book is attributed one
+    chapter off. Nothing errors, nothing looks wrong, and this function
+    happily reports the book as already resolved — so the wrong answer
+    survives indefinitely. Comparing the stored cuid against the cuid of the
+    chapter currently AT that number catches it, and returning None re-resolves
+    the book (one model call, a few cents).
+
+    A stored NULL is *unknown* identity, not a mismatch: rows predating the
+    column, and books never canon-exported, must keep working exactly as they
+    did. Same degradation contract as everywhere else in LOOM-12/65 — the old
+    behaviour is the floor, never a regression.
+    """
+    assigned, stored_ids = {}, {}
+    for ch, y, mode, conf, rat, cid in db.execute(
+            """SELECT chapter_number, story_year, temporal_mode,
+                      confidence, rationale, loom_chapter_id
+               FROM chapter_timeline WHERE book_number = ?""", (book,)):
+        assigned[ch] = {"chapter_number": ch, "story_year": y,
+                        "temporal_mode": mode, "confidence": conf,
+                        "rationale": rat or ""}
+        stored_ids[ch] = cid
     if any(c["chapter_number"] not in assigned for c in chapters):
         return None
+    if chapter_ids:
+        for c in chapters:
+            n = c["chapter_number"]
+            stored, current = stored_ids.get(n), chapter_ids.get(n)
+            if stored and current and stored != current:
+                log.info("chronology: book %d chapter %d is a different "
+                         "chapter than the stored row describes — the book "
+                         "was renumbered; re-resolving it", book, n)
+                return None
     return assigned
 
 
@@ -364,8 +402,17 @@ def _prior_entry(book: int, chapters: list[dict],
 
 
 def _upsert_book(db: sqlite3.Connection, book: int, chapters: list[dict],
-                 assigned: dict[int, dict], overridden: set) -> int:
-    """Upsert one book's rows; manual_override rows are never rewritten."""
+                 assigned: dict[int, dict], overridden: set,
+                 chapter_ids: dict[int, str] | None = None) -> int:
+    """Upsert one book's rows; manual_override rows are never rewritten.
+
+    Identity is stamped here, on every write, rather than by a backfill —
+    a one-off backfill decays the moment new prose is resolved, which is
+    exactly how `chapter_summaries` ended up with one NULL row after its
+    own backfill ran. The conflict clause refreshes it too, so a renumbered
+    chapter takes its current identity instead of keeping a stale one.
+    """
+    ids = chapter_ids or {}
     upserts = 0
     for c in chapters:
         a = assigned[c["chapter_number"]]
@@ -374,19 +421,21 @@ def _upsert_book(db: sqlite3.Connection, book: int, chapters: list[dict],
         db.execute(
             """INSERT INTO chapter_timeline
                    (book_number, chapter_number, story_year, month,
-                    day, temporal_mode, confidence, rationale)
-               VALUES (?,?,?,?,?,?,?,?)
+                    day, temporal_mode, confidence, rationale,
+                    loom_chapter_id)
+               VALUES (?,?,?,?,?,?,?,?,?)
                ON CONFLICT(book_number, chapter_number) DO UPDATE SET
                    story_year = excluded.story_year,
                    month = excluded.month,
                    day = excluded.day,
                    temporal_mode = excluded.temporal_mode,
                    confidence = excluded.confidence,
-                   rationale = excluded.rationale
+                   rationale = excluded.rationale,
+                   loom_chapter_id = excluded.loom_chapter_id
                WHERE chapter_timeline.manual_override = 0""",
             (book, c["chapter_number"], a["story_year"], c["month"],
              c["day"], a["temporal_mode"], a["confidence"],
-             a["rationale"]))
+             a["rationale"], ids.get(c["chapter_number"])))
         upserts += 1
     return upserts
 
@@ -435,12 +484,26 @@ def resolve_chronology(db: sqlite3.Connection, cfg, client, *,
     prior_books: list[dict] = []   # running context passed forward
     anchor = None                  # (last main-thread (month, day), epoch)
     resolved_any = False
+    # Resolution walks the books directory and opens a manifest, so it is done
+    # once per book here rather than per chapter. An unresolvable book yields
+    # {} — unknown identity, which every consumer below treats as "fall back
+    # to the chapter number", never as "no match".
+    # Imported here, not at module scope, matching how storage.py and
+    # enrich.py reach discovery — it walks the filesystem and pulls in config.
+    from src.discovery import loom_chapter_ids_for
+    try:
+        chapter_ids = {b: loom_chapter_ids_for(cfg, b) for b in all_books}
+    except Exception:
+        log.warning("chronology: could not resolve Loom chapter identity — "
+                    "writing rows without it", exc_info=True)
+        chapter_ids = {}
     try:
         for book in sorted(all_books):
             chapters = all_books[book]
+            ids = chapter_ids.get(book) or {}
             assigned = None
             if book not in targets:
-                assigned = _stored_assignments(db, book, chapters)
+                assigned = _stored_assignments(db, book, chapters, ids)
                 if assigned is None:
                     if book > last_target:
                         # never resolved and not needed as context: leave it,
@@ -457,7 +520,7 @@ def resolve_chronology(db: sqlite3.Connection, cfg, client, *,
                                         prior_books, usage)
                 anchor, n_fixed = repair_story_years(chapters, assigned, anchor)
                 stats["upserts"] += _upsert_book(db, book, chapters, assigned,
-                                                 overridden)
+                                                 overridden, ids)
                 db.commit()
                 stats["books_resolved"].append(book)
                 resolved_any = True
@@ -470,7 +533,7 @@ def resolve_chronology(db: sqlite3.Connection, cfg, client, *,
                 anchor, n_fixed = repair_story_years(chapters, assigned, anchor)
                 if n_fixed and resolved_any:
                     stats["upserts"] += _upsert_book(db, book, chapters,
-                                                     assigned, overridden)
+                                                     assigned, overridden, ids)
                     db.commit()
                     if on_book:
                         on_book(book, chapters, assigned, n_fixed, "repaired")

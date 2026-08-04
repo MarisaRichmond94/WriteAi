@@ -37,10 +37,26 @@ _POLL_SECONDS = 120
 # A writing session produces an export per blur/chapter-switch; waiting for
 # a quiet stretch turns that stream into one ingest at the session's end.
 _DEBOUNCE_SECONDS = 600
+# Structural changes get a much shorter wait. Ten minutes is the right answer
+# for prose, which arrives as a stream of small edits worth batching — but a
+# chapter being added or removed is a discrete act that happens once,
+# renumbers the rest of the book, and leaves the index confidently wrong
+# about every chapter below it until it lands. There is nothing to batch.
+_STRUCTURAL_DEBOUNCE_SECONDS = 60
 
 _CURSOR_PATH = WRITER_DATA_DIR / "loom_event_cursor.json"
 
 _pending: dict[str, float] = {}  # book title -> monotonic time of last event
+# Books whose pending export followed a chapter being created or deleted,
+# keyed by title like _pending and cleared once the book is ingested.
+_structural: set[str] = set()
+# Loom book cuids seen in a chapter.created/deleted whose export.completed
+# has not arrived yet. Those events carry a bookId and no book TITLE, and
+# _pending is keyed by title — export.completed carries both, so it is the
+# export that resolves one to the other. Loom emits the structural event
+# first and the export immediately after, so the two normally land in the
+# same poll; holding the id across polls covers the case where they don't.
+_structural_book_ids: set[str] = set()
 _was_reachable = True
 
 
@@ -91,16 +107,31 @@ async def _tick() -> None:
             _write_cursor(data.get("cursor", cursor))
             return
         for event in data.get("events", []):
-            if event.get("type") != "export.completed":
+            payload = event.get("payload") or {}
+            kind = event.get("type")
+            # Still only export.completed triggers an ingest — it is the
+            # "a consistent canon snapshot is on disk" signal, and nothing
+            # else is safe to read. chapter.created/deleted only mark the
+            # book, so the export that follows is treated as urgent.
+            if kind in ("chapter.created", "chapter.deleted"):
+                if payload.get("bookId"):
+                    _structural_book_ids.add(payload["bookId"])
                 continue
-            title = (event.get("payload") or {}).get("bookTitle")
+            if kind != "export.completed":
+                continue
+            title = payload.get("bookTitle")
             if title:
                 _pending[title] = time.monotonic()
+                if payload.get("bookId") in _structural_book_ids:
+                    _structural_book_ids.discard(payload["bookId"])
+                    _structural.add(title)
         if data.get("cursor", cursor) != cursor:
             _write_cursor(data["cursor"])
 
     now = time.monotonic()
-    due = [t for t, at in _pending.items() if now - at >= _DEBOUNCE_SECONDS]
+    due = [t for t, at in _pending.items()
+           if now - at >= (_STRUCTURAL_DEBOUNCE_SECONDS if t in _structural
+                           else _DEBOUNCE_SECONDS)]
     if not due:
         return
     numbers = {b.title: b.number for b in discover_books(get_state().cfg)}
@@ -110,6 +141,7 @@ async def _tick() -> None:
         if number is None:
             log.warning("loom-events: no folder matches exported book %r — dropping", title)
             _pending.pop(title, None)
+            _structural.discard(title)
             continue
         resolved.append((title, number))
     if not resolved:
@@ -128,9 +160,13 @@ async def _tick() -> None:
         return
     for title, number in resolved:
         _pending.pop(title, None)
-        audit.log_event("loom_event_sync",
-                        f"auto-ingest of '{title}' after Loom canon export",
-                        book=number)
+        was_structural = title in _structural
+        _structural.discard(title)
+        audit.log_event(
+            "loom_event_sync",
+            f"auto-ingest of '{title}' after Loom canon export"
+            + (" (chapter added or removed)" if was_structural else ""),
+            book=number)
 
 
 async def run_forever() -> None:

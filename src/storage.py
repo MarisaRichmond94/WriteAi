@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS chapter_timeline (
     confidence      REAL,
     rationale       TEXT,
     manual_override INTEGER NOT NULL DEFAULT 0,
+    loom_chapter_id TEXT,             -- stable identity; NULL = unknown
     PRIMARY KEY (book_number, chapter_number)
 );
 
@@ -150,10 +151,16 @@ def migrate_schema(db: sqlite3.Connection) -> None:
     #
     # Nullable, like the columns above: rows written before this, and books
     # that have never been canon-exported, hold NULL and readers fall back to
-    # the number. `chapter_timeline` has the identical shape and the same
-    # exposure; it is deliberately left for its own change, since nothing reads
-    # it by identity yet.
-    for table in ("chapter_summaries",):
+    # the number.
+    #
+    # `chapter_timeline` was deliberately left out of the original LOOM-65
+    # change ("nothing reads it by identity yet") and has now been brought in,
+    # because something does: `_stored_assignments` in src/chronology.py uses
+    # the stored id to tell "this book is already resolved" from "these rows
+    # describe whichever chapters used to hold these numbers". Without it, an
+    # insert left every later chapter's chronology row silently attributed to
+    # the wrong chapter and chronology considered the book done.
+    for table in ("chapter_summaries", "chapter_timeline"):
         cols = {row[1] for row in
                 db.execute(f"SELECT * FROM pragma_table_info('{table}')")}
         if cols and "loom_chapter_id" not in cols:
@@ -573,6 +580,29 @@ class SeriesStore:
                 continue
             for cid, emb in zip(res["ids"], embeddings):
                 out[cid] = emb
+        return out
+
+    def get_metadata(self, chunk_ids: list[str]) -> dict[str, dict]:
+        """Stored LLM metadata, by chunk id. Used by the moved-chunk path in
+        `ingest.py`: prose that only changed POSITION (a chapter inserted above
+        it renumbers every chunk id below) has identical metadata, so it is
+        carried over rather than re-extracted at the model.
+
+        Ids absent from the store, and rows whose extraction failed and left
+        metadata_json NULL, are simply absent from the result — the caller
+        treats a miss as "extract this one properly"."""
+        out: dict[str, dict] = {}
+        for i in range(0, len(chunk_ids), 400):
+            batch = chunk_ids[i:i + 400]
+            rows = self.db.execute(
+                "SELECT chunk_id, metadata_json FROM chunks WHERE chunk_id IN "
+                f"({','.join('?' * len(batch))}) AND metadata_json IS NOT NULL",
+                batch).fetchall()
+            for cid, raw in rows:
+                try:
+                    out[cid] = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    continue  # corrupt row: re-extract rather than carry junk
         return out
 
     def chunks_with_character(self, name: str) -> list[sqlite3.Row]:

@@ -219,6 +219,38 @@ incremental ingest of a book once its exports have been quiet for 10
 minutes. The nightly scheduler (Settings → Sync) remains the
 reconciliation safety net when either app was closed.
 
+**Structural changes export immediately and sync in ~1 minute.** Adding,
+inserting, deleting or dragging a chapter renumbers every chapter below it —
+and is the one kind of change no keystroke follows, since creation lands you
+in an *empty* chapter and a drag alters no prose at all. The blur autosave
+therefore never fired, and the manifest kept describing the old numbering
+until the writer next typed in that book. Loom now fires a silent canon
+export from `addChapter`/`insertChapter` (`author/[seriesId]/layout.tsx`) and
+from the outline drag (`OutlineTree.tsx`), via
+`saveCanonAfterStructuralChange` — which respects the Settings → Export
+autosave preference exactly as the blur save does, and treats an unreadable
+preference as "don't write". Deleting a chapter and ⌥⇧N are already covered
+by the editor's unmount autosave. `tests/unit/structuralCanonSave.test.ts`
+pins all of it at source level, since the failure is invisible from Loom.
+
+On the WriteAI side, a `chapter.created`/`chapter.deleted` marks the book so
+the `export.completed` that follows debounces for 60s instead of 600s. Those
+two event types **still trigger no ingest of their own** — `export.completed`
+remains the only "safe to read" signal; they only change how long its export
+waits. Ten minutes stays right for prose, which arrives as a stream of blur
+exports worth batching into one ingest per session.
+
+> **An insert used to cost a whole book's re-extraction.** The chunk id is
+> positional (`b02.c040.s01.k00`), so renumbering handed the diff a book whose
+> entire tail looked rewritten — inserting one chapter into *Faded* (94
+> chapters, 368 chunks) re-ran the metadata model over 223 of them. WriteAI's
+> `detect_moved_chunks` now matches by content hash first: prose that only
+> changed position carries its stored metadata over and is re-embedded
+> locally, so the same insert costs 3 extractions — exactly the new chapter.
+> Note the shape, because it is the trap: an insert makes the book *longer*,
+> so nothing is deleted and almost nothing is new. The tail lands in
+> `updated`. Detection keyed off `deleted_ids` finds only the shrinking case.
+
 ### 5. Event tagging (Loom ↔ WriteAI)
 
 Which chapters a writer-event is referenced in. **Loom owns the join; WriteAI
