@@ -160,7 +160,10 @@ def migrate_schema(db: sqlite3.Connection) -> None:
     # describe whichever chapters used to hold these numbers". Without it, an
     # insert left every later chapter's chronology row silently attributed to
     # the wrong chapter and chronology considered the book done.
-    for table in ("chapter_summaries", "chapter_timeline"):
+    # `events` is created by server/enrich.py's own DDL and migrated there
+    # too; listed here as well because this runs on the ingest path, which a
+    # store can reach without ever going through enrichment.
+    for table in ("chapter_summaries", "chapter_timeline", "events"):
         cols = {row[1] for row in
                 db.execute(f"SELECT * FROM pragma_table_info('{table}')")}
         if cols and "loom_chapter_id" not in cols:

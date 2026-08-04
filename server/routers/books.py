@@ -720,7 +720,19 @@ def ingest_run(book: int | None = None, full: bool = False,
                     # numbering back as duplicate "earlier" story material.
                     # get_state().db is thread-local — safe from this thread.
                     try:
-                        from ..enrich import gc_orphans
+                        from ..enrich import (gc_orphans,
+                                              reposition_renumbered_chapters)
+                        # Relocate summaries/events onto their chapters'
+                        # current numbers first. This is what keeps the plan
+                        # page correct straight after a sync that inserted a
+                        # chapter, rather than only once enrichment next runs.
+                        moved = reposition_renumbered_chapters(
+                            get_state().db, get_state().cfg)
+                        if moved:
+                            audit.log_event(
+                                "enrich_repositioned",
+                                "moved enrichment rows onto renumbered chapters",
+                                rows=moved)
                         removed = gc_orphans(get_state().db)
                         if removed:
                             audit.log_event(

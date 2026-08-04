@@ -217,11 +217,109 @@ Never invent facts not supported by the notes. Do NOT describe how characters ar
 
 def ensure_tables(db: sqlite3.Connection) -> None:
     db.executescript(_SCHEMA)
-    try:  # added after the table shipped
-        db.execute("ALTER TABLE events ADD COLUMN quote TEXT")
-    except sqlite3.OperationalError:
-        pass
+    # Columns added after their tables shipped. src/storage.py migrates the
+    # identity columns too, but only on the ingest path — enrichment both
+    # READS and WRITES them, so it cannot assume an ingest has happened on
+    # this store first. ALTER on an existing column raises; that is the guard.
+    for table, column in (("events", "quote TEXT"),
+                          ("events", "loom_chapter_id TEXT"),
+                          ("events", "loom_book_id TEXT"),
+                          ("events", "loom_series_id TEXT"),
+                          ("chapter_summaries", "loom_chapter_id TEXT"),
+                          ("chapter_summaries", "loom_book_id TEXT"),
+                          ("chapter_summaries", "loom_series_id TEXT")):
+        try:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column}")
+        except sqlite3.OperationalError:
+            pass
     db.commit()
+
+
+def reposition_renumbered_chapters(db: sqlite3.Connection, cfg) -> int:
+    """Move enrichment rows to the chapter number their chapter now holds.
+
+    This is the other half of keying `enrich_state` by chapter cuid, and
+    without it that change is a correctness REGRESSION rather than a saving.
+    Both output tables are still keyed by NUMBER — `chapter_summaries` by
+    (book_number, chapter_number) and `events` deleted/reinserted by the same
+    pair — while the cache is now keyed by identity. So when a chapter is
+    inserted above them, every later chapter correctly reports "my prose has
+    not changed" and is skipped, and its summary and events rows are left
+    sitting at a number that now belongs to a different chapter. The plan page
+    then shows chapter 41's summary on chapter 42, indefinitely, because
+    nothing will ever ask to regenerate it.
+
+    The old positional key hid this by missing the cache on every renumbering
+    and paying to regenerate the whole tail. That was expensive, not correct —
+    it arrived at the right answer by throwing the work away.
+
+    A renumbering is a data MOVE. Rows carry `loom_chapter_id`, so they can
+    simply be relocated to wherever that chapter now sits, at no model cost —
+    the same argument `carry_chunks` makes for chunk metadata.
+
+    Rows with no identity are left where they are: they predate the column or
+    belong to a book that has never been canon-exported, and for those
+    `events_scope` also falls back to the number, so the pre-existing
+    regenerate-on-mismatch behaviour still covers them. The two keying schemes
+    must agree per row, and they do.
+
+    Returns the number of rows moved.
+    """
+    ensure_tables(db)
+    try:
+        books = [r[0] for r in db.execute(
+            "SELECT DISTINCT book_number FROM chunks")]
+    except sqlite3.OperationalError:  # ingest has never run
+        return 0
+
+    moved = 0
+    for book in books:
+        _loom_ids(cfg, book, 0)  # resolve + cache the book's number->cuid map
+        hit = _LOOM_ID_CACHE.get(book)
+        if hit is None or not hit[0] or not hit[2]:
+            continue  # unknown identity: leave every row exactly as it is
+        # number -> cuid, inverted. A manifest maps each number to one id, so
+        # `desired` is injective — no two rows can want the same slot.
+        desired = {cuid: number for number, cuid in hit[2].items()}
+
+        for table in ("chapter_summaries", "events"):
+            rows = db.execute(
+                f"SELECT rowid, chapter_number, loom_chapter_id FROM {table} "
+                f"WHERE book_number = ?", (book,)).fetchall()
+            movers = [(rowid, at, desired[cid]) for rowid, at, cid in rows
+                      if cid and cid in desired and desired[cid] != at]
+            if not movers:
+                continue
+            targets = {to for _, _, to in movers}
+            # Whoever sits in a target slot without a claim to it is the
+            # previous occupant's stale row — the exact row that would
+            # otherwise be served under the wrong chapter.
+            keep = {rowid for rowid, _, _ in movers}
+            for rowid, at, cid in rows:
+                if at in targets and rowid not in keep and (
+                        not cid or cid not in desired or desired[cid] != at):
+                    db.execute(f"DELETE FROM {table} WHERE rowid = ?", (rowid,))
+            # Two-phase, because chapter_summaries has a UNIQUE (book,
+            # chapter) primary key and a shift moves rows THROUGH each other:
+            # 41->42 while 42->43 collides head-on if applied in place. Park
+            # every mover at a negative number first — no real chapter number
+            # is negative, and old numbers are unique, so the parking spots
+            # cannot collide either.
+            for rowid, at, _to in movers:
+                db.execute(f"UPDATE {table} SET chapter_number = ? "
+                           f"WHERE rowid = ?", (-1 - at, rowid))
+            for rowid, _at, to in movers:
+                db.execute(f"UPDATE {table} SET chapter_number = ? "
+                           f"WHERE rowid = ?", (to, rowid))
+            moved += len(movers)
+
+    if moved:
+        db.commit()
+        log.info("repositioned %d enrichment row(s) onto their chapters' "
+                 "current numbers", moved)
+    else:
+        db.rollback()  # see gc_orphans: never leave a write txn open
+    return moved
 
 
 def gc_orphans(db: sqlite3.Connection,
@@ -743,6 +841,11 @@ class EnrichmentRunner:
             db.execute("PRAGMA busy_timeout = 30000")
             canon = canon_factory(db)
             ensure_tables(db)
+            # Order matters: relocate rows onto their chapters' current
+            # numbers BEFORE the GC decides which numbers are orphaned, or a
+            # row in flight past the end of a shortened book is collected
+            # rather than moved.
+            reposition_renumbered_chapters(db, cfg)
             removed = gc_orphans(db, live_chapter_ids(db, cfg))
             if removed:
                 log.info("enrichment GC: removed %d stale row(s) for chapters "
@@ -802,11 +905,11 @@ class EnrichmentRunner:
                         if q and norm_quote(q) not in prose_norm:
                             log.info("rejected unverified quote for %r", ev.get("title"))
                             ev["quote"] = None
-                    self._store_events(db, c, data.get("events", []))
+                    book_id, series_id, chapter_id = _loom_ids(
+                        cfg, c["book_number"], c["chapter_number"])
+                    self._store_events(db, c, data.get("events", []), chapter_id)
                     summary = (data.get("chapter_summary") or "").strip()
                     if summary:
-                        book_id, series_id, chapter_id = _loom_ids(
-                            cfg, c["book_number"], c["chapter_number"])
                         # Identity is stamped on write, never left to a later
                         # backfill: a one-off backfill decays the moment new
                         # prose is enriched. Book 2 chapter 93 proved it — the
@@ -1009,7 +1112,11 @@ class EnrichmentRunner:
                                 "state": self.status["state"]})
 
     @staticmethod
-    def _store_events(db, chapter: dict, events: list[dict]) -> None:
+    def _store_events(db, chapter: dict, events: list[dict],
+                      chapter_id: str | None = None) -> None:
+        # chapter_id is what lets reposition_renumbered_chapters move these
+        # rows when an insert renumbers the book, instead of them being
+        # served under whichever chapter later holds this number.
         book, ch = chapter["book_number"], chapter["chapter_number"]
         valid_chars = set(chapter["characters"])
         valid_chunks = {n["chunk_id"] for n in chapter["notes"]}
@@ -1032,13 +1139,13 @@ class EnrichmentRunner:
                 """INSERT INTO events (book_number, chapter_number, position, title,
                        type, granularity, date_line, summary, location,
                        participants_json, knowledge_json, source_chunk_ids_json,
-                       quote)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                       quote, loom_chapter_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (book, ch, pos, ev["title"], ev["type"], ev["granularity"],
                  chapter.get("date_line"), ev.get("summary"), location,
                  json.dumps(participants, ensure_ascii=False),
                  json.dumps(knowledge[:12], ensure_ascii=False),
-                 json.dumps(sources), ev.get("quote")))
+                 json.dumps(sources), ev.get("quote"), chapter_id))
 
     @staticmethod
     def _store_profile(db, payload: dict, data: dict) -> None:
