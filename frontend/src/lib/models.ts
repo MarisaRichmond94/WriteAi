@@ -29,7 +29,11 @@ export const CHAT_MODELS: ModelOption[] = [
 
 export const MODEL_IDS = CHAT_MODELS.map((m) => m.id);
 
-export const DEFAULT_QUERY_MODEL = "claude-opus-5";
+// Sonnet 5 ($3/$15) rather than Opus 5 ($5/$25): Explore is asked casual
+// questions all day, not a handful of hard ones. Opus stays one click away in
+// the picker. Keep this in step with DEFAULT_CHAT_MODEL in
+// server/routers/settings.py — tests/test_model_pricing.py pins both.
+export const DEFAULT_QUERY_MODEL = "claude-sonnet-5";
 export const DEFAULT_EXTRACTION_MODEL = "claude-haiku-4-5";
 
 export function modelLabel(id: string): string {

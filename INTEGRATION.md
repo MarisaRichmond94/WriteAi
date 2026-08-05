@@ -408,6 +408,73 @@ start showing chapters from a story it should not know exists.
 > data just goes quiet. Rename to match the manuscript, or accept losing the
 > canon tie-in for that character.
 
+### 7. Explore chat (Loom ↔ WriteAI)
+
+Loom now hosts this pane too, as a tab on its series and book pages (LOOM-114).
+WriteAI's own Explore is unchanged and fully usable; what follows is what a
+second consumer means for this side.
+
+**Endpoints Loom calls.** All pre-existing except `/api/models`:
+
+| Endpoint | Used for | Contract note |
+|---|---|---|
+| `POST /api/chat/stream` | the conversation | Loom sends `book_filter` as NUMBERS, already clamped |
+| `GET /api/books` | the filter bar's books + POVs | must stay a pure read |
+| `GET /api/models` | the model picker | **new** (LOOM-119) |
+| `GET/PUT/DELETE /api/sessions[/chat/{id}]` | shared chat history | |
+| `GET /api/books/{n}/chapters/{c}/text` | the citation viewer | must stay a pure read |
+| `GET /api/sync/status`, `/api/ingest/{preview,run,status}` | the staleness banner | |
+
+> ⚠️ **`GET /api/books` and `/chapters/{c}/text` are now load-bearing as PURE
+> READS.** Loom calls the first whenever the tab opens and the second on every
+> citation click. Both only read sqlite today. If either ever grows a seeding,
+> pruning or self-healing write — the way `GET /api/plan/characters` and
+> `GET /api/plan/outline/{n}` did — it will fire on ordinary browsing from
+> another app. Add such behaviour to a new endpoint instead.
+
+**`/api/models` exists so Loom needs no model list of its own.** `CHAT_MODELS`
+in `server/routers/settings.py` is the API-facing list; `frontend/src/lib/models.ts`
+is the one this app's own pane renders. They must not fork, and neither may
+offer a model absent from `PRICING_PER_MTOK` —
+`tests/test_model_pricing.py` parses all three and fails if they disagree.
+
+> The reason that test exists: the backend imposes **no model allowlist**, so an
+> id missing from the pricing table is still passed to the Anthropic SDK and
+> **called** — only its cost is wrong, at a cheap fallback rate. `claude-opus-5`
+> shipped that way, under-reporting its spend by ~40%, guarded by nothing but a
+> comment. `_pricing_for()` now warns once per unknown model rather than
+> silently substituting.
+
+**`sessions.json` gains one field.** Threads written by Loom carry `loomScope`
+(`{seriesId, bookId, label, bookIds}`) recording where the thread was asked.
+WriteAI does not write it and does not need to read it; **it must be preserved
+on any rewrite of that file**, since Loom uses it to restore a thread's book
+scope. Threads without it are treated as WriteAI-origin, which is correct.
+
+The replace-not-merge hazard on `PUT /api/sessions/{kind}/{sid}` applies here as
+it does for reviews (§3). Loom's proxy refuses incomplete bodies before they
+arrive; that guard is on Loom's side, so a third consumer would need its own.
+
+**Two silent filter behaviours were fixed** (LOOM-113), both in
+`server/routers/chat.py`:
+
+- A POV filter matching nothing used to be **discarded**, and the answer built
+  from the unfiltered excerpts while the UI still showed the filter active. It
+  now emits `{"type": "filter_starved", ...}` and spends nothing. Any client
+  reading this stream should handle that event; ignoring it renders an empty
+  answer rather than an explanation.
+- `book_filter` used to become a contiguous `Scope(book_min, book_max)` RANGE
+  with the exact set applied afterwards as a post-filter, so books 1 and 4
+  retrieved across 1–4 and discarded 2 and 3. `Scope` now carries `books`,
+  pushed into both the SQL and the Chroma filter. The range bounds are still
+  set alongside, because `describe()` and the temporal logic reason about the
+  span — do not remove them.
+
+**Scope enforcement is Loom's, not WriteAI's.** A book page may only search
+that book and earlier ones; Loom clamps before calling, and `book_filter`
+arrives already correct. WriteAI applies what it is given. If a third consumer
+appears, it owns its own clamp — there is no server-side spoiler boundary here.
+
 ## Identity
 
 **Loom's cuids are the identity of a series and a book across both apps.**

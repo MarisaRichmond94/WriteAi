@@ -100,6 +100,15 @@ class OfferedModelsArePriced(unittest.TestCase):
         self.assertIn(DEFAULT_CHAT_MODEL, [m["id"] for m in PY_MODELS])
         self.assertIn(DEFAULT_CHAT_MODEL, PRICING_PER_MTOK)
 
+    def test_the_two_defaults_agree(self):
+        """The API's default (Loom reads this) and the frontend's default
+        (WriteAI's own pane reads this) live in different files and different
+        languages. Drift between them is invisible — both apps work, they just
+        quietly bill at different rates for the same question."""
+        from server.routers.settings import DEFAULT_CHAT_MODEL
+
+        self.assertEqual(DEFAULT_CHAT_MODEL, _const(self.src, "DEFAULT_QUERY_MODEL"))
+
     def test_opus_5_priced_at_its_real_rate(self):
         """The specific regression. Opus 5 is $5/$25; the generic fallback is
         $1/$5 and answerer.py's old one was $3/$15 — both under-report."""

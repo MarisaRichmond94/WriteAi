@@ -32,7 +32,11 @@ CHAT_MODELS = [
     {"id": "claude-sonnet-5", "label": "Sonnet 5"},
     {"id": "claude-haiku-4-5", "label": "Haiku 4.5"},
 ]
-DEFAULT_CHAT_MODEL = "claude-opus-5"
+# Sonnet 5, not Opus 5 — $3/$15 against $5/$25, and Explore is asked casual
+# questions all day rather than a handful of hard ones. Opus stays one click
+# away in the picker for the questions that earn it. The list keeps Opus first
+# because it is ordered by capability, not by default-ness.
+DEFAULT_CHAT_MODEL = "claude-sonnet-5"
 
 
 @router.get("/models")
