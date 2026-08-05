@@ -57,19 +57,39 @@ def chat_stream(req: ChatRequest):
         plan = classify(req.message,
                         forced_type=MODE_MAP.get(req.mode) or None)
         if books:
-            plan.scope = Scope(book_min=min(books), book_max=max(books))
+            # Exact set, pushed INTO retrieval (LOOM-113). This used to be a
+            # contiguous range plus a post-filter, which meant a
+            # non-contiguous selection (books 1 and 4) retrieved across 1-4 and
+            # then threw away 2 and 3 — budget spent on excluded books, and a
+            # thinner slice of the ones actually chosen. The range bounds are
+            # kept alongside so `describe()` and the temporal logic still see
+            # the span they reason about.
+            plan.scope = Scope(book_min=min(books), book_max=max(books),
+                               books=frozenset(books))
         if req.thorough:  # Explore "Thorough" toggle -> full-quality reranker
             plan.reranker_model = s.cfg.reranker_model_thorough
         excerpts, notes = s.retriever.retrieve(plan)
-        # exact-set filters the range scope can't express
-        if books:
-            excerpts = [e for e in excerpts
-                        if e.get("book_number") in set(books)]
+
+        # POV is a property of the retrieved chunk, so it stays a post-filter —
+        # but it is now HONEST (LOOM-113). It used to be discarded whenever it
+        # matched nothing, and the answer was built from the unfiltered set
+        # while the UI still showed the filter as active. In a story told in
+        # limited POV, answering about Noah out of Jared's chapters is worse
+        # than reporting that there was nothing to find.
+        starved = False
         if req.pov_filter:
             povs = set(req.pov_filter)
-            filtered = [e for e in excerpts if e.get("pov_character") in povs]
-            if filtered:  # don't starve the model if the filter is too tight
-                excerpts = filtered
+            excerpts = [e for e in excerpts if e.get("pov_character") in povs]
+            starved = not excerpts
+
+        if starved:
+            # No excerpts, so no model call and no spend. Told plainly rather
+            # than answered around.
+            yield {"type": "filter_starved",
+                   "pov_filter": sorted(povs),
+                   "books": sorted(books) if books else []}
+            yield citations_payload([])
+            return
 
         answerer = s.new_answerer(model=req.model)
         history = [{"role": m["role"], "content": m["content"]}

@@ -48,6 +48,11 @@ def _like_clause(column: str, aliases: list[str]) -> tuple[str, list[str]]:
 def _scope_sql(scope: Scope) -> tuple[str, list]:
     """WHERE fragment (on aliased table c) implementing the scope bound."""
     clauses, params = [], []
+    if scope.books:
+        # Exact set (LOOM-113) — sorted so the SQL text is stable per set.
+        nums = sorted(scope.books)
+        clauses.append("c.book_number IN (" + ",".join("?" * len(nums)) + ")")
+        params.extend(nums)
     if scope.book_min is not None:
         clauses.append("c.book_number >= ?")
         params.append(scope.book_min)
@@ -64,6 +69,8 @@ def _scope_sql(scope: Scope) -> tuple[str, list]:
 def _scope_chroma(scope: Scope) -> dict | None:
     """Chroma `where` filter for the scope (chapter bound handled post-hoc)."""
     clauses = []
+    if scope.books:
+        clauses.append({"book_number": {"$in": sorted(scope.books)}})
     if scope.book_min is not None:
         clauses.append({"book_number": {"$gte": scope.book_min}})
     if scope.book_max is not None:

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from .extractor import PRICING_PER_MTOK
+from .extractor import _pricing_for
 from .query_router import QueryPlan
 
 log = logging.getLogger(__name__)
@@ -82,7 +82,10 @@ class Answerer:
 
     @property
     def actual_cost_usd(self) -> float:
-        in_p, out_p = PRICING_PER_MTOK.get(self.model, (3.00, 15.00))
+        # _pricing_for rather than a bare .get: this is the number the Explore
+        # chat and the review pane report as their spend, so an unpriced model
+        # must complain rather than quietly bill at the fallback (LOOM-119).
+        in_p, out_p = _pricing_for(self.model)
         # cache writes bill at 1.25x input, cache reads at 0.1x
         return round((self.usage["input_tokens"] * in_p
                       + self.usage["cache_write_tokens"] * in_p * 1.25

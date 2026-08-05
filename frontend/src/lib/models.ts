@@ -4,15 +4,24 @@
 //
 // Keep these IDs in sync with PRICING_PER_MTOK in src/extractor.py — the backend
 // imposes no model allowlist (it passes whatever ID it's given straight to the
-// Anthropic SDK), but an ID missing from the pricing table silently logs cost at
-// the default $3/$15 fallback rate.
+// Anthropic SDK), so an ID missing from the pricing table is still CALLED and
+// only its COST is wrong, billed at a cheap fallback rate.
+//
+// This comment used to be the only thing guarding that, and it did not hold:
+// `claude-opus-5` shipped without a pricing entry (LOOM-119). It is now pinned
+// by tests/test_model_pricing.py, which parses this file — so adding a model
+// here without pricing it fails the suite instead of quietly under-reporting
+// spend. Add the entry in src/extractor.py in the same commit.
 
 export interface ModelOption {
   id: string;
   label: string;
 }
 
+// Fable 5 is deliberately absent: it is priced at $10/$50 per MTok, which is
+// not a sane default for interrogating a manuscript. Add it only on purpose.
 export const CHAT_MODELS: ModelOption[] = [
+  { id: "claude-opus-5", label: "Opus 5" },
   { id: "claude-opus-4-8", label: "Opus 4.8" },
   { id: "claude-sonnet-5", label: "Sonnet 5" },
   { id: "claude-haiku-4-5", label: "Haiku 4.5" },
@@ -20,7 +29,7 @@ export const CHAT_MODELS: ModelOption[] = [
 
 export const MODEL_IDS = CHAT_MODELS.map((m) => m.id);
 
-export const DEFAULT_QUERY_MODEL = "claude-sonnet-5";
+export const DEFAULT_QUERY_MODEL = "claude-opus-5";
 export const DEFAULT_EXTRACTION_MODEL = "claude-haiku-4-5";
 
 export function modelLabel(id: string): string {

@@ -16,6 +16,11 @@ export interface ChatRequest {
 export type SSEEvent =
   | { type: "chunk"; content: string }
   | { type: "citations"; sources: Citation[] }
+  // The POV filter matched nothing in the selected books, so there is no
+  // answer rather than a wrong one (LOOM-113). This used to be silent: the
+  // filter was dropped and the model answered from everyone else's chapters
+  // while the UI still showed the filter as active.
+  | { type: "filter_starved"; pov_filter: string[]; books: number[] }
   | { type: "done" }
   | { type: "error"; message: string };
 

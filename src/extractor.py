@@ -37,13 +37,48 @@ from .quotesnap import normalize_quote, snap_quote_to_sentences
 log = logging.getLogger(__name__)
 
 # $ per million tokens (input, output) — used for estimates and run summaries.
+#
+# ⚠️ THIS TABLE IS LOAD-BEARING FOR SPEND REPORTING. The backend imposes no
+# model allowlist — whatever id it is handed goes straight to the Anthropic SDK
+# — so a model missing from here is still CALLED, and only its cost is wrong.
+# Every id offered in frontend/src/lib/models.ts must appear here;
+# tests/test_model_pricing.py pins that, because the failure is invisible: the
+# fallback under-reports the expensive models, which is the direction that
+# makes a feature look cheaper than it is.
 PRICING_PER_MTOK = {
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-sonnet-4-6": (3.00, 15.00),
     "claude-sonnet-5": (2.00, 10.00),   # intro pricing thru 2026-08-31; $3/$15 after
     "claude-opus-4-8": (5.00, 25.00),
+    "claude-opus-5": (5.00, 25.00),
     "claude-fable-5": (10.00, 50.00),
 }
+
+# Used when a model is not in the table above. Deliberately NOT silent — see
+# _pricing_for().
+_PRICING_FALLBACK = (1.00, 5.00)
+_warned_unpriced: set[str] = set()
+
+
+def _pricing_for(model: str) -> tuple[float, float]:
+    """(input, output) $/MTok, warning once per unknown model.
+
+    The warning is the point. This used to be a bare `.get(model, default)`,
+    so adding a model to the UI dropdown without adding it here logged every
+    call at the wrong rate with nothing to notice — and the wrong rate is
+    always the cheap one, so spend silently under-reported.
+    """
+    price = PRICING_PER_MTOK.get(model)
+    if price is None:
+        if model not in _warned_unpriced:
+            _warned_unpriced.add(model)
+            log.warning(
+                "no pricing entry for model %r — cost is being logged at the "
+                "fallback rate $%.2f/$%.2f per MTok and is WRONG. Add it to "
+                "PRICING_PER_MTOK in src/extractor.py.",
+                model, *_PRICING_FALLBACK)
+        return _PRICING_FALLBACK
+    return price
 
 TOKENS_PER_WORD = 1.35          # prose heuristic, same as the chunker
 # Observed metadata size per chunk. 450 before source quotes; the verbatim
@@ -182,7 +217,7 @@ def estimate_extraction_cost(chunks: list[Chunk], model: str) -> dict:
     n_batches = -(-len(chunks) // MAX_BATCH_CHUNKS)
     input_tokens = int(total_words * TOKENS_PER_WORD) + n_batches * 700  # + system prompt
     output_tokens = len(chunks) * EST_OUTPUT_TOKENS_PER_CHUNK
-    in_price, out_price = PRICING_PER_MTOK.get(model, (1.00, 5.00))
+    in_price, out_price = _pricing_for(model)
     cost = (input_tokens * in_price + output_tokens * out_price) / 1_000_000
     return {
         "model": model,
@@ -256,7 +291,7 @@ class MetadataExtractor:
 
     @property
     def actual_cost_usd(self) -> float:
-        in_price, out_price = PRICING_PER_MTOK.get(self.model, (1.00, 5.00))
+        in_price, out_price = _pricing_for(self.model)
         sync_cost = (self.usage["input_tokens"] * in_price
                      + self.usage["output_tokens"] * out_price)
         batch_cost = BATCH_PRICE_MULTIPLIER * (
@@ -265,17 +300,25 @@ class MetadataExtractor:
         )
         return round((sync_cost + batch_cost) / 1_000_000, 4)
 
-    def extract(self, chunks: list[Chunk]) -> list[dict | None]:
+    def extract(self, chunks: list[Chunk], on_progress=None) -> list[dict | None]:
         """Extract metadata for all chunks. Returns one dict per chunk, in
-        order; a chunk whose extraction failed gets None (log-and-continue)."""
+        order; a chunk whose extraction failed gets None (log-and-continue).
+        `on_progress`, if given, is called with the number of chunks
+        completed after each packed batch returns — the batches-API path
+        reports its whole run as one increment (results only arrive after
+        the batch ends, so there's no finer signal to report)."""
         stats_before = dict(self.quote_stats)
         batches = _batches(chunks)
         results: list[dict | None] = []
         if self.use_batches and batches:
             results.extend(self._extract_batched(batches))
+            if on_progress:
+                on_progress(len(chunks))
         else:
             for batch in batches:
                 results.extend(self._extract_batch(batch))
+                if on_progress:
+                    on_progress(len(batch))
 
         # Second pass: in large batches the model occasionally skips a chunk
         # entirely. Retry any misses one at a time — a single-chunk request

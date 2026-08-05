@@ -17,6 +17,37 @@ router = APIRouter(prefix="/api")
 
 _MASKABLE = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY")
 
+# The chat models this deployment offers, served so a second app does not have
+# to keep its own copy (LOOM-119). Loom's Explore tab renders whatever this
+# returns — a hard-coded list on that side would be the one nobody updates, and
+# the failure is silent: an unpriced model still answers, and only the spend
+# figure is wrong.
+#
+# Kept in step with frontend/src/lib/models.ts and with PRICING_PER_MTOK by
+# tests/test_model_pricing.py, which parses all three. Fable 5 is deliberately
+# absent — $10/$50 per MTok is not a sane default for interrogating prose.
+CHAT_MODELS = [
+    {"id": "claude-opus-5", "label": "Opus 5"},
+    {"id": "claude-opus-4-8", "label": "Opus 4.8"},
+    {"id": "claude-sonnet-5", "label": "Sonnet 5"},
+    {"id": "claude-haiku-4-5", "label": "Haiku 4.5"},
+]
+DEFAULT_CHAT_MODEL = "claude-opus-5"
+
+
+@router.get("/models")
+def list_models():
+    """Chat models offered, plus this deployment's configured default.
+
+    A pure read of module constants and the writer's UI settings — nothing is
+    computed, fetched, or written, so it is safe to call when a tab opens.
+    """
+    configured = writer_store.ui_settings().get("query_model")
+    default = (configured
+               if any(m["id"] == configured for m in CHAT_MODELS)
+               else DEFAULT_CHAT_MODEL)
+    return {"models": CHAT_MODELS, "default": default}
+
 
 def _mask(key: str, value: str) -> str:
     if key in _MASKABLE and len(value) > 12:

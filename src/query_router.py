@@ -96,8 +96,28 @@ class Scope:
     book_min: int | None = None
     book_max: int | None = None
     chapter_max: int | None = None   # applies to book_max only
+    # Exact set membership, for a selection a min/max range cannot express
+    # (LOOM-113). A range plus a post-filter spent the retrieval budget on
+    # books the caller had excluded: selecting books 1 and 4 retrieved across
+    # 1-4 and then discarded everything from 2 and 3, so the answer was built
+    # from a thinner slice of 1 and 4 than the caller thought. Set this and the
+    # exclusion happens IN the query instead.
+    #
+    # Contiguous selections should still use book_min/book_max — the range
+    # bounds are what `describe()` reports to the model and what the temporal
+    # ("by the end of book N") logic reasons about. `books` is additive: when
+    # both are set, both constrain.
+    books: frozenset[int] | None = None
 
     def describe(self) -> str:
+        if self.books:
+            nums = sorted(self.books)
+            if len(nums) == 1:
+                return f"book {nums[0]}"
+            # Contiguous runs read better as a range than as a list.
+            if nums == list(range(nums[0], nums[-1] + 1)):
+                return f"books {nums[0]}-{nums[-1]}"
+            return "books " + ", ".join(str(n) for n in nums)
         if self.book_min is None and self.book_max is None:
             return "the whole series"
         lo = self.book_min or 1

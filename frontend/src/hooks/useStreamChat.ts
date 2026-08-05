@@ -106,6 +106,17 @@ export function useStreamChat() {
             appendChunk(assistantId, event.content);
           } else if (event.type === "citations") {
             pendingCitations = event.sources;
+          } else if (event.type === "filter_starved") {
+            // Nothing matched the POV filter, so nothing was asked of the
+            // model (LOOM-113). Say so in the answer itself rather than
+            // leaving an empty bubble — and name the filter, since the whole
+            // point is that it was honoured rather than quietly dropped.
+            const who = event.pov_filter.join(", ") || "the selected POVs";
+            appendChunk(
+              assistantId,
+              `No excerpts match **${who}** in the selected books, so there is nothing to answer from. ` +
+                `Widen the POV filter or the book selection and ask again.`,
+            );
           } else if (event.type === "done") {
             finish(pendingCitations);
           } else if (event.type === "error") {
