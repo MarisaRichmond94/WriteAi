@@ -41,12 +41,19 @@ interface EnrichStatus {
   cost_usd: number;
 }
 
+interface IngestStatus {
+  running: boolean;
+  chunks_done: number | null;
+  chunks_total: number | null;
+}
+
 /** Slim always-visible-while-running indicator pinned to the sidebar bottom:
- * indeterminate shimmer while a sync (ingest) runs, a real progress bar while
- * enrichment runs. Hidden entirely when both are idle. */
+ * a real progress bar while ingest is extracting chunks (falls back to an
+ * indeterminate shimmer during parsing/diffing, before chunk counts exist),
+ * and a real progress bar while enrichment runs. Hidden when both are idle. */
 export default function PipelineStatusBar() {
   const { setActivePane } = useAppStore();
-  const [ingestRunning, setIngestRunning] = useState(false);
+  const [ingest, setIngest] = useState<IngestStatus | null>(null);
   const [enrich, setEnrich] = useState<EnrichStatus | null>(null);
 
   useEffect(() => {
@@ -58,7 +65,7 @@ export default function PipelineStatusBar() {
           fetch("/api/enrich/status").then((r) => (r.ok ? r.json() : null)),
         ]);
         if (!alive) return;
-        setIngestRunning(Boolean(ing?.running));
+        setIngest(ing && ing.running ? ing : null);
         setEnrich(enr && enr.state === "running" ? enr : null);
       } catch {
         /* server briefly away — keep the last known state */
@@ -72,12 +79,18 @@ export default function PipelineStatusBar() {
     };
   }, []);
 
+  const ingestRunning = ingest !== null;
   const syncPhrase = usePhrase(SYNC_PHRASES, ingestRunning);
   const enrichPhrase = usePhrase(ENRICH_PHRASES, enrich !== null);
 
   if (!ingestRunning && !enrich) return null;
-  const pct = enrich && enrich.total > 0
+  const enrichPct = enrich && enrich.total > 0
     ? Math.round((enrich.done / enrich.total) * 100)
+    : 0;
+  const hasChunkProgress = Boolean(
+    ingest && ingest.chunks_total !== null && ingest.chunks_total > 0);
+  const ingestPct = hasChunkProgress
+    ? Math.round((ingest!.chunks_done! / ingest!.chunks_total!) * 100)
     : 0;
 
   return (
@@ -93,8 +106,22 @@ export default function PipelineStatusBar() {
             <span key={syncPhrase} className="animate-phrase inline-block">{syncPhrase}</span>
           </div>
           <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-border">
-            <div className="animate-indeterminate h-full w-1/3 rounded-full bg-accent" />
+            {hasChunkProgress ? (
+              <div
+                className="relative h-full overflow-hidden rounded-full bg-accent transition-all duration-700"
+                style={{ width: `${Math.max(ingestPct, 2)}%` }}
+              >
+                <div className="animate-sheen absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+              </div>
+            ) : (
+              <div className="animate-indeterminate h-full w-1/3 rounded-full bg-accent" />
+            )}
           </div>
+          {hasChunkProgress && (
+            <p className="mt-1 text-center text-[10px] text-ink-muted">
+              {ingest!.chunks_done}/{ingest!.chunks_total} chunks · {ingestPct}%
+            </p>
+          )}
         </div>
       )}
       {enrich && (
@@ -106,13 +133,13 @@ export default function PipelineStatusBar() {
           <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-border">
             <div
               className="relative h-full overflow-hidden rounded-full bg-accent transition-all duration-700"
-              style={{ width: `${Math.max(pct, 2)}%` }}
+              style={{ width: `${Math.max(enrichPct, 2)}%` }}
             >
               <div className="animate-sheen absolute inset-0 bg-gradient-to-r from-transparent via-white/40 to-transparent" />
             </div>
           </div>
           <p className="mt-1 text-center text-[10px] text-ink-muted">
-            {enrich.done}/{enrich.total} · {pct}%
+            {enrich.done}/{enrich.total} · {enrichPct}%
           </p>
         </div>
       )}

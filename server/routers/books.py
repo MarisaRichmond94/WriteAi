@@ -821,6 +821,21 @@ def ingest_status():
     if done:
         # data changed under us — force rebuild of derived views
         get_state().canon._map_state = ""
+    # Chunk-level progress the subprocess writes as it works (ingest.py ->
+    # write_ingest_progress). Only meaningful while running: it's cleared at
+    # the start of each run, but a run that hasn't reached the extraction
+    # loop yet (still parsing/chunking/diffing) has no file to read.
+    chunks_done = chunks_total = None
+    if running:
+        try:
+            from src.ingestion import ingest_progress_path
+            p = ingest_progress_path(get_state().cfg)
+            if p.exists():
+                data = json.loads(p.read_text())
+                chunks_done, chunks_total = data["done"], data["total"]
+        except Exception:
+            pass
     return {"running": running, "finished": done,
             "exit_code": proc.poll() if proc else None,
-            "started_at": _ingest["started_at"], "log_tail": tail}
+            "started_at": _ingest["started_at"], "log_tail": tail,
+            "chunks_done": chunks_done, "chunks_total": chunks_total}

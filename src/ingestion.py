@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import shutil
 from dataclasses import dataclass, field
 
@@ -29,6 +30,24 @@ log = logging.getLogger(__name__)
 def chunk_text_hash(chunk: Chunk) -> str:
     """SHA-256 of the chunk's raw text — the unit of change detection."""
     return hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+
+
+def ingest_progress_path(cfg):
+    return cfg.data_dir / "ingest_progress.json"
+
+
+def write_ingest_progress(cfg, done: int, total: int) -> None:
+    """Chunk-level progress for the running ingest subprocess, read by
+    server/routers/books.py::ingest_status(). Written tmp-then-rename so the
+    reader never sees a half-written file."""
+    path = ingest_progress_path(cfg)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"done": done, "total": total}))
+    os.replace(tmp, path)
+
+
+def clear_ingest_progress(cfg) -> None:
+    ingest_progress_path(cfg).unlink(missing_ok=True)
 
 
 def load_and_chunk_book(cfg, book: Book) -> list[Chunk] | None:
@@ -49,14 +68,14 @@ def load_and_chunk_book(cfg, book: Book) -> list[Chunk] | None:
 
 
 def ingest_chunks(cfg, chunks: list[Chunk], extractor: MetadataExtractor,
-                  embedder, store) -> dict:
+                  embedder, store, on_progress=None) -> dict:
     """Extract metadata + embeddings for `chunks` and upsert them.
     Returns a summary dict. Assumes the caller already handled cost
     confirmation and (Phase 5) change detection."""
     if not chunks:
         return {"chunks": 0}
 
-    metadata_list = extractor.extract(chunks)
+    metadata_list = extractor.extract(chunks, on_progress=on_progress)
     embeddings = embedder.embed_documents([c.embedding_text for c in chunks])
 
     records = [
@@ -80,7 +99,7 @@ def ingest_chunks(cfg, chunks: list[Chunk], extractor: MetadataExtractor,
 
 
 def reextract_chunks(cfg, chunks: list[Chunk], extractor: MetadataExtractor,
-                     embedder, store) -> dict:
+                     embedder, store, on_progress=None) -> dict:
     """Metadata-only re-extraction (ingest.py --re-extract): re-runs the LLM
     extraction for `chunks` whose TEXT is unchanged, so parsing/chunking are
     reused from the caller and embeddings are fetched back from ChromaDB
@@ -93,7 +112,7 @@ def reextract_chunks(cfg, chunks: list[Chunk], extractor: MetadataExtractor,
     if not chunks:
         return {"chunks": 0}
 
-    metadata_list = extractor.extract(chunks)
+    metadata_list = extractor.extract(chunks, on_progress=on_progress)
     embeddings = store.get_embeddings([c.chunk_id for c in chunks])
     missing = [c for c in chunks if c.chunk_id not in embeddings]
     if missing:  # e.g. a chunk that never made it into the store; embed fresh

@@ -41,9 +41,11 @@ def _notify(title: str, body: str, ok: bool = True) -> None:
 from src.discovery import discover_books
 from src.extractor import estimate_extraction_cost
 from src.ingestion import (BookDiff, carry_chunks, chunk_text_hash,
-                           clear_staging, detect_moved_chunks, diff_chunks,
-                           ingest_chunks, load_and_chunk_book, load_hash_index,
-                           reextract_chunks, save_hash_index)
+                           clear_ingest_progress, clear_staging,
+                           detect_moved_chunks, diff_chunks, ingest_chunks,
+                           load_and_chunk_book, load_hash_index,
+                           reextract_chunks, save_hash_index,
+                           write_ingest_progress)
 
 log = logging.getLogger("ingest")
 
@@ -84,6 +86,7 @@ def main() -> int:
 
     started = time.time()
     cfg = load_config()
+    clear_ingest_progress(cfg)  # stale numbers from a prior run must not leak in
     if args.batches:  # CLI flag overrides EXTRACTION_USE_BATCHES on
         cfg.extraction_use_batches = True
 
@@ -225,6 +228,15 @@ def main() -> int:
     # refused donor is added to d.new inside the loop, after the plan was
     # printed, so the plan's number would understate what actually ran.
     total_processed = 0
+    progress_done = 0
+    progress_total = len(changed)
+    write_ingest_progress(cfg, progress_done, progress_total)
+
+    def _on_progress(n: int) -> None:
+        nonlocal progress_done
+        progress_done += n
+        write_ingest_progress(cfg, progress_done, progress_total)
+
     for num in sorted(diffs):
         b, chunks, d = diffs[num]
         if not d.changed and not d.deleted_ids:
@@ -249,7 +261,8 @@ def main() -> int:
             + (f", {len(d.moved)} moved" if d.moved else "") + ")")
         ingest_fn = reextract_chunks if args.re_extract else ingest_chunks
         total_processed += len(d.changed)
-        summary = ingest_fn(cfg, d.changed, extractor, embedder, store)
+        summary = ingest_fn(cfg, d.changed, extractor, embedder, store,
+                            on_progress=_on_progress)
         if d.deleted_ids:
             store.delete_chunks(d.deleted_ids)
             if cfg.enable_note_ranking:
