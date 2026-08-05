@@ -41,16 +41,37 @@ DEFAULT_CHAT_MODEL = "claude-sonnet-5"
 
 @router.get("/models")
 def list_models():
-    """Chat models offered, plus this deployment's configured default.
+    """Chat models offered, plus the one a request with `model: null` gets.
 
-    A pure read of module constants and the writer's UI settings — nothing is
-    computed, fetched, or written, so it is safe to call when a tab opens.
+    ⚠️ `default` MUST be the EFFECTIVE default — `cfg.query_model`, set by
+    QUERY_MODEL in .env — not a constant this module would prefer. It read
+    `ui_settings()` at first, which does not hold that key, so it fell through
+    to DEFAULT_CHAT_MODEL and advertised `claude-sonnet-5` while an unspecified
+    request actually ran on `claude-sonnet-4-6`. Verified 2026-08-05 by
+    checking a real answer's `usage.model` against what this endpoint claimed.
+    Nothing errors when those disagree; the picker just shows one model and
+    bills for another.
+
+    The configured model is added to the offered list when it is priced but
+    not already there, so the picker can show what is actually selected. A
+    configured model with no pricing entry is NOT offered — it would answer
+    fine and cost the wrong amount, which is the failure test_model_pricing.py
+    exists to prevent.
+
+    A pure read of config plus module constants; safe on tab open.
     """
-    configured = writer_store.ui_settings().get("query_model")
-    default = (configured
-               if any(m["id"] == configured for m in CHAT_MODELS)
-               else DEFAULT_CHAT_MODEL)
-    return {"models": CHAT_MODELS, "default": default}
+    from src.extractor import PRICING_PER_MTOK
+
+    configured = get_state().cfg.query_model
+    models = list(CHAT_MODELS)
+    if (configured
+            and configured in PRICING_PER_MTOK
+            and not any(m["id"] == configured for m in models)):
+        models.append({"id": configured, "label": configured})
+
+    offered = {m["id"] for m in models}
+    default = configured if configured in offered else DEFAULT_CHAT_MODEL
+    return {"models": models, "default": default}
 
 
 def _mask(key: str, value: str) -> str:

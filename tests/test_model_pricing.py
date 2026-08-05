@@ -100,6 +100,46 @@ class OfferedModelsArePriced(unittest.TestCase):
         self.assertIn(DEFAULT_CHAT_MODEL, [m["id"] for m in PY_MODELS])
         self.assertIn(DEFAULT_CHAT_MODEL, PRICING_PER_MTOK)
 
+    def test_api_default_is_the_model_a_null_request_actually_gets(self):
+        """`GET /api/models` advertises a default; a request with `model: null`
+        runs on `cfg.query_model`. Those must be the same string.
+
+        They were not: the endpoint read a settings key that does not exist,
+        fell through to DEFAULT_CHAT_MODEL, and advertised claude-sonnet-5
+        while answers actually ran on claude-sonnet-4-6. Nothing errors when
+        they disagree — the picker shows one model and the bill is for
+        another."""
+        from unittest.mock import patch
+
+        from server.routers import settings as mod
+
+        class FakeCfg:
+            query_model = "claude-sonnet-4-6"   # priced, not in CHAT_MODELS
+
+        with patch.object(mod, "get_state", lambda: type("S", (), {"cfg": FakeCfg})()):
+            payload = mod.list_models()
+
+        self.assertEqual(payload["default"], "claude-sonnet-4-6")
+        self.assertIn("claude-sonnet-4-6", [m["id"] for m in payload["models"]],
+                      "the configured model must be selectable, or the picker "
+                      "cannot show what is actually in use")
+
+    def test_an_unpriced_configured_model_is_not_offered(self):
+        """A configured model with no pricing entry would answer fine and cost
+        the wrong amount — the exact failure this suite exists to prevent."""
+        from unittest.mock import patch
+
+        from server.routers import settings as mod
+
+        class FakeCfg:
+            query_model = "claude-not-priced-9"
+
+        with patch.object(mod, "get_state", lambda: type("S", (), {"cfg": FakeCfg})()):
+            payload = mod.list_models()
+
+        self.assertNotIn("claude-not-priced-9", [m["id"] for m in payload["models"]])
+        self.assertEqual(payload["default"], mod.DEFAULT_CHAT_MODEL)
+
     def test_the_two_defaults_agree(self):
         """The API's default (Loom reads this) and the frontend's default
         (WriteAI's own pane reads this) live in different files and different
