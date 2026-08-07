@@ -84,10 +84,20 @@ class AppState:
         the process restarts — which silently breaks semantic retrieval (and
         thus review). Swap in a fresh SeriesStore (new client + collection)
         and drop the retriever so it rebuilds against it on next use. The
-        embedder is unaffected by a re-ingest, so it's left in place."""
+        embedder is unaffected by a re-ingest, so it's left in place.
+
+        The OLD store must be closed before the new one opens. Constructing a
+        SeriesStore does not by itself buy a fresh view: chroma caches clients
+        per path, so a store built while the old one is still open inherits the
+        very stale handle this method exists to discard — which is why this
+        path quietly stopped working. Closing first is what makes the swap
+        real; see `SeriesStore.close_chroma`."""
         with self._lock:
-            self.store = SeriesStore(self.cfg)
+            old = getattr(self, "store", None)
             self._retriever = None
+            if old is not None:
+                old.close_chroma()
+            self.store = SeriesStore(self.cfg)
 
 
 state: AppState | None = None
