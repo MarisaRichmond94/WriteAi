@@ -13,6 +13,7 @@ SQLite   : a `chunks` table with the full metadata (list fields as JSON), plus
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import re
@@ -287,10 +288,92 @@ class SeriesStore:
                           "Queries will use a new empty collection until this "
                           "is resolved.", old, new, exc_info=True)
 
+    def close_chroma(self) -> None:
+        """Release this store's Chroma client so the next open reads disk.
+
+        THE WHOLE REOPEN DEPENDS ON THIS, and it is not obvious why.
+
+        `chromadb.PersistentClient(path=...)` looks like it opens the store,
+        but it does not: chroma keeps a process-wide cache of `System`
+        instances keyed by path (`SharedSystemClient._identifier_to_system`),
+        so constructing a second client for a path already open hands back the
+        FIRST one's System — the same Rust bindings, holding the same stale
+        in-memory view of the segments. A "reopen" that only reconstructs the
+        client is therefore a no-op against precisely the failure it exists to
+        clear, and the retry re-runs the same doomed query on the same handle.
+        That is what kept `Error finding id` alive across both recovery paths
+        until a process restart (2026-08-07).
+
+        `close()` is what drops the System from that cache — but only when its
+        refcount reaches zero, and the count leaks: every client construction
+        adds to it and the discarded stores never closed theirs, so a process
+        that has already reopened a few times sits on a count no single close()
+        can retire. So we close, then VERIFY the entry is actually gone, and
+        evict it ourselves when it is not.
+
+        Stopping the System also invalidates any collection handle another
+        holder still has for this path. That is the intended cost: within this
+        process the only other holder is a store being replaced, and a query
+        in flight on it was already going to fail — now it fails into
+        `_requery_after_reopen`, which recovers for real.
+
+        Never raises: failing to close must not take down a request. It does
+        log loudly, because a silent failure here degrades back to the no-op
+        reopen that this docstring exists to describe.
+        """
+        client = getattr(self, "_chroma", None)
+        if client is None:
+            return
+        self._chroma = None
+        self.collection = None
+        self._notes_collection = None
+
+        try:
+            client.close()
+        except Exception:
+            log.warning("closing the Chroma client raised; continuing to the "
+                        "cache check, which is the part that matters",
+                        exc_info=True)
+
+        # Verify, don't assume. If close() retired the System the cache no
+        # longer holds the identifier and there is nothing left to do.
+        try:
+            from chromadb.api.shared_system_client import SharedSystemClient
+
+            identifier = getattr(client, "_identifier", None)
+            if identifier is None:
+                raise AttributeError("client has no _identifier")
+            lock = getattr(SharedSystemClient, "_refcount_lock", None)
+            with lock if lock is not None else contextlib.nullcontext():
+                system = SharedSystemClient._identifier_to_system.pop(identifier, None)
+                SharedSystemClient._identifier_to_refcount.pop(identifier, None)
+            if system is not None:
+                log.warning("Chroma still cached a System for %r after close() "
+                            "— refcounts leaked by earlier reopens. Evicted it "
+                            "directly so the next open reads from disk.",
+                            identifier)
+                try:
+                    system.stop()
+                except Exception:
+                    log.warning("stopping the evicted Chroma System raised; it "
+                                "is out of the cache either way", exc_info=True)
+        except Exception:
+            log.error("could not confirm Chroma's client cache was cleared — "
+                      "its internals may have changed shape in an upgrade. "
+                      "Reopening may silently return the same stale handle, "
+                      "which means `Error finding id` can only be cleared by "
+                      "restarting the server.", exc_info=True)
+
     def _open_chroma(self) -> None:
-        """(Re)open the Chroma client and collection from disk."""
+        """(Re)open the Chroma client and collection from disk.
+
+        Safe to call repeatedly: the previous client is released first, which
+        is what makes this a real reopen rather than a cache hit. See
+        `close_chroma`.
+        """
         import chromadb  # heavy import, keep at call time
 
+        self.close_chroma()
         self._chroma = chromadb.PersistentClient(path=self._chroma_dir)
         self._migrate_legacy_collections()
         self.collection = self._chroma.get_or_create_collection(
@@ -319,14 +402,17 @@ class SeriesStore:
         fix it. Reopening from disk here is cheap and idempotent, and turns a
         dead query into a slow one.
 
+        Reopening only works because `_open_chroma` releases the old client
+        first; without that, chroma's per-path client cache hands the retry
+        the same stale handle. See `close_chroma`.
+
         Returns True when the caller should retry; re-raises anything else.
         """
         if "Error finding id" not in str(exc):
             raise exc
         log.warning("%s hit a stale Chroma handle (%s) — reopening the "
                     "collection and retrying once", what, exc)
-        self._open_chroma()
-        self._notes_collection = None
+        self._open_chroma()  # also drops the notes collection
         return True
 
     def _backfill_fts(self) -> None:

@@ -22,6 +22,8 @@ Run from the repo root:
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 import unittest
 
 from src.storage import SeriesStore
@@ -57,6 +59,9 @@ class _Store(SeriesStore):
 
     def _open_chroma(self):
         self.reopens += 1
+        # Mirrors the real one, which drops both handles via close_chroma.
+        # RealChromaReopenTest is what holds this stub to that contract.
+        self._notes_collection = None
         if self._reopen_to is not None:
             self.collection = self._reopen_to
 
@@ -106,6 +111,98 @@ class StaleChromaRecoveryTest(unittest.TestCase):
 
         self.assertIn("disk I/O error", str(ctx.exception))
         self.assertEqual(store.reopens, 0)
+
+
+class RealChromaReopenTest(unittest.TestCase):
+    """The tests above stub `_open_chroma`, so they prove the retry MECHANISM
+    and nothing about whether reopening reopens anything. It doesn't, by
+    default: chroma caches System instances per path, so a second
+    PersistentClient on an open path returns the first one's System — same Rust
+    bindings, same stale segment view. Every recovery path in this file was
+    therefore a no-op against the failure it was written for, and `Error
+    finding id` survived until the process restarted (2026-08-07).
+
+    These tests drive the real chromadb, which is the only way to catch that.
+    """
+
+    def _store(self, path):
+        """A SeriesStore with only the Chroma plumbing wired up — __init__
+        wants a Config, a books dir and SQLite, none of which this needs."""
+        store = SeriesStore.__new__(SeriesStore)
+        store._chroma_dir = path
+        store._collection_name = "test-collection"
+        store._legacy_collection_name = "test-collection"
+        store._notes_collection = None
+        return store
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="chroma-reopen-test-")
+        self.addCleanup(shutil.rmtree, self.dir, True)
+
+    def test_reopen_actually_rebinds_to_disk(self):
+        """THE REGRESSION: before the fix both opens shared one System."""
+        store = self._store(self.dir)
+        store._open_chroma()
+        first = store._chroma._system
+
+        store._open_chroma()
+
+        self.assertIsNot(store._chroma._system, first,
+                         "reopen returned the cached System — the stale handle "
+                         "would survive, and so would the failing query")
+
+    def test_close_evicts_even_when_refcounts_leaked(self):
+        """close() alone only drops the System at refcount zero, and the count
+        leaks: every client construction adds to it and discarded stores never
+        closed theirs. close_chroma must evict regardless."""
+        import chromadb
+        from chromadb.api.shared_system_client import SharedSystemClient
+
+        store = self._store(self.dir)
+        store._open_chroma()
+        identifier = store._chroma._identifier
+        # Stand-ins for the stores earlier reopens dropped without closing.
+        leaked = [chromadb.PersistentClient(path=self.dir) for _ in range(3)]
+
+        store.close_chroma()
+
+        self.assertNotIn(identifier, SharedSystemClient._identifier_to_system)
+        del leaked
+
+    def test_reopened_collection_is_queryable(self):
+        """A reopen that rebinds but can't serve a query has moved the failure,
+        not fixed it."""
+        store = self._store(self.dir)
+        store._open_chroma()
+        store.collection.upsert(ids=["c1"], embeddings=[[0.1, 0.2, 0.3]],
+                                documents=["chapter text"])
+
+        store._open_chroma()
+        hits = store.semantic_search([0.1, 0.2, 0.3], top_k=1)
+
+        self.assertEqual([h["chunk_id"] for h in hits], ["c1"])
+
+    def test_reopen_drops_the_real_notes_handle(self):
+        """The stubbed twin of this test can only assert what the stub does.
+        The notes index is opened off the same client, so a handle kept across
+        a reopen would be stale in exactly the same way."""
+        store = self._store(self.dir)
+        store._open_chroma()
+        self.assertIsNotNone(store.notes)   # force the lazy open
+
+        store._open_chroma()
+
+        self.assertIsNone(store._notes_collection)
+
+    def test_close_is_idempotent_and_safe_before_any_open(self):
+        """`_open_chroma` calls it unconditionally, including the first time,
+        and a failed close must never propagate into a request."""
+        store = self._store(self.dir)
+        store.close_chroma()          # never opened
+        store._open_chroma()
+        store.close_chroma()
+        store.close_chroma()          # already closed
+        self.assertIsNone(store._chroma)
 
 
 if __name__ == "__main__":
