@@ -616,9 +616,15 @@ export default function ReviewPane() {
     if (msgs.length === 0) return;
     // After the FIRST review of a conversation, downshift for the iteration
     // rounds: skip the Ideal Version rewrite and drop to the cheapest model.
-    // One-time and fully manual afterwards — the toggle and model selector
-    // stay in the writer's hands.
-    if (!autoTunedRef.current && msgs.filter((m) => m.role === "assistant").length === 1) {
+    // A draft re-review temporarily upshifts back to the full model (it is
+    // the hardest turn — see handleSendUpdatedDraft); once it lands, drop
+    // again, so iteration questions never quietly run at full price. Only
+    // OUR upshift re-arms this — a hand-picked model clears autoTunedRef
+    // and stays in the writer's hands.
+    const firstReviewDone =
+      !autoTunedRef.current && msgs.filter((m) => m.role === "assistant").length === 1;
+    const rereviewDone = autoTunedRef.current && model === defaultModel;
+    if (firstReviewDone || rereviewDone) {
       autoTunedRef.current = true;
       setIncludeIdeal(false);
       setModel(DEFAULT_EXTRACTION_MODEL);
@@ -830,7 +836,9 @@ export default function ReviewPane() {
     }
     // Diffing drafts is the hardest turn of the conversation — undo the
     // automatic cheap-model downshift for it (visibly, via the dropdown).
-    // A model the writer picked by hand sticks.
+    // A model the writer picked by hand sticks. The downshift re-applies
+    // when this review lands (see the auto-save effect), so only the
+    // re-review itself runs at full price.
     const reviewModel = autoTunedRef.current ? defaultModel : model;
     if (autoTunedRef.current) setModel(defaultModel);
     sendMessage(
@@ -1316,7 +1324,14 @@ export default function ReviewPane() {
                 {MODELS.map((m) => (
                   <button
                     key={m.id}
-                    onClick={() => { setModel(m.id); setModelDropdownOpen(false); }}
+                    onClick={() => {
+                      // a hand-picked model must STICK: clearing the
+                      // auto-tune marker is what stops the next re-review
+                      // (and resetCostControls) from overriding this choice
+                      autoTunedRef.current = false;
+                      setModel(m.id);
+                      setModelDropdownOpen(false);
+                    }}
                     className={clsx(
                       "w-full px-3 py-1.5 text-left text-[11px] transition-colors hover:bg-surface-hover",
                       model === m.id ? "text-accent" : "text-ink-secondary"

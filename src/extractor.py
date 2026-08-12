@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import time
+from datetime import date
 
 from .chunker import Chunk
 from .quotesnap import normalize_quote, snap_quote_to_sentences
@@ -48,11 +49,19 @@ log = logging.getLogger(__name__)
 PRICING_PER_MTOK = {
     "claude-haiku-4-5": (1.00, 5.00),
     "claude-sonnet-4-6": (3.00, 15.00),
-    "claude-sonnet-5": (2.00, 10.00),   # intro pricing thru 2026-08-31; $3/$15 after
+    "claude-sonnet-5": (2.00, 10.00),   # intro pricing — date-flipped in _pricing_for
     "claude-opus-4-8": (5.00, 25.00),
     "claude-opus-5": (5.00, 25.00),
     "claude-fable-5": (10.00, 50.00),
 }
+
+# Sonnet 5's introductory pricing ends 2026-08-31; the sticker rate applies
+# from Sept 1. Checked per call in _pricing_for rather than baked into the
+# table, so the ledger reprices at the boundary without a restart or a human
+# remembering the date — spend would otherwise silently under-report by a
+# third on every Sonnet 5 call.
+_SONNET5_INTRO_ENDS = date(2026, 8, 31)
+_SONNET5_STANDARD = (3.00, 15.00)
 
 # Used when a model is not in the table above. Deliberately NOT silent — see
 # _pricing_for().
@@ -68,6 +77,8 @@ def _pricing_for(model: str) -> tuple[float, float]:
     call at the wrong rate with nothing to notice — and the wrong rate is
     always the cheap one, so spend silently under-reported.
     """
+    if model == "claude-sonnet-5" and date.today() > _SONNET5_INTRO_ENDS:
+        return _SONNET5_STANDARD
     price = PRICING_PER_MTOK.get(model)
     if price is None:
         if model not in _warned_unpriced:

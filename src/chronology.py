@@ -47,7 +47,7 @@ import sqlite3
 import time
 
 from src.costlog import log_cost
-from src.extractor import PRICING_PER_MTOK
+from src.extractor import _pricing_for
 
 log = logging.getLogger(__name__)
 
@@ -478,7 +478,7 @@ def resolve_chronology(db: sqlite3.Connection, cfg, client, *,
     overridden = {(b, c) for b, c in db.execute(
         "SELECT book_number, chapter_number FROM chapter_timeline "
         "WHERE manual_override = 1")}
-    in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))
+    in_p, out_p = _pricing_for(cfg.extraction_model)
     t0 = time.monotonic()
 
     prior_books: list[dict] = []   # running context passed forward

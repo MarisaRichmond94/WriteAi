@@ -37,7 +37,7 @@ import sqlite3
 import time
 
 from src.costlog import log_cost
-from src.extractor import PRICING_PER_MTOK
+from src.extractor import _pricing_for
 
 log = logging.getLogger(__name__)
 
@@ -495,7 +495,7 @@ def resolve_locations(db: sqlite3.Connection, cfg, client, *,
         todo = {b: raws for b, raws in todo.items() if b in books}
 
     known = _known_places(db, exclude=set(todo))
-    in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))
+    in_p, out_p = _pricing_for(cfg.extraction_model)
     t0 = time.monotonic()
     try:
         for book in sorted(todo):

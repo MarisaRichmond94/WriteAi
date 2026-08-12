@@ -155,6 +155,43 @@ class OfferedModelsArePriced(unittest.TestCase):
         self.assertEqual(PRICING_PER_MTOK.get("claude-opus-5"), (5.00, 25.00))
 
 
+class Sonnet5IntroPricingFlips(unittest.TestCase):
+    """Sonnet 5's intro pricing ($2/$10) ends 2026-08-31. The flip must be
+    date-driven inside _pricing_for — a table entry someone has to remember
+    to edit on Sept 1 would under-report every Sonnet 5 call by a third,
+    silently, in the direction that makes spend look fine."""
+
+    def _on(self, iso_day: str):
+        import datetime as real_dt
+        from unittest.mock import patch
+
+        class FakeDate(real_dt.date):
+            @classmethod
+            def today(cls):
+                return real_dt.date.fromisoformat(iso_day)
+
+        with patch("src.extractor.date", FakeDate):
+            return _pricing_for("claude-sonnet-5")
+
+    def test_intro_rate_through_august_31(self):
+        self.assertEqual(self._on("2026-08-31"), (2.00, 10.00))
+
+    def test_standard_rate_from_september_1(self):
+        self.assertEqual(self._on("2026-09-01"), (3.00, 15.00))
+
+    def test_other_models_are_untouched_by_the_boundary(self):
+        import datetime as real_dt
+        from unittest.mock import patch
+
+        class FakeDate(real_dt.date):
+            @classmethod
+            def today(cls):
+                return real_dt.date(2026, 9, 1)
+
+        with patch("src.extractor.date", FakeDate):
+            self.assertEqual(_pricing_for("claude-haiku-4-5"), (1.00, 5.00))
+
+
 class UnpricedModelIsLoud(unittest.TestCase):
     def setUp(self):
         _warned_unpriced.clear()   # the warning is once-per-process

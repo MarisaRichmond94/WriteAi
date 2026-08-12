@@ -25,7 +25,7 @@ import time
 from collections import defaultdict
 
 from src.costlog import log_cost
-from src.extractor import PRICING_PER_MTOK
+from src.extractor import _pricing_for
 
 log = logging.getLogger(__name__)
 
@@ -984,9 +984,9 @@ def preview(db, cfg, canon) -> dict:
         + sum((len(p["knowledge"]) + len(p["beats"])) * 20 + 500 for p in profiles)
     out_tok = (len(chapters) * 550 + len(profiles) * 500
                + sum(len(b) * 25 for b in loc_batches))
-    in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))
+    in_p, out_p = _pricing_for(cfg.extraction_model)
     rel_model = cfg.enrich_rel_model or cfg.extraction_model
-    rel_in_p, rel_out_p = PRICING_PER_MTOK.get(rel_model, (in_p, out_p))
+    rel_in_p, rel_out_p = _pricing_for(rel_model)
     return {
         "chapters_to_process": len(chapters),
         "profiles_to_process": len(profiles),
@@ -1042,7 +1042,7 @@ class EnrichmentRunner:
                          "no longer in the index", removed)
             client = anthropic.Anthropic(api_key=cfg.anthropic_api_key or None,
                                          max_retries=4)
-            in_p, out_p = PRICING_PER_MTOK.get(cfg.extraction_model, (1.0, 5.0))
+            in_p, out_p = _pricing_for(cfg.extraction_model)
 
             chapters = [c for c in _chapter_inputs(db, canon)
                         if _state(db, events_scope(cfg, c["book_number"],
@@ -1073,7 +1073,7 @@ class EnrichmentRunner:
 
             def call(system, user, schema, model=None):
                 m = model or cfg.extraction_model
-                m_in, m_out = PRICING_PER_MTOK.get(m, (in_p, out_p))
+                m_in, m_out = _pricing_for(m)
                 r = client.messages.create(
                     model=m, max_tokens=8000, system=system,
                     output_config={"format": {"type": "json_schema", "schema": schema}},
