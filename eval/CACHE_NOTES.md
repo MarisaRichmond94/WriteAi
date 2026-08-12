@@ -1,5 +1,19 @@
 # Prompt-Cache Notes (WP9)
 
+> **Update 2026-08-12 — 1-hour TTL (`PROMPT_CACHE_TTL`).** The analysis below
+> assumed follow-up turns arrive inside the 5-minute cache TTL. They don't:
+> `logs/cost.jsonl` gap analysis over 198 review calls showed a median
+> 17.7-minute gap between turns (126 gaps of 5–60 min, only 18 under 5 min),
+> so cache reads hit on just 2 of 84 recent review calls while every call
+> paid the 1.25x write premium on a ~46K-token system block. `PROMPT_CACHE_TTL`
+> (default `1h`, in `.env`) now marks both breakpoints with
+> `cache_control: {type: ephemeral, ttl: "1h"}`: writes bill at 2x instead of
+> 1.25x, reads at 0.1x, and the prefix survives a whole writing session.
+> `actual_cost_usd` bills writes at the matching multiplier. Set
+> `PROMPT_CACHE_TTL=5m` to restore the byte-identical legacy request shape.
+> Verify with a review follow-up >5 min after the first: its ledger line
+> should show `cache_read_tokens` ≈ the prior call's `cache_write_tokens`.
+
 Diagnosis of why the Anthropic prompt-cache marker in `src/answerer.py`
 `build_request` never engages on the query path, what the bible-injecting
 chat path does, and what the flag-gated fix (`ENABLE_PROMPT_CACHE_V2`)

@@ -83,6 +83,12 @@ class Config:
     log_level: str
     cost_log_enabled: bool = True
     enable_prompt_cache_v2: bool = False
+    # Prompt-cache entry lifetime: "5m" (API default) or "1h". Writes bill at
+    # 1.25x input for 5m entries, 2x for 1h; reads at 0.1x either way. Review
+    # and chat turns land ~10-30 minutes apart in real sessions, so 5m entries
+    # expire between turns and every call re-pays the write premium for
+    # nothing — one follow-up inside the hour already makes 1h cheaper.
+    prompt_cache_ttl: str = "1h"
     enable_note_ranking: bool = False
     continuity_notes_cap: int = 0
     enable_sentiment_v2: bool = False
@@ -145,6 +151,12 @@ def load_config(env_file: Path | None = None) -> Config:
     except re.error as e:
         raise ValueError(f"BOOK_PREFIX_PATTERN is not a valid regex: {e}") from e
 
+    cache_ttl = os.environ.get("PROMPT_CACHE_TTL", "1h").strip().lower()
+    if cache_ttl not in ("5m", "1h"):
+        logging.warning("PROMPT_CACHE_TTL must be 5m or 1h, not %r; using 1h",
+                        cache_ttl)
+        cache_ttl = "1h"
+
     export_raw = os.environ.get("TEXT_EXPORT_DIR", "").strip()
     text_export_dir = _expand(export_raw) if export_raw else None
     if text_export_dir and not text_export_dir.is_dir():
@@ -180,6 +192,7 @@ def load_config(env_file: Path | None = None) -> Config:
         log_level=os.environ.get("LOG_LEVEL", "INFO").upper(),
         cost_log_enabled=_get_bool("COST_LOG_ENABLED", True),
         enable_prompt_cache_v2=_get_bool("ENABLE_PROMPT_CACHE_V2", False),
+        prompt_cache_ttl=cache_ttl,
         enable_note_ranking=_get_bool("ENABLE_NOTE_RANKING", False),
         continuity_notes_cap=_get_int("CONTINUITY_NOTES_CAP", 200),
         enable_sentiment_v2=_get_bool("ENABLE_SENTIMENT_V2", False),

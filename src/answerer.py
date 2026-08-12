@@ -69,6 +69,11 @@ class Answerer:
         # -> request payloads are byte-identical to the legacy shape.
         self.enable_prompt_cache_v2 = getattr(cfg, "enable_prompt_cache_v2",
                                               False)
+        # Cache-entry lifetime. Real review/chat sessions have turns minutes
+        # apart (median gap ~18 min in logs/cost.jsonl), so the API-default
+        # 5-minute entries expired before the follow-up arrived — 2 cache
+        # reads in 84 review calls. "1h" holds the prefix across a session.
+        self.prompt_cache_ttl = getattr(cfg, "prompt_cache_ttl", "5m")
         self.usage = {"input_tokens": 0, "output_tokens": 0,
                       "cache_write_tokens": 0, "cache_read_tokens": 0}
 
@@ -86,11 +91,20 @@ class Answerer:
         # chat and the review pane report as their spend, so an unpriced model
         # must complain rather than quietly bill at the fallback (LOOM-119).
         in_p, out_p = _pricing_for(self.model)
-        # cache writes bill at 1.25x input, cache reads at 0.1x
+        # cache writes bill at 1.25x input for 5m entries, 2x for 1h;
+        # cache reads at 0.1x either way
+        write_mult = 2.0 if self.prompt_cache_ttl == "1h" else 1.25
         return round((self.usage["input_tokens"] * in_p
-                      + self.usage["cache_write_tokens"] * in_p * 1.25
+                      + self.usage["cache_write_tokens"] * in_p * write_mult
                       + self.usage["cache_read_tokens"] * in_p * 0.10
                       + self.usage["output_tokens"] * out_p) / 1_000_000, 4)
+
+    def _cache_control(self) -> dict:
+        """The breakpoint marker for this answerer's TTL. 5m omits the ttl
+        field — byte-identical to the pre-TTL request shape."""
+        if self.prompt_cache_ttl == "1h":
+            return {"type": "ephemeral", "ttl": "1h"}
+        return {"type": "ephemeral"}
 
     def build_request(self, plan: QueryPlan, excerpts: list[dict],
                       notes: list[str],
@@ -135,7 +149,8 @@ class Answerer:
             max_tokens = 12000 if plan.qtype in ("continuity", "general") else 6000
         messages = list(history or [])
         if self.enable_prompt_cache_v2 and messages:
-            messages = self._mark_history_breakpoint(messages)
+            messages = self._mark_history_breakpoint(messages,
+                                                     self._cache_control())
         messages.append({"role": "user", "content": "\n".join(parts)})
         # The quoting instruction is appended in a fixed position (right after
         # the base prompt, before system_extra) so the system string stays
@@ -149,11 +164,12 @@ class Answerer:
         # Below the model's minimum cacheable size this is a silent no-op.
         return {"model": self.model, "max_tokens": max_tokens,
                 "system": [{"type": "text", "text": system,
-                            "cache_control": {"type": "ephemeral"}}],
+                            "cache_control": self._cache_control()}],
                 "messages": messages}
 
     @staticmethod
-    def _mark_history_breakpoint(messages: list[dict]) -> list[dict]:
+    def _mark_history_breakpoint(messages: list[dict],
+                                 cache_control: dict) -> list[dict]:
         """ENABLE_PROMPT_CACHE_V2 only: mark the last content block of the
         last history message with cache_control, so on turn N+1 the whole
         prefix (system + all prior turns) is a cache read instead of a full-
@@ -172,7 +188,7 @@ class Answerer:
                 return messages  # unexpected shape — leave untouched
         else:
             return messages
-        blocks[-1] = {**blocks[-1], "cache_control": {"type": "ephemeral"}}
+        blocks[-1] = {**blocks[-1], "cache_control": cache_control}
         last["content"] = blocks
         messages[-1] = last
         return messages
