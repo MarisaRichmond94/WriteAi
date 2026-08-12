@@ -1059,9 +1059,16 @@ class EnrichmentRunner:
             chrono_books: list[int] = (
                 sorted({c["book_number"] for c in chapters})
                 if getattr(cfg, "enable_story_order", False) else [])
+            # condensed book digests are re-checked for EVERY book, not just
+            # the ones enriched this run: repositioning and GC above can
+            # change a book's summaries without any chapter being re-enriched.
+            # A fresh book costs one hash lookup and no API call.
+            digest_books: list[int] = [r[0] for r in db.execute(
+                "SELECT DISTINCT book_number FROM chunks ORDER BY book_number")]
             self.status.update(state="running", done=0,
                                total=(len(chapters) + len(profiles) + len(rels)
-                                      + len(loc_batches) + len(chrono_books)),
+                                      + len(loc_batches) + len(chrono_books)
+                                      + len(digest_books)),
                                cost_usd=0.0, error=None)
 
             def call(system, user, schema, model=None):
@@ -1273,6 +1280,42 @@ class EnrichmentRunner:
                                     "scripts/resolve_chronology.py): %s",
                                     affected, e)
                 self.status["done"] = done_before + len(chrono_books)
+
+            # condensed book digests (the review/chat bible prefix) — refresh
+            # whichever books' chapter summaries changed, so the small prompt
+            # stays current with no manual step. Hash-guarded: unchanged books
+            # skip at zero API cost. Spend goes to the "digest" cost surface
+            # (logged inside refresh_digests), NOT this run's "enrich" line.
+            # Non-fatal by convention: on failure the digest is merely stale
+            # and review/chat fall back to the full bible;
+            # scripts/build_book_digests.py rebuilds it.
+            if digest_books:
+                done_before = self.status["done"]
+                try:
+                    from types import SimpleNamespace
+
+                    from .digests import digest_source, refresh_digests
+
+                    shim = SimpleNamespace(db=db, canon=canon)
+
+                    def _digest_tick(*_args):
+                        self.status["done"] = min(
+                            self.status["done"] + 1,
+                            done_before + len(digest_books))
+
+                    stats = refresh_digests(
+                        db, cfg, client, digest_books,
+                        source_for=lambda b: digest_source(shim, b),
+                        on_book=_digest_tick)
+                    if stats["built"] or stats["failed"]:
+                        log.info("book digests: %(built)d rebuilt, "
+                                 "%(skipped)d fresh, %(failed)d failed "
+                                 "($%(cost_usd).4f)", stats)
+                except Exception as e:
+                    log.warning("book digest refresh failed (review/chat fall "
+                                "back to full bibles; run "
+                                "scripts/build_book_digests.py): %s", e)
+                self.status["done"] = done_before + len(digest_books)
 
             self._reconcile_directions(db)
             self.status["state"] = "done"

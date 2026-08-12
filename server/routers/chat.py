@@ -13,6 +13,7 @@ from src.query_router import Scope, classify
 
 from ..deps import get_state
 from ..sse import citations_payload, stream_response
+from ..digests import book_digest
 from .books import _build_bible
 
 log = logging.getLogger(__name__)
@@ -98,8 +99,18 @@ def chat_stream(req: ChatRequest):
 
         extra_parts = []
         bible_parts = []
+        latest = max(books) if books else None
         for book_num in books:
             try:
+                # Only the latest selected book gets the full compact bible;
+                # earlier selections ride as stored condensed digests (~1.5K
+                # tokens each vs ~13K), falling back to the full bible when
+                # no fresh digest exists.
+                if book_num != latest:
+                    digest = book_digest(s, book_num)
+                    if digest:
+                        bible_parts.append(digest)
+                        continue
                 _, md = _build_bible(s, book_num, compact=True)
                 bible_parts.append(md)
             except Exception:
@@ -108,7 +119,9 @@ def chat_stream(req: ChatRequest):
             extra_parts.append(
                 "The following condensed story bibles cover the books the "
                 "author has in scope — major characters plus a chapter-by-"
-                "chapter summary of each book. Use them for overarching, "
+                "chapter summary of the latest book (earlier books may "
+                "appear as condensed digests of their arc, reveals, and "
+                "outcomes). Use them for overarching, "
                 "cross-book questions; the retrieved excerpts remain the "
                 "source of truth for verbatim detail.\n\n"
                 + "\n\n---\n\n".join(bible_parts))

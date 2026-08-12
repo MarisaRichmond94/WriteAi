@@ -16,6 +16,7 @@ from src.query_router import QueryPlan, Scope
 from .. import outline_store
 from ..deps import get_state
 from ..sse import citations_payload, stream_response
+from ..digests import book_digest
 from .books import _build_bible
 
 log = logging.getLogger(__name__)
@@ -109,8 +110,10 @@ STORY_NOTES_HEADER = ("== STORY SO FAR (events from earlier in the series, "
 # system block — follow-up turns in a session read it at the cache rate
 BIBLE_PREAMBLE = (
     "Condensed story bibles for the series so far follow: chapter-by-chapter "
-    "summaries of the earlier books, and the major characters (traits, arcs, "
-    "relationships) of the book under review. Background reference assembled "
+    "summaries of recent earlier books (older books may appear as condensed "
+    "digests covering their arc, reveals, and outcomes), and the major "
+    "characters (traits, arcs, relationships) of the book under review. "
+    "Background reference assembled "
     "from the manuscripts — use it to read the chapter the way someone who "
     "knows the series would, not as material to review. Note the character "
     "profiles and arcs summarize each book as a whole, so they may reach past "
@@ -520,6 +523,15 @@ def review_stream(req: ReviewRequest):
         bible_parts = []
         for bn in range(1, req.book + 1):
             try:
+                # Books two or more behind the reviewed one ride as stored
+                # condensed digests (~1.5K tokens each vs ~12K for a full
+                # chapter-by-chapter bible). The previous book keeps full
+                # detail — its callbacks are the ones a new chapter leans on.
+                if bn <= req.book - 2:
+                    digest = book_digest(s, bn)
+                    if digest:
+                        bible_parts.append(digest)
+                        continue
                 _, md = _build_bible(s, bn, compact=True,
                                      characters=(bn == req.book),
                                      chapters=(bn < req.book))
