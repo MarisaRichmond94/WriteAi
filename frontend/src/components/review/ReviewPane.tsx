@@ -388,10 +388,10 @@ export default function ReviewPane() {
   const [draft, setDraft] = useState<ChapterDraft | null>(null);
   const [draftLoading, setDraftLoading] = useState(false);
 
-  // Cost controls: the Ideal Version rewrite is the dominant output cost, so
-  // it defaults ON for the first review of a conversation and auto-switches
-  // OFF (with a drop to the cheapest model) for follow-up iterations.
-  const [includeIdeal, setIncludeIdeal] = useState(true);
+  // Cost controls: the Ideal Version rewrite is the dominant output cost and
+  // rarely useful on a first pass, so it stays OFF unless toggled on for a
+  // review; follow-up iterations also drop to the cheapest model.
+  const [includeIdeal, setIncludeIdeal] = useState(false);
   const autoTunedRef = useRef(false);
   // one resync nudge per book when the canon-dependent persona is picked
   const hardcoreNudgedRef = useRef<Set<string>>(new Set());
@@ -441,10 +441,11 @@ export default function ReviewPane() {
   const bookOptions = books.map((b) => b.name);
   const selectedBookObj = books.find((b) => b.name === filterBook) ?? null;
 
-  // A fresh conversation gets the Ideal Version again; the auto-downshift to
-  // the cheap model is undone only if it was ours (a manual pick sticks).
+  // A fresh conversation resets to the targeted-suggestions default (Ideal
+  // Version off); the auto-downshift to the cheap model is undone only if it
+  // was ours (a manual pick sticks).
   const resetCostControls = () => {
-    setIncludeIdeal(true);
+    setIncludeIdeal(false);
     if (autoTunedRef.current) setModel(defaultModel);
     autoTunedRef.current = false;
   };
@@ -1098,7 +1099,7 @@ export default function ReviewPane() {
                           <p className="mt-0.5 text-[10px] text-ink-muted leading-relaxed">
                             {includeIdeal
                               ? "Full tracked-changes rewrite on next review. Auto-disables after round 1."
-                              : "Only marks passages needing work. Toggle on for a full rewrite."}
+                              : "Targeted, prioritized suggestions only. Toggle on for a full rewrite."}
                           </p>
                         </div>
                         <div className={clsx(

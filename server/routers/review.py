@@ -90,9 +90,10 @@ REVIEW_SYSTEM = """You are giving the author feedback on a chapter of her own ma
 
 The chapter marked CHAPTER UNDER REVIEW is the document you are reviewing — all of your feedback must be about that chapter. The STORY SO FAR notes, condensed story bibles, and manuscript excerpts are background material, provided so you can read the chapter the way someone who knows the series would. Do not review, summarize, or give feedback on the background material itself. Cite (Book N, Chapter M) when a point rests on earlier material. If the background is insufficient to judge something, say so rather than guessing. Never invent series details that are not present in the provided material."""
 
-# Appended when the request asks for it (the UI defaults it ON for the
-# first review of a session and OFF for follow-up iterations — the rewrite
-# is the dominant output cost).
+# Appended when the request opts in via the UI's Ideal Version toggle —
+# the rewrite is the dominant output cost and rarely earns it on a first
+# pass, so it is off by default and the targeted suggestions below take
+# its place.
 IDEAL_VERSION_INSTRUCTION = """When the author asks for a review of the chapter (as opposed to a specific follow-up question), end your reply with a section headed "## Ideal Version" — your best revision of the chapter with your recommended changes applied, marked up as tracked changes:
 - wrap every addition or rewritten passage in **bold**
 - wrap every deletion in ~~strikethrough~~ (a replacement shows the old text struck through, immediately followed by the bolded new text)
@@ -101,7 +102,7 @@ Include only paragraphs you touched, in their original order. Begin with `...` i
 Preserve paragraphing in the passages you do include: each paragraph on its own line with a BLANK LINE between paragraphs (your reply renders as markdown, which merges single line breaks — without the blank lines the whole chapter congeals into one block). A deleted paragraph stays in place as its own struck-through paragraph; an added one gets its own bolded paragraph.
 Reserve bold EXCLUSIVELY for marked additions throughout your reply — never use it for emphasis or headings-in-prose. For follow-up questions, include a revised passage with the same markup only when the author asks for a rewrite."""
 
-NO_IDEAL_INSTRUCTION = """Do not produce a full rewritten version of the chapter. If a passage needs rework, quote the specific lines and show your suggested replacement inline — wrap suggested new text in **bold** and text to delete in ~~strikethrough~~ — but keep it to the passages that matter, not the whole chapter."""
+NO_IDEAL_INSTRUCTION = """Do not produce a full rewritten version of the chapter. When the author asks for a review of the chapter (as opposed to a specific follow-up question), end your reply with a section headed "## What To Revise" — the 3-5 changes that would most improve the chapter, in priority order, judged by your persona's priorities. For each: quote the passage (or name the exact moment), say what isn't working and why it matters to a reader like you, and give a concrete fix — where a line-level rewrite helps, show it inline with suggested new text in **bold** and text to delete in ~~strikethrough~~. Keep suggestions to the passages that matter, not the whole chapter; if fewer than three changes are genuinely worth making, list only those rather than inventing work. Reserve bold EXCLUSIVELY for suggested new text throughout your reply — never for emphasis."""
 
 STORY_NOTES_HEADER = ("== STORY SO FAR (events from earlier in the series, "
                       "for continuity checking — not under review) ==")
@@ -172,7 +173,7 @@ class ReviewRequest(BaseModel):
     focus: str = "Casual Reader"
     message: str = ""
     conversation_history: list[dict] = []
-    include_ideal: bool = True        # append the tracked-changes rewrite
+    include_ideal: bool = False       # opt in to the tracked-changes rewrite
     model: str | None = None          # per-request model (None = settings default)
 
 
