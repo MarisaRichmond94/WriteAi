@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException
 
 from config import REPO_ROOT
 
-from .. import audit, writer_store
+from .. import audit, enrich, writer_store
 from ..deps import get_state
 
 log = logging.getLogger(__name__)
@@ -26,6 +26,18 @@ router = APIRouter(prefix="/api")
 _ingest = {"proc": None, "log_path": None, "started_at": None,
            "post_processing": False}
 _ingest_lock = threading.Lock()
+
+
+def _ingest_active() -> bool:
+    """Whether an ingest subprocess or its post-ingest writes are in flight —
+    the window in which the enrichment runner must not restart itself, because
+    the numbering a new pass would snapshot is still being rewritten."""
+    proc = _ingest["proc"]
+    return (proc is not None and proc.poll() is None) \
+        or bool(_ingest["post_processing"])
+
+
+enrich.runner.ingest_active = _ingest_active
 
 
 @router.get("/books")
@@ -599,12 +611,21 @@ def _auto_enrich(reason: str = "re-ingest") -> None:
     complete" notification. Runs on the ingest watcher thread;
     get_state().db is thread-local, so the preview read is safe."""
     from ..canonical import Canonicalizer
-    from .. import enrich
 
     if not writer_store.ui_settings().get("auto_enrich_enabled"):
         return
     if enrich.runner.running:
-        log.info("auto-enrich: skipped, an enrichment run is already in progress")
+        # Never drop a trigger. This is exactly how 2026-08-12 stuck: a
+        # numbering-change run arrived while a 61-chapter run was mid-flight,
+        # was skipped here, and the stale rows the in-flight run was writing
+        # never got corrected. Queued, the in-flight run reruns when it
+        # finishes (or the next post-ingest watcher starts it).
+        enrich.runner.request_rerun(reason)
+        log.info("auto-enrich: a run is already in flight — rerun queued (%s)",
+                 reason)
+        audit.log_event("enrich_rerun_queued",
+                        "enrichment rerun queued behind the in-flight run",
+                        reason=reason)
         return
     s = get_state()
     try:
@@ -679,6 +700,10 @@ def ingest_run(book: int | None = None, full: bool = False,
         # re-ingest of a single book); ingest.py only forbids --full + --re-extract.
         if full:
             cmd.append("--full")
+        # Before the subprocess can touch the DB: an enrichment pass in flight
+        # checks this generation before every chapter write and stops rather
+        # than keep writing rows keyed by numbers this ingest may rewrite.
+        enrich.runner.note_ingest_started()
         with open(log_path, "w") as out:
             _ingest["proc"] = subprocess.Popen(
                 cmd, cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT,
@@ -713,6 +738,7 @@ def ingest_run(book: int | None = None, full: bool = False,
                 # write lock. Cleared in finally so a failure can't wedge it on.
                 with _ingest_lock:
                     _ingest["post_processing"] = True
+                desynced = 0
                 try:
                     # chapters may have been renumbered or removed by this sync:
                     # purge enrichment rows (events/summaries) stranded at chapter
@@ -720,25 +746,36 @@ def ingest_run(book: int | None = None, full: bool = False,
                     # numbering back as duplicate "earlier" story material.
                     # get_state().db is thread-local — safe from this thread.
                     try:
-                        from ..enrich import (gc_orphans,
-                                              reposition_renumbered_chapters)
                         # Relocate summaries/events onto their chapters'
                         # current numbers first. This is what keeps the plan
                         # page correct straight after a sync that inserted a
                         # chapter, rather than only once enrichment next runs.
-                        moved = reposition_renumbered_chapters(
+                        moved = enrich.reposition_renumbered_chapters(
                             get_state().db, get_state().cfg)
                         if moved:
                             audit.log_event(
                                 "enrich_repositioned",
                                 "moved enrichment rows onto renumbered chapters",
                                 rows=moved)
-                        removed = gc_orphans(get_state().db)
+                        removed = enrich.gc_orphans(get_state().db)
                         if removed:
                             audit.log_event(
                                 "enrich_gc",
                                 "purged stale enrichment rows after re-ingest",
                                 rows=removed)
+                        # Whatever the two passes above could not fix —
+                        # unstamped or mis-stamped rows in a book whose
+                        # manifest is trustworthy — gets its cache scopes
+                        # dirtied so the next enrichment run regenerates it,
+                        # and forces that run below.
+                        desynced = enrich.dirty_desynced_rows(
+                            get_state().db, get_state().cfg)
+                        if desynced:
+                            audit.log_event(
+                                "enrich_desynced",
+                                "found enrichment rows with untrusted identity "
+                                "— marked for regeneration",
+                                chapters=desynced)
                     except Exception:
                         log.exception("post-ingest enrichment GC failed")
                     # The subprocess rewrote the Chroma segments under this
@@ -782,6 +819,25 @@ def ingest_run(book: int | None = None, full: bool = False,
                             removed=[c for _b, c in removed])
                         enrich_after = True
                         reason = "chapter numbering change"
+                if not enrich_after and desynced:
+                    audit.log_event(
+                        "enrich_forced",
+                        "desynced enrichment rows found — enriching regardless "
+                        "of cadence", chapters=desynced)
+                    enrich_after = True
+                    reason = "desynced enrichment rows"
+                # A trigger that arrived while a previous run was in flight
+                # (queued by _auto_enrich or by the run stopping for this very
+                # ingest). Consumed even when a run is due anyway — that run
+                # covers the queued work.
+                queued = enrich.runner.consume_rerun()
+                if not enrich_after and queued:
+                    audit.log_event(
+                        "enrich_forced",
+                        "starting the enrichment rerun queued behind the "
+                        "previous run", queued_reason=queued)
+                    enrich_after = True
+                    reason = "queued rerun"
                 if enrich_after:
                     _auto_enrich(reason)
             if code != 0:

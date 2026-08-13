@@ -464,6 +464,74 @@ def gc_orphans(db: sqlite3.Connection,
     return total
 
 
+def dirty_desynced_rows(db: sqlite3.Connection, cfg) -> int:
+    """Force regeneration for enrichment rows whose identity cannot be trusted.
+
+    In a canon-exported book whose manifest matches its indexed prose, every
+    summary/event row SHOULD carry the loom_chapter_id the manifest assigns to
+    its number: enrichment stamps on write, and reposition keeps stamped rows
+    at their chapter's current number. A row that is unstamped, or stamped
+    with a cuid the manifest puts at a different number, is the residue of a
+    run that raced a renumbering (2026-08-12: an ingest renumbered book 3
+    mid-run and 59 chapters were written unstamped at stale numbers).
+    Reposition deliberately never moves such rows, gc_orphans cannot collect
+    them (their numbers exist), and the identity-keyed cache believes their
+    chapters are done — so without this sweep they are served wrong forever.
+
+    The cure is to delete the chapter's enrich_state scope so the next run
+    regenerates it from current prose. That is safe by construction: content
+    is regenerated, never guessed, and re-enriching an already-correct chapter
+    just rewrites the same summary at one model call. Books with no manifest,
+    or whose manifest is behind their prose, are skipped whole — their rows
+    are legitimately unstamped and `events_scope` still keys them by number.
+
+    Returns the number of chapters marked dirty.
+    """
+    ensure_tables(db)
+    try:
+        books = [r[0] for r in db.execute(
+            "SELECT DISTINCT book_number FROM chunks")]
+    except sqlite3.OperationalError:  # ingest has never run
+        return 0
+
+    dirtied = 0
+    for book in books:
+        _loom_ids(cfg, book, 0)  # resolve + cache the book's number->cuid map
+        hit = _LOOM_ID_CACHE.get(book)
+        if hit is None or not hit[0] or not hit[2]:
+            continue  # never canon-exported: unstamped is the correct state
+        if not identity_matches_prose(db, cfg, book):
+            continue  # stamps cannot be judged against a manifest that is behind
+        by_number = hit[2]
+        suspect: set[int] = set()
+        for table in ("chapter_summaries", "events"):
+            for ch, cid in db.execute(
+                    f"SELECT DISTINCT chapter_number, loom_chapter_id "
+                    f"FROM {table} WHERE book_number = ?", (book,)):
+                expected = by_number.get(ch)
+                if expected is None:
+                    continue  # a number the manifest doesn't know: gc's problem
+                if not cid or cid != expected:
+                    suspect.add(ch)
+        for ch in sorted(suspect):
+            # Both keying schemes: the cuid scope current runs write, and the
+            # numeric scope rows from before the book's first export may hold.
+            for scope in (f"events:{by_number[ch]}", f"events:{book}.{ch}"):
+                db.execute("DELETE FROM enrich_state WHERE scope = ?", (scope,))
+        if suspect:
+            log.warning(
+                "book %s: chapter(s) %s hold enrichment rows that are unstamped "
+                "or stamped against a different numbering — marked dirty so the "
+                "next enrichment run regenerates them", book, sorted(suspect)[:10])
+        dirtied += len(suspect)
+
+    if dirtied:
+        db.commit()
+    else:
+        db.rollback()  # see gc_orphans: never leave a write txn open
+    return dirtied
+
+
 _LOOM_ID_CACHE: dict[int, tuple[str | None, str | None, dict[int, str]]] = {}
 
 # Per book: (manifest path, stat signature) as of the cached entry above.
@@ -1001,6 +1069,12 @@ def preview(db, cfg, canon) -> dict:
 
 # ── run ─────────────────────────────────────────────────────────────────────
 
+class _IngestInterrupted(Exception):
+    """An ingest started while this pass was writing chapter rows. The rows it
+    would write next are keyed by numbers the ingest may be rewriting, so the
+    pass stops here and reruns once the DB is quiet (see request_rerun)."""
+
+
 class EnrichmentRunner:
     """Background enrichment with observable progress."""
 
@@ -1008,10 +1082,50 @@ class EnrichmentRunner:
         self.status = {"state": "idle", "done": 0, "total": 0, "cost_usd": 0.0,
                        "error": None}
         self._thread: threading.Thread | None = None
+        self._rerun_reason: str | None = None
+        self._ingest_generation = 0
+        # Wired by routers.books at import: whether an ingest subprocess (or
+        # its post-processing) is currently writing the DB. The runner must
+        # not restart itself while one is — the rerun would race the very
+        # renumbering it exists to absorb. The default keeps this module
+        # importable standalone (tests, scripts).
+        self.ingest_active = lambda: False
 
     @property
     def running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def rerun_pending(self) -> bool:
+        return self._rerun_reason is not None
+
+    def request_rerun(self, reason: str) -> None:
+        """Ask for another pass when the current one finishes.
+
+        This is how a trigger that fires mid-run survives instead of being
+        dropped: the 2026-08-12 incident was a forced numbering-change run
+        arriving while a 61-chapter run was in flight, being skipped, and the
+        shifted rows the in-flight run wrote never getting corrected."""
+        self._rerun_reason = reason
+
+    def consume_rerun(self) -> str | None:
+        """Claim the queued rerun (reason, or None). The caller owns starting
+        the pass it stands for — or verifying via preview that none is needed."""
+        reason, self._rerun_reason = self._rerun_reason, None
+        return reason
+
+    def note_ingest_started(self) -> None:
+        """Called by ingest_run for every ingest, so an in-flight pass can
+        notice the numbering under its snapshot may be moving (see
+        _check_ingest_generation)."""
+        self._ingest_generation += 1
+
+    def _check_ingest_generation(self, at_snapshot: int, remaining: int) -> None:
+        if self._ingest_generation != at_snapshot:
+            raise _IngestInterrupted(
+                f"an ingest started mid-run with {remaining} chapter(s) left — "
+                "their numbers were snapshotted before it and can no longer be "
+                "trusted")
 
     def start(self, db_path, cfg, canon_factory) -> bool:
         if self.running:
@@ -1022,6 +1136,31 @@ class EnrichmentRunner:
         return True
 
     def _run(self, db_path, cfg, canon_factory) -> None:
+        """Drive passes until no rerun is queued.
+
+        A rerun queued behind an active ingest is left queued: the post-ingest
+        watcher (_watch in routers/books.py) consumes it once the subprocess
+        and its post-processing are done, which is the earliest moment a new
+        pass could read a stable numbering."""
+        while True:
+            self._run_once(db_path, cfg, canon_factory)
+            if self._rerun_reason is None:
+                return
+            if self.ingest_active():
+                log.info("enrichment: rerun queued (%s) but an ingest is "
+                         "active — the post-ingest watcher starts it",
+                         self._rerun_reason)
+                return
+            reason = self.consume_rerun()
+            log.info("enrichment: rerunning immediately (%s)", reason)
+            try:
+                from . import audit
+                audit.log_event("enrich_rerun", "enrichment rerunning",
+                                reason=reason)
+            except Exception:
+                pass
+
+    def _run_once(self, db_path, cfg, canon_factory) -> None:
         import anthropic
         run_usage = {"input_tokens": 0, "output_tokens": 0, "api_calls": 0}
         t0 = time.monotonic()
@@ -1040,6 +1179,16 @@ class EnrichmentRunner:
             if removed:
                 log.info("enrichment GC: removed %d stale row(s) for chapters "
                          "no longer in the index", removed)
+            # Rows neither of the two passes above can fix — unstamped or
+            # mis-stamped in a book whose manifest is trustworthy — get their
+            # cache scopes dirtied here, so THIS run's snapshot below already
+            # includes them.
+            dirty_desynced_rows(db, cfg)
+            # The numbering this pass is about to snapshot. Checked before
+            # every chapter write: an ingest starting mid-pass may renumber
+            # the chapters still to come, and rows written from the stale
+            # snapshot would sit at wrong numbers (2026-08-12).
+            generation = self._ingest_generation
             client = anthropic.Anthropic(api_key=cfg.anthropic_api_key or None,
                                          max_retries=4)
             in_p, out_p = _pricing_for(cfg.extraction_model)
@@ -1097,7 +1246,8 @@ class EnrichmentRunner:
             # stamp half a book and leave the other half bare.
             can_stamp = {b: identity_matches_prose(db, cfg, b)
                          for b in sorted({c["book_number"] for c in chapters})}
-            for c in chapters:
+            for i, c in enumerate(chapters):
+                self._check_ingest_generation(generation, len(chapters) - i)
                 try:
                     data = call(EVENTS_PROMPT, json.dumps(
                         {k: v for k, v in c.items() if k != "content_hash"},
@@ -1326,15 +1476,29 @@ class EnrichmentRunner:
                                 cost_usd=self.status["cost_usd"])
             except Exception:
                 pass
+            if self._rerun_reason is None:  # another pass follows: hold the bell
+                try:
+                    from . import notify
+                    notify.add("extraction_complete", "Enrichment complete",
+                               f"{self.status['total']} tasks processed "
+                               f"(${self.status['cost_usd']:.2f}). Events, summaries, "
+                               "and profiles are up to date.",
+                               action_url="/?pane=timeline")
+                except Exception:
+                    log.exception("failed to write enrichment notification")
+        except _IngestInterrupted as e:
+            # Not a failure: completed chapters are committed and their cache
+            # scopes written; the queued rerun covers everything left.
+            log.warning("enrichment pass stopped early: %s", e)
+            self.request_rerun(str(e))
+            self.status.update(state="interrupted", error=None)
             try:
-                from . import notify
-                notify.add("extraction_complete", "Enrichment complete",
-                           f"{self.status['total']} tasks processed "
-                           f"(${self.status['cost_usd']:.2f}). Events, summaries, "
-                           "and profiles are up to date.",
-                           action_url="/?pane=timeline")
+                from . import audit
+                audit.log_event("enrich_interrupted",
+                                "enrichment pass stopped for an ingest; "
+                                "rerun queued", reason=str(e))
             except Exception:
-                log.exception("failed to write enrichment notification")
+                pass
         except Exception as e:
             log.exception("enrichment run failed")
             self.status.update(state="error", error=str(e))
