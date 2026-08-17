@@ -110,10 +110,11 @@ STORY_NOTES_HEADER = ("== STORY SO FAR (events from earlier in the series, "
 # rides in system_extra (with the persona) so it lands inside the cached
 # system block — follow-up turns in a session read it at the cache rate
 BIBLE_PREAMBLE = (
-    "Condensed story bibles for the series so far follow: chapter-by-chapter "
-    "summaries of recent earlier books (older books may appear as condensed "
-    "digests covering their arc, reveals, and outcomes), and the major "
-    "characters (traits, arcs, relationships) of the book under review. "
+    "Condensed story bibles for the series so far follow: earlier books as "
+    "condensed digests covering their arc, reveals, and outcomes (a book "
+    "may appear as chapter-by-chapter summaries where no digest exists), "
+    "and the major characters of this chapter (traits, arcs, relationships) "
+    "for the book under review. "
     "Background reference assembled "
     "from the manuscripts — use it to read the chapter the way someone who "
     "knows the series would, not as material to review. Note the character "
@@ -524,18 +525,25 @@ def review_stream(req: ReviewRequest):
         bible_parts = []
         for bn in range(1, req.book + 1):
             try:
-                # Books two or more behind the reviewed one ride as stored
-                # condensed digests (~1.5K tokens each vs ~12K for a full
-                # chapter-by-chapter bible). The previous book keeps full
-                # detail — its callbacks are the ones a new chapter leans on.
-                if bn <= req.book - 2:
+                # Every earlier book rides as a stored condensed digest
+                # (~1.5K tokens each vs ~12K for a full chapter-by-chapter
+                # bible). The previous book used to keep full detail for its
+                # callbacks, but the ledger showed the system block dominating
+                # review cost (~50%), so it is condensed too; book_digest
+                # falls back to the full bible when no digest is stored.
+                if bn < req.book:
                     digest = book_digest(s, bn)
                     if digest:
                         bible_parts.append(digest)
                         continue
+                # current book: character profiles only, filtered to the
+                # chapter's cast — profiles for characters who never appear
+                # in the chapter under review are dead weight in the prompt
                 _, md = _build_bible(s, bn, compact=True,
                                      characters=(bn == req.book),
-                                     chapters=(bn < req.book))
+                                     chapters=(bn < req.book),
+                                     mention_filter=(text if bn == req.book
+                                                     else None))
                 bible_parts.append(md)
             except Exception:
                 log.warning("review: could not build bible for book %s", bn)

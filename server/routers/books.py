@@ -311,7 +311,8 @@ def _ch_label(n: int) -> str:
 
 
 def _build_bible(s, book: int, compact: bool = False,
-                 characters: bool = True, chapters: bool = True) -> tuple[str, str]:
+                 characters: bool = True, chapters: bool = True,
+                 mention_filter: str | None = None) -> tuple[str, str]:
     """(title, markdown). Assembled entirely from extracted/enriched data —
     deterministic, zero LLM cost, nothing invented.
 
@@ -321,7 +322,14 @@ def _build_bible(s, book: int, compact: bool = False,
 
     characters/chapters drop whole sections — the review pane sends several
     bibles at once and skips the sections that would duplicate each other
-    (character profiles are series-global, so one copy suffices)."""
+    (character profiles are series-global, so one copy suffices).
+
+    mention_filter, when given, is a reference text (the review pane passes
+    the chapter under review): character profiles are kept only for
+    characters whose name or alias appears in it, so the block carries the
+    chapter's cast instead of the book's. Falls back to the unfiltered list
+    when nothing matches (an all-new-cast chapter shouldn't lose every
+    profile). Deterministic for a given text, so cache-safe."""
     db = s.db
     row = db.execute("SELECT DISTINCT book_title FROM chunks WHERE book_number = ?",
                      (book,)).fetchone()
@@ -401,6 +409,13 @@ def _build_bible(s, book: int, compact: bool = False,
         out("## Characters")
         out("")
         major = [(n, e) for n, e in in_book if n >= 3]
+        if mention_filter is not None:
+            hay = mention_filter.lower()
+            mentioned = [(n, e) for n, e in major
+                         if e.name.lower() in hay
+                         or any(a.lower() in hay for a in e.aliases)]
+            if mentioned:
+                major = mentioned
         if compact:
             # POVs always make the cut; fill the rest by appearance count
             major = ([(n, e) for n, e in major if e.name in pov_counts]
