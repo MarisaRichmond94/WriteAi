@@ -23,7 +23,8 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 # Reviewer personas: each reads the same chapter with different priorities,
-# expertise, and voice. The persona rides in system_extra under REVIEW_SYSTEM.
+# expertise, and voice. The persona rides in the volatile system block after
+# the cached bible prefix (see answerer.build_request's system_volatile).
 FOCUS_PROMPTS = {
     "Literary Agent": (
         "REVIEWER PERSONA: a seasoned literary agent reading this chapter the "
@@ -107,8 +108,9 @@ NO_IDEAL_INSTRUCTION = """Do not produce a full rewritten version of the chapter
 STORY_NOTES_HEADER = ("== STORY SO FAR (events from earlier in the series, "
                       "for continuity checking — not under review) ==")
 
-# rides in system_extra (with the persona) so it lands inside the cached
-# system block — follow-up turns in a session read it at the cache rate
+# rides in system_extra so it lands inside the stable cached system block —
+# every turn in a session reads it at the cache rate, even across persona
+# or Ideal-toggle changes (those live in the volatile block after it)
 BIBLE_PREAMBLE = (
     "Condensed story bibles for the series so far follow: earlier books as "
     "condensed digests covering their arc, reveals, and outcomes (a book "
@@ -517,11 +519,12 @@ def review_stream(req: ReviewRequest):
             question=f"{chapter_block}\n\n{question}",
             qtype="general")
 
-        # condensed story bibles (chapter summaries for the earlier books,
-        # character profiles for the reviewed book) ride in system_extra with
-        # the persona: deterministic, zero LLM cost to build, and inside the
-        # cached system block so follow-up turns read them at the cache rate
-        extra_parts = [FOCUS_PROMPTS[req.focus]]
+        # condensed story bibles (digests for earlier books, character
+        # profiles for the reviewed book) ride alone in system_extra:
+        # deterministic, zero LLM cost to build, and inside the STABLE cached
+        # system block so every turn reads them at the cache rate — including
+        # turns where the persona or Ideal toggle changed (those ride in
+        # system_volatile, after the stable prefix)
         bible_parts = []
         for bn in range(1, req.book + 1):
             try:
@@ -547,22 +550,29 @@ def review_stream(req: ReviewRequest):
                 bible_parts.append(md)
             except Exception:
                 log.warning("review: could not build bible for book %s", bn)
-        if bible_parts:
-            extra_parts.append(BIBLE_PREAMBLE + "\n\n"
-                               + "\n\n---\n\n".join(bible_parts))
-        # forward context for the author-side personas only — the reader
-        # personas review without knowing what comes next
-        if req.focus in FORWARD_PERSONAS:
-            upcoming = _upcoming(s, req.book, req.chapter)
-            if upcoming:
-                extra_parts.append(UPCOMING_HEADER + "\n" + "\n".join(upcoming)
-                                   + "\n\n" + UPCOMING_INSTRUCTION)
+        system_extra = (BIBLE_PREAMBLE + "\n\n"
+                        + "\n\n---\n\n".join(bible_parts)) if bible_parts else ""
 
         answerer = s.new_answerer(model=req.model)
         history = _condense_history(req.conversation_history)
         # the Ideal Version section rewrites the whole chapter with markup —
         # far past the default 12K output budget
         ideal = IDEAL_VERSION_INSTRUCTION if req.include_ideal else NO_IDEAL_INSTRUCTION
+        # persona + Ideal toggle + forward context are the parts of the
+        # system prompt that change between reviews. They ride in
+        # system_volatile — a second system block with its own cache
+        # breakpoint AFTER the stable bible prefix — so switching persona or
+        # flipping the toggle re-writes only this small block while the
+        # bible-sized prefix stays a cache read.
+        volatile_parts = [FOCUS_PROMPTS[req.focus], ideal]
+        # forward context for the author-side personas only — the reader
+        # personas review without knowing what comes next
+        if req.focus in FORWARD_PERSONAS:
+            upcoming = _upcoming(s, req.book, req.chapter)
+            if upcoming:
+                volatile_parts.append(UPCOMING_HEADER + "\n"
+                                      + "\n".join(upcoming)
+                                      + "\n\n" + UPCOMING_INSTRUCTION)
         # ahead of the reply, so the writer knows the review is running on
         # thinner context while she reads it — not after she has acted on it
         if degraded:
@@ -577,8 +587,9 @@ def review_stream(req: ReviewRequest):
                                "draft_rereview": bool(req.previous_text)}):
             for delta in answerer.answer_stream(review_plan, excerpts, notes,
                                                 history=history,
-                                                system_extra="\n\n".join(extra_parts),
-                                                system_base=f"{REVIEW_SYSTEM}\n\n{ideal}",
+                                                system_extra=system_extra,
+                                                system_base=REVIEW_SYSTEM,
+                                                system_volatile="\n\n".join(volatile_parts),
                                                 notes_header=STORY_NOTES_HEADER,
                                                 max_tokens=32000 if req.include_ideal else 12000):
                 yield {"type": "chunk", "content": delta}

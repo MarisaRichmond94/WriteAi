@@ -111,10 +111,20 @@ class Answerer:
                       history: list[dict] | None = None,
                       system_extra: str = "",
                       system_base: str | None = None,
+                      system_volatile: str = "",
                       notes_header: str | None = None,
                       max_tokens: int | None = None) -> dict:
         """Assemble the messages.create kwargs. Shared by the blocking
-        answer() path and the server's SSE streaming path."""
+        answer() path and the server's SSE streaming path.
+
+        system_extra is STABLE reference material (story bibles) that joins
+        the base prompt inside the first cached system block. system_volatile
+        is per-request instruction text (the review pane's persona and Ideal
+        Version toggle) that becomes a SECOND system block with its own cache
+        breakpoint — so a toggle flip re-writes only that small block while
+        the bible-sized prefix ahead of it stays a cache read. Empty
+        system_volatile keeps the single-block request shape byte-identical
+        to the legacy form."""
         parts: list[str] = []
 
         if notes:
@@ -162,9 +172,17 @@ class Answerer:
         # e.g. Explore's story bibles). Messages come after the breakpoint, so
         # follow-up turns reuse the cache as long as the system text is stable.
         # Below the model's minimum cacheable size this is a silent no-op.
+        system_blocks = [{"type": "text", "text": system,
+                          "cache_control": self._cache_control()}]
+        if system_volatile:
+            # own breakpoint: an unchanged toggle set reads stable+volatile;
+            # a changed one still reads the stable prefix and re-writes only
+            # this block. With the history breakpoint that is 3 of the API's
+            # max 4.
+            system_blocks.append({"type": "text", "text": system_volatile,
+                                  "cache_control": self._cache_control()})
         return {"model": self.model, "max_tokens": max_tokens,
-                "system": [{"type": "text", "text": system,
-                            "cache_control": self._cache_control()}],
+                "system": system_blocks,
                 "messages": messages}
 
     @staticmethod
@@ -175,7 +193,8 @@ class Answerer:
         prefix (system + all prior turns) is a cache read instead of a full-
         price re-process. String content is converted to the block form —
         semantically identical on the wire, required to carry the marker.
-        Two breakpoints total (system + here), well under the API's max 4.
+        Up to three breakpoints total (system, optional volatile system
+        block, here), under the API's max 4.
         Copies, never mutates, the caller's message dicts."""
         messages = list(messages)
         last = dict(messages[-1])
@@ -206,6 +225,7 @@ class Answerer:
                       notes: list[str], history: list[dict] | None = None,
                       system_extra: str = "",
                       system_base: str | None = None,
+                      system_volatile: str = "",
                       notes_header: str | None = None,
                       max_tokens: int | None = None):
         """Generator of text deltas; records usage when the stream ends —
@@ -214,7 +234,8 @@ class Answerer:
         output it had produced, so the partial snapshot gets recorded rather
         than dropped."""
         request = self.build_request(plan, excerpts, notes, history, system_extra,
-                                     system_base, notes_header, max_tokens)
+                                     system_base, system_volatile, notes_header,
+                                     max_tokens)
         usage = None
         try:
             with self.client.messages.stream(**request) as stream:
