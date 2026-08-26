@@ -1,0 +1,54 @@
+[project]
+name = "writeai"
+version = "1.0.0"
+description = "Manuscript index and query engine over a Pages/docx book series."
+requires-python = ">=3.14"
+
+dependencies = [
+    # Phase 3+ — LLM metadata extraction and query answering
+    # Pinned below 1.0: src/answerer.py builds an `httpx.Timeout` for the
+    # client, and anthropic 1.x is built on httpx2 and rejects it. Lift the
+    # ceiling as part of a deliberate SDK upgrade, not a packaging change.
+    "anthropic>=0.40,<1",
+
+    # Phase 4+ — vector store and embeddings
+    "chromadb>=0.5",
+    "sentence-transformers>=3.0",   # only needed if EMBEDDING_PROVIDER=local
+    "einops>=0.8",                  # required by the nomic embedding models
+
+    # Settings TUI
+    "questionary>=2.0",
+
+    # Web UI backend (frontend lives in frontend/, built with npm)
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "python-multipart>=0.0.9",      # FastAPI Form/UploadFile endpoints in server/
+]
+
+[project.optional-dependencies]
+# Only needed if EMBEDDING_PROVIDER=openai — install with `uv sync --extra openai`
+openai = ["openai>=1.40"]
+# PDF text extraction fallback (.pdf sources or .pages QuickLook previews)
+pdf = ["pypdf>=4.0"]
+
+[tool.uv]
+# Application, not a distributable package: flat modules at the repo root
+# (config.py, settings.py, ingest.py, query.py) plus src/, server/, scripts/.
+package = false
+
+# Versions carried over from the pre-uv venv. The floors above are the real
+# minimums; these hold the exact versions the current data/chroma_db index was
+# built against, so `uv sync` can't quietly move the embedding stack underneath
+# it. Lifting the first group means re-embedding — plan a full re-ingest before
+# touching them. The second group is server-side only and safe to lift.
+constraint-dependencies = [
+    "sentence-transformers==5.6.0",
+    "torch==2.12.1",
+    "numpy==2.5.0",
+    "chromadb==1.5.9",
+    "einops==0.8.2",
+
+    "fastapi==0.139.0",
+    "uvicorn==0.49.0",
+    "questionary==2.1.1",
+]

@@ -35,7 +35,7 @@ re-process only chunks that changed. A run against unchanged books costs $0.
 
 ## Prerequisites
 
-- Python 3.11+ (developed on 3.14)
+- Python 3.14+ (`uv sync` installs and pins it for you; see `.python-version`)
 - An Anthropic API key
 - For `.pages` manuscripts: **macOS with Pages installed.** Apple's current
   `.pages` format stores the body as binary `.iwa`, so the only reliable
@@ -47,11 +47,24 @@ re-process only chunks that changed. A run against unchanged books costs $0.
 
 ## Installation
 
+Dependencies are managed with [uv](https://docs.astral.sh/uv/).
+
 ```sh
 git clone <this repo> && cd <repo>
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+uv sync
 ```
+
+`uv sync` creates `.venv/` (pinned to the Python in `.python-version`) and
+installs the exact versions locked in `uv.lock` — every command below that
+starts with `.venv/bin/` works unchanged. Optional extras:
+
+```sh
+uv sync --extra openai   # only if EMBEDDING_PROVIDER=openai
+uv sync --extra pdf      # .pdf sources / .pages QuickLook previews
+```
+
+To add or change a dependency, edit `pyproject.toml` and re-run `uv sync`
+(or `uv add <pkg>`), then commit the updated `uv.lock`.
 
 ## First-time setup
 
