@@ -77,6 +77,20 @@ FOCUS_PROMPTS = {
 # their whole value is reacting as readers who don't know the future.
 FORWARD_PERSONAS = {"Literary Agent", "Philosopher", "What-If Explorer"}
 
+# personas whose review leans on manuscript excerpts — Hard-Core Reader's
+# continuity catches and What-If's character grounding cite earlier prose
+# directly, so they keep the full top_k+2 retrieval. The craft/reaction
+# personas rarely cite excerpts, yet at ~1K tokens apiece the full set was
+# ~40% of the uncached spend per turn (2026-09-01 ledger) — they get a
+# lighter set covering the strongest matches.
+_CANON_PERSONAS = {"Hard-Core Reader", "What-If Explorer"}
+_EXCERPT_LIGHT = 6
+
+
+def _excerpt_budget(focus: str, top_k: int) -> int:
+    full = top_k + 2
+    return full if focus in _CANON_PERSONAS else min(_EXCERPT_LIGHT, full)
+
 # pre-persona focus values (old saved sessions) -> nearest persona
 LEGACY_FOCUS = {
     "Rough Draft": "Casual Reader",
@@ -512,7 +526,8 @@ def review_stream(req: ReviewRequest):
             if dropped_self:
                 log.info("review: dropped %d excerpt(s) near-identical to the "
                          "chapter under review", dropped_self)
-            excerpts = excerpts[:s.cfg.top_k_results + 2]
+            excerpts = excerpts[:_excerpt_budget(req.focus,
+                                                 s.cfg.top_k_results)]
         notes = [] if no_prior else _story_so_far(s.db, req.book, req.chapter)
 
         question = req.message or f"Give your review of this chapter as a {req.focus}."
