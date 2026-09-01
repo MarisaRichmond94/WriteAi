@@ -115,7 +115,8 @@ class Answerer:
                       notes_header: str | None = None,
                       max_tokens: int | None = None,
                       quote_instruction: str | None = None,
-                      effort: str | None = None) -> dict:
+                      effort: str | None = None,
+                      system_extra_tail: str = "") -> dict:
         """Assemble the messages.create kwargs. Shared by the blocking
         answer() path and the server's SSE streaming path.
 
@@ -126,7 +127,11 @@ class Answerer:
         breakpoint — so a toggle flip re-writes only that small block while
         the bible-sized prefix ahead of it stays a cache read. Empty
         system_volatile keeps the single-block request shape byte-identical
-        to the legacy form."""
+        to the legacy form. system_extra_tail is reference material on its
+        own breakpoint BETWEEN the stable and volatile blocks (the review's
+        cast-filtered character profiles, which refresh on a sync/enrichment
+        cadence): when it changes, only its block re-writes while the stable
+        prefix ahead of it stays a cache read."""
         parts: list[str] = []
 
         if notes:
@@ -181,11 +186,17 @@ class Answerer:
         # Below the model's minimum cacheable size this is a silent no-op.
         system_blocks = [{"type": "text", "text": system,
                           "cache_control": self._cache_control()}]
+        if system_extra_tail:
+            # own breakpoint: this block changes on its own cadence, and a
+            # change re-writes it alone instead of invalidating the stable
+            # prefix ahead of it.
+            system_blocks.append({"type": "text", "text": system_extra_tail,
+                                  "cache_control": self._cache_control()})
         if system_volatile:
-            # own breakpoint: an unchanged toggle set reads stable+volatile;
-            # a changed one still reads the stable prefix and re-writes only
-            # this block. With the history breakpoint that is 3 of the API's
-            # max 4.
+            # own breakpoint: an unchanged toggle set reads the whole system
+            # prefix; a changed one still reads the blocks ahead of it and
+            # re-writes only this one. With the tail and history breakpoints
+            # that is up to 4 — exactly the API's max.
             system_blocks.append({"type": "text", "text": system_volatile,
                                   "cache_control": self._cache_control()})
         request = {"model": self.model, "max_tokens": max_tokens,
@@ -205,8 +216,8 @@ class Answerer:
         prefix (system + all prior turns) is a cache read instead of a full-
         price re-process. String content is converted to the block form —
         semantically identical on the wire, required to carry the marker.
-        Up to three breakpoints total (system, optional volatile system
-        block, here), under the API's max 4.
+        Up to four breakpoints total (system, optional profile-tail and
+        volatile system blocks, here) — at the API's max of 4.
         Copies, never mutates, the caller's message dicts."""
         messages = list(messages)
         last = dict(messages[-1])
@@ -241,7 +252,8 @@ class Answerer:
                       notes_header: str | None = None,
                       max_tokens: int | None = None,
                       quote_instruction: str | None = None,
-                      effort: str | None = None):
+                      effort: str | None = None,
+                      system_extra_tail: str = ""):
         """Generator of text deltas; records usage when the stream ends —
         including when it ends badly. A stream killed by a read timeout or a
         client disconnect was still billed for the prompt it processed and the
@@ -249,7 +261,8 @@ class Answerer:
         than dropped."""
         request = self.build_request(plan, excerpts, notes, history, system_extra,
                                      system_base, system_volatile, notes_header,
-                                     max_tokens, quote_instruction, effort)
+                                     max_tokens, quote_instruction, effort,
+                                     system_extra_tail)
         usage = None
         try:
             with self.client.messages.stream(**request) as stream:

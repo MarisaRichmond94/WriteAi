@@ -2,7 +2,22 @@
 story-so-far gisting (and, in later commits, the per-persona excerpt budget
 and the system-block layout)."""
 
+from types import SimpleNamespace
+
 from server.routers.review import FOCUS_PROMPTS, _excerpt_budget, _gist
+from src.answerer import Answerer
+from src.query_router import QueryPlan
+
+
+def _answerer(**overrides):
+    cfg = SimpleNamespace(anthropic_api_key="test-key",
+                          query_model="claude-sonnet-5",
+                          enable_prompt_cache_v2=True,
+                          prompt_cache_ttl="1h",
+                          api_read_timeout_s=5.0)
+    for k, v in overrides.items():
+        setattr(cfg, k, v)
+    return Answerer(cfg)
 
 
 def test_gist_takes_first_sentence():
@@ -47,3 +62,33 @@ def test_excerpt_budget_never_exceeds_configured_top_k():
 def test_excerpt_budget_covers_every_persona():
     for focus in FOCUS_PROMPTS:
         assert 1 <= _excerpt_budget(focus, top_k=15) <= 17
+
+
+def test_system_block_layout_and_breakpoint_budget():
+    a = _answerer()
+    req = a.build_request(
+        QueryPlan(question="q", qtype="general"), [], [],
+        history=[{"role": "user", "content": "hi"},
+                 {"role": "assistant", "content": "there"}],
+        system_extra="STABLE BIBLES", system_extra_tail="PROFILES",
+        system_volatile="PERSONA", effort="medium")
+    texts = [b["text"] for b in req["system"]]
+    assert "STABLE BIBLES" in texts[0]        # stable prefix holds the bibles
+    assert texts[1] == "PROFILES"             # tail block sits between them
+    assert texts[2] == "PERSONA"              # volatile block stays last
+    assert all("cache_control" in b for b in req["system"])
+    marked_history = sum(
+        1 for m in req["messages"]
+        if isinstance(m.get("content"), list)
+        and any("cache_control" in b for b in m["content"]
+                if isinstance(b, dict)))
+    # stable + tail + volatile + history marker: exactly the API's max 4
+    assert len(req["system"]) + marked_history == 4
+    assert req["output_config"] == {"effort": "medium"}
+
+
+def test_empty_tail_keeps_legacy_block_shape():
+    a = _answerer(enable_prompt_cache_v2=False)
+    req = a.build_request(QueryPlan(question="q", qtype="general"), [], [])
+    assert len(req["system"]) == 1
+    assert "output_config" not in req

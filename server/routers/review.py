@@ -556,13 +556,32 @@ def review_stream(req: ReviewRequest):
             question=f"{chapter_block}\n\n{question}",
             qtype="general")
 
-        # condensed story bibles (digests for earlier books, character
-        # profiles for the reviewed book) ride alone in system_extra:
-        # deterministic, zero LLM cost to build, and inside the STABLE cached
-        # system block so every turn reads them at the cache rate — including
-        # turns where the persona or Ideal toggle changed (those ride in
-        # system_volatile, after the stable prefix)
+        # condensed story bibles ride in two cached system blocks: the
+        # earlier-book digests join the STABLE block (byte-stable across a
+        # whole session), while the reviewed book's cast-filtered character
+        # profiles get their OWN block (system_extra_tail) — they refresh on
+        # a different cadence (sync/enrichment), and when they change only
+        # their ~3K block re-writes instead of the whole bible-sized prefix.
+        # Everything is deterministic and zero LLM cost to build.
+        #
+        # The cast filter keys off the INDEXED copy of the chapter when one
+        # exists: filtering on the live draft meant any edit that added or
+        # dropped a major character's name changed the profile set mid-
+        # session (36 full-miss re-reviews inside the 1h TTL in the
+        # 2026-09-01 ledger). The indexed copy holds still until a resync —
+        # and a resync is a legitimate refresh point. A character brand-new
+        # in an unsynced draft gains a profile at the next sync;
+        # _build_bible's unfiltered fallback still covers an all-new cast.
+        cast_source = text
+        if req.chapter is not None:
+            idx = s.db.execute(
+                "SELECT text FROM chunks WHERE book_number = ? AND "
+                "chapter_number = ? ORDER BY chunk_index",
+                (req.book, req.chapter)).fetchall()
+            if idx:
+                cast_source = "\n".join(r[0] for r in idx)
         bible_parts = []
+        profile_part = ""
         for bn in range(1, req.book + 1):
             try:
                 # Every earlier book rides as a stored condensed digest
@@ -582,13 +601,20 @@ def review_stream(req: ReviewRequest):
                 _, md = _build_bible(s, bn, compact=True,
                                      characters=(bn == req.book),
                                      chapters=(bn < req.book),
-                                     mention_filter=(text if bn == req.book
+                                     mention_filter=(cast_source
+                                                     if bn == req.book
                                                      else None))
-                bible_parts.append(md)
+                if bn == req.book:
+                    profile_part = md
+                else:
+                    bible_parts.append(md)
             except Exception:
                 log.warning("review: could not build bible for book %s", bn)
-        system_extra = (BIBLE_PREAMBLE + "\n\n"
-                        + "\n\n---\n\n".join(bible_parts)) if bible_parts else ""
+        # the preamble stays in the stable block and introduces both blocks
+        system_extra = ((BIBLE_PREAMBLE
+                         + (("\n\n" + "\n\n---\n\n".join(bible_parts))
+                            if bible_parts else ""))
+                        if (bible_parts or profile_part) else "")
 
         answerer = s.new_answerer(model=req.model)
         history = _condense_history(req.conversation_history)
@@ -625,6 +651,7 @@ def review_stream(req: ReviewRequest):
             for delta in answerer.answer_stream(review_plan, excerpts, notes,
                                                 history=history,
                                                 system_extra=system_extra,
+                                                system_extra_tail=profile_part,
                                                 system_base=REVIEW_SYSTEM,
                                                 system_volatile="\n\n".join(volatile_parts),
                                                 notes_header=STORY_NOTES_HEADER,
