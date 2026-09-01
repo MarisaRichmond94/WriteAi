@@ -114,6 +114,7 @@ class Answerer:
                       system_volatile: str = "",
                       notes_header: str | None = None,
                       max_tokens: int | None = None,
+                      quote_instruction: str | None = None,
                       effort: str | None = None) -> dict:
         """Assemble the messages.create kwargs. Shared by the blocking
         answer() path and the server's SSE streaming path.
@@ -166,8 +167,13 @@ class Answerer:
         # The quoting instruction is appended in a fixed position (right after
         # the base prompt, before system_extra) so the system string stays
         # byte-stable across turns and the prompt-cache prefix is preserved.
+        # Callers may swap in their own (the review pane wants locator quotes,
+        # not Explore's complete-sentence verbatim rules); None keeps the
+        # default, "" omits it.
+        quote = (QUOTE_INSTRUCTION if quote_instruction is None
+                 else quote_instruction)
         system = ((system_base or SYSTEM_PROMPT)
-                  + f"\n\n{QUOTE_INSTRUCTION}"
+                  + (f"\n\n{quote}" if quote else "")
                   + (f"\n\n{system_extra}" if system_extra else ""))
         # Cache the system block (base prompt + injected reference material,
         # e.g. Explore's story bibles). Messages come after the breakpoint, so
@@ -234,6 +240,7 @@ class Answerer:
                       system_volatile: str = "",
                       notes_header: str | None = None,
                       max_tokens: int | None = None,
+                      quote_instruction: str | None = None,
                       effort: str | None = None):
         """Generator of text deltas; records usage when the stream ends —
         including when it ends badly. A stream killed by a read timeout or a
@@ -242,7 +249,7 @@ class Answerer:
         than dropped."""
         request = self.build_request(plan, excerpts, notes, history, system_extra,
                                      system_base, system_volatile, notes_header,
-                                     max_tokens, effort)
+                                     max_tokens, quote_instruction, effort)
         usage = None
         try:
             with self.client.messages.stream(**request) as stream:

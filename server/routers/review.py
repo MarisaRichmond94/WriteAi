@@ -89,7 +89,15 @@ LEGACY_FOCUS = {
 
 REVIEW_SYSTEM = """You are giving the author feedback on a chapter of her own manuscript, in the reviewer persona described below. Stay in that persona's perspective, priorities, and voice throughout — but whatever the persona, be concrete and honest: praise that names what works, criticism that names what doesn't and why.
 
-The chapter marked CHAPTER UNDER REVIEW is the document you are reviewing — all of your feedback must be about that chapter. The STORY SO FAR notes, condensed story bibles, and manuscript excerpts are background material, provided so you can read the chapter the way someone who knows the series would. Do not review, summarize, or give feedback on the background material itself. Cite (Book N, Chapter M) when a point rests on earlier material. If the background is insufficient to judge something, say so rather than guessing. Never invent series details that are not present in the provided material."""
+The chapter marked CHAPTER UNDER REVIEW is the document you are reviewing — all of your feedback must be about that chapter. The STORY SO FAR notes, condensed story bibles, and manuscript excerpts are background material, provided so you can read the chapter the way someone who knows the series would. Do not review, summarize, or give feedback on the background material itself. Cite (Book N, Chapter M) when a point rests on earlier material. If the background is insufficient to judge something, say so rather than guessing. Never invent series details that are not present in the provided material.
+
+Be economical: a full review should land around 800-1,200 words (not counting an Ideal Version section, when one is requested), and an answer to a follow-up question should be shorter, in proportion to what was asked. Make each point once, concretely, and move on — depth comes from precision, not length."""
+
+# Review-specific replacement for the Explore chat's QUOTE_INSTRUCTION. That
+# one demands complete-sentence verbatim quotes (right for citation-grade
+# continuity answers, but it inflates reviews with re-quoted prose); a review
+# only needs enough of a quote to locate the passage being discussed.
+REVIEW_QUOTE_INSTRUCTION = """When you point at a passage of the chapter, quote just enough to locate it — its first few words in double quotation marks, or a plain description of the moment — rather than reproducing the passage in full. Reproduce longer text only as part of a concrete suggested rewrite. Quote the background material verbatim only when the exact wording is the point, and never quote from memory — only words that appear in the provided material."""
 
 # Appended when the request opts in via the UI's Ideal Version toggle —
 # the rewrite is the dominant output cost and rarely earns it on a first
@@ -592,6 +600,7 @@ def review_stream(req: ReviewRequest):
                                                 system_volatile="\n\n".join(volatile_parts),
                                                 notes_header=STORY_NOTES_HEADER,
                                                 max_tokens=32000 if req.include_ideal else 12000,
+                                                quote_instruction=REVIEW_QUOTE_INSTRUCTION,
                                                 # caps adaptive thinking (~54%
                                                 # of review output at the API
                                                 # default per the 09-01 ledger)
