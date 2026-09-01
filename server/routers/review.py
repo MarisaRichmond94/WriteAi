@@ -370,6 +370,22 @@ def _strip_ideal(content: str) -> str:
               "here — omitted from the replayed conversation.]")
 
 
+def _question(message: str, focus: str, history: list) -> str:
+    """The QUESTION line for this turn. An opening-turn note from the author
+    rides WITH the review ask instead of replacing it: sent alone, "watch the
+    pacing in the middle third" reads as a specific follow-up question and the
+    reviewer answers just that instead of delivering the full review the
+    button promised (Loom's review tab sends such notes with the first pass).
+    Later turns are the writer's own words, verbatim."""
+    default = f"Give your review of this chapter as a {focus}."
+    if not message:
+        return default
+    if not history:
+        return (f"{default}\n\nA note from the author to weigh while "
+                f"reviewing: {message}")
+    return message
+
+
 def _condense_history(raw: list[dict]) -> list[dict]:
     """API-ready conversation history: Ideal Version rewrites stripped, the
     first exchange pinned, the most recent turns kept."""
@@ -530,7 +546,7 @@ def review_stream(req: ReviewRequest):
                                                  s.cfg.top_k_results)]
         notes = [] if no_prior else _story_so_far(s.db, req.book, req.chapter)
 
-        question = req.message or f"Give your review of this chapter as a {req.focus}."
+        question = _question(req.message, req.focus, req.conversation_history)
         if req.chapter is None:
             ch_label = ", new draft"
         else:

@@ -4,7 +4,8 @@ and the system-block layout)."""
 
 from types import SimpleNamespace
 
-from server.routers.review import FOCUS_PROMPTS, _excerpt_budget, _gist
+from server.routers.review import (FOCUS_PROMPTS, _excerpt_budget, _gist,
+                                   _question)
 from src.answerer import Answerer
 from src.query_router import QueryPlan
 
@@ -62,6 +63,24 @@ def test_excerpt_budget_never_exceeds_configured_top_k():
 def test_excerpt_budget_covers_every_persona():
     for focus in FOCUS_PROMPTS:
         assert 1 <= _excerpt_budget(focus, top_k=15) <= 17
+
+
+def test_question_defaults_to_the_review_ask():
+    assert _question("", "Literary Agent", []) == \
+        "Give your review of this chapter as a Literary Agent."
+
+
+def test_question_opening_note_steers_rather_than_replaces():
+    q = _question("Watch the pacing in the middle third.", "Casual Reader", [])
+    assert q.startswith("Give your review of this chapter as a Casual Reader.")
+    assert "Watch the pacing in the middle third." in q
+
+
+def test_question_later_turns_are_verbatim():
+    history = [{"role": "user", "content": "hi"},
+               {"role": "assistant", "content": "review text"}]
+    assert _question("Does the twist land?", "Casual Reader", history) == \
+        "Does the twist land?"
 
 
 def test_system_block_layout_and_breakpoint_budget():
