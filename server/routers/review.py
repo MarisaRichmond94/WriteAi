@@ -154,7 +154,9 @@ DRAFT_DIFF_INSTRUCTION = (
     "do not infer other changes, and do not treat unchanged prose as new or "
     "repeated material.")
 
-# how many events immediately preceding the chapter get full summaries
+# how many events/chapter summaries immediately preceding the chapter ride
+# at full length; older prose chapter summaries are cut to their first
+# sentence (see _gist)
 _DIGEST_TAIL = 12
 # hard cap on digest lines; oldest lines drop first (recency matters most)
 _DIGEST_MAX = 120
@@ -186,6 +188,17 @@ class ReviewRequest(BaseModel):
     conversation_history: list[dict] = []
     include_ideal: bool = False       # opt in to the tracked-changes rewrite
     model: str | None = None          # per-request model (None = settings default)
+
+
+def _gist(summary: str) -> str:
+    """First sentence of a prose chapter summary. Chapters outside the
+    recency tail used to ride at full length — by chapter 76 the reviewed
+    book's summaries alone were ~15K of the ~23K-token story-so-far notes,
+    re-sent uncached on every turn (2026-09-01 ledger). Far-back events need
+    to be recallable, not re-readable; the story bibles and excerpts carry
+    the detail."""
+    m = re.match(r".+?[.!?](?=\s|$)", summary, re.DOTALL)
+    return m.group(0) if m else summary
 
 
 def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
@@ -243,7 +256,8 @@ def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
         when = dates.get((bn, cn))
         loc = f"Book {bn}, {ch}" + (f" — {when}" if when else "")
         if gran == "summary":               # prose chapter summary line
-            lines.append(f"- ({loc}) {summary}")
+            full = i >= len(rows) - _DIGEST_TAIL
+            lines.append(f"- ({loc}) {summary if full else _gist(summary)}")
         elif i >= len(rows) - _DIGEST_TAIL:
             lines.append(f"- ({loc}) {title}: {summary}")
         elif gran == "major":
