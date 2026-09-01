@@ -591,7 +591,11 @@ def review_stream(req: ReviewRequest):
                                                 system_base=REVIEW_SYSTEM,
                                                 system_volatile="\n\n".join(volatile_parts),
                                                 notes_header=STORY_NOTES_HEADER,
-                                                max_tokens=32000 if req.include_ideal else 12000):
+                                                max_tokens=32000 if req.include_ideal else 12000,
+                                                # caps adaptive thinking (~54%
+                                                # of review output at the API
+                                                # default per the 09-01 ledger)
+                                                effort=s.cfg.review_effort or None):
                 yield {"type": "chunk", "content": delta}
         yield citations_payload(excerpts)
         yield {"type": "usage", "model": answerer.model,

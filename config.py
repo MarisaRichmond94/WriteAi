@@ -102,6 +102,11 @@ class Config:
     # Seconds to wait on a silent socket before giving up on a model request.
     # For a stream this is the gap between chunks, not the whole generation.
     api_read_timeout_s: float = 120.0
+    # Reasoning effort for review-pane requests. Ledger analysis (2026-09-01):
+    # at the adaptive default, thinking was ~54% of billed review output while
+    # visible replies averaged only ~2.4K tokens — "medium" roughly halves
+    # output spend with no prompt change. Blank = API default (no cap).
+    review_effort: str = "medium"
 
     # Derived data locations (all under data_dir; created on demand)
     staging_dir: Path = field(init=False)
@@ -157,6 +162,12 @@ def load_config(env_file: Path | None = None) -> Config:
                         cache_ttl)
         cache_ttl = "1h"
 
+    review_effort = os.environ.get("REVIEW_EFFORT", "medium").strip().lower()
+    if review_effort not in ("", "low", "medium", "high", "xhigh", "max"):
+        logging.warning("REVIEW_EFFORT must be low, medium, high, xhigh, or "
+                        "max, not %r; using medium", review_effort)
+        review_effort = "medium"
+
     export_raw = os.environ.get("TEXT_EXPORT_DIR", "").strip()
     text_export_dir = _expand(export_raw) if export_raw else None
     if text_export_dir and not text_export_dir.is_dir():
@@ -201,6 +212,7 @@ def load_config(env_file: Path | None = None) -> Config:
         enable_canon_v2=_get_bool("ENABLE_CANON_V2", False),
         enrich_rel_model=os.environ.get("ENRICH_REL_MODEL", "").strip(),
         api_read_timeout_s=_get_float("API_READ_TIMEOUT_S", 120.0),
+        review_effort=review_effort,
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)
 

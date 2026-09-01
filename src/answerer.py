@@ -113,7 +113,8 @@ class Answerer:
                       system_base: str | None = None,
                       system_volatile: str = "",
                       notes_header: str | None = None,
-                      max_tokens: int | None = None) -> dict:
+                      max_tokens: int | None = None,
+                      effort: str | None = None) -> dict:
         """Assemble the messages.create kwargs. Shared by the blocking
         answer() path and the server's SSE streaming path.
 
@@ -181,9 +182,14 @@ class Answerer:
             # max 4.
             system_blocks.append({"type": "text", "text": system_volatile,
                                   "cache_control": self._cache_control()})
-        return {"model": self.model, "max_tokens": max_tokens,
-                "system": system_blocks,
-                "messages": messages}
+        request = {"model": self.model, "max_tokens": max_tokens,
+                   "system": system_blocks,
+                   "messages": messages}
+        if effort:
+            # Caps adaptive thinking depth. Unset -> the API default, which
+            # the review ledger showed spending ~54% of output on thinking.
+            request["output_config"] = {"effort": effort}
+        return request
 
     @staticmethod
     def _mark_history_breakpoint(messages: list[dict],
@@ -227,7 +233,8 @@ class Answerer:
                       system_base: str | None = None,
                       system_volatile: str = "",
                       notes_header: str | None = None,
-                      max_tokens: int | None = None):
+                      max_tokens: int | None = None,
+                      effort: str | None = None):
         """Generator of text deltas; records usage when the stream ends —
         including when it ends badly. A stream killed by a read timeout or a
         client disconnect was still billed for the prompt it processed and the
@@ -235,7 +242,7 @@ class Answerer:
         than dropped."""
         request = self.build_request(plan, excerpts, notes, history, system_extra,
                                      system_base, system_volatile, notes_header,
-                                     max_tokens)
+                                     max_tokens, effort)
         usage = None
         try:
             with self.client.messages.stream(**request) as stream:

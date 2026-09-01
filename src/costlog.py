@@ -29,7 +29,8 @@ _PATH = REPO_ROOT / "logs" / "cost.jsonl"
 # Feature-flag env vars worth stamping on every line, so A/B comparisons of
 # cost/quality across flag settings stay possible after the fact.
 _FLAG_PREFIXES = ("ENABLE_", "CONTINUITY_", "RERANK", "COST_LOG",
-                  "EXTRACTION_USE", "CHUNKER_", "PROMPT_CACHE_TTL")
+                  "EXTRACTION_USE", "CHUNKER_", "PROMPT_CACHE_TTL",
+                  "REVIEW_EFFORT")
 
 
 def usage_diff(after: dict, before: dict) -> dict:
