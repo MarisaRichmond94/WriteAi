@@ -105,6 +105,8 @@ REVIEW_SYSTEM = """You are giving the author feedback on a chapter of her own ma
 
 The chapter marked CHAPTER UNDER REVIEW is the document you are reviewing — all of your feedback must be about that chapter. The STORY SO FAR notes, condensed story bibles, and manuscript excerpts are background material, provided so you can read the chapter the way someone who knows the series would. Do not review, summarize, or give feedback on the background material itself. Cite (Book N, Chapter M) when a point rests on earlier material. If the background is insufficient to judge something, say so rather than guessing. Never invent series details that are not present in the provided material.
 
+Chronology is a hard rule: for the reader, the story exists only up to the end of the chapter under review. Wherever background material describes events after this chapter (an author's plan, a character arc or profile that reaches ahead), those events have not happened yet — never state them as current fact or current character state (injuries, possessions, knowledge, positions, relationships), and never count them for or against this chapter's realism, stakes, pacing, or continuity.
+
 When the author asks you to dig deeper into (or elaborate on, or expand on) a piece of your feedback, treat it as a request for evidence, not restatement: walk through the specific passages of the chapter that prompted the point, locating each one with a short quote, and for each show concretely what you are looking for — what the passage does now versus what a version that works would do at that spot. Every example must be grounded in the chapter's actual text or the provided background material; do not invent characters, events, wording, or details that are not on the page.
 
 Be economical: a full review should land around 800-1,200 words (not counting an Ideal Version section, when one is requested), and an answer to a follow-up question should be shorter, in proportion to what was asked — though a dig-deeper request earns whatever length its worked examples need. Make each point once, concretely, and move on — depth comes from precision, not length."""
@@ -148,12 +150,28 @@ BIBLE_PREAMBLE = (
     "the chapter under review.")
 
 UPCOMING_HEADER = ("== WHERE THE STORY IS HEADED (the author's plan for what "
-                   "follows this chapter — not under review) ==")
+                   "follows this chapter — NONE of it has happened yet as of "
+                   "the chapter under review) ==")
 UPCOMING_INSTRUCTION = (
-    "Use the WHERE THE STORY IS HEADED notes to judge setup, foreshadowing, "
-    "and whether this chapter earns its place in the arc — but review the "
-    "chapter from the reader's seat: the reader has not seen any of it, and "
-    "the chapter cannot be faulted for not yet revealing it.")
+    "HARD RULES for the WHERE THE STORY IS HEADED notes above. They describe "
+    "chapters the reader has not read; as of the chapter under review, none "
+    "of it has happened. Therefore:\n"
+    "- Never present anything from these notes as current fact or current "
+    "character state. If an injury, possession, piece of knowledge, plan, or "
+    "relationship is not established by the end of the chapter under review, "
+    "the character does not have it yet.\n"
+    "- Never use these notes to fault the chapter — not its realism, stakes, "
+    "pacing, tension, or continuity, and not for failing to reveal or set up "
+    "what comes later. Judge the chapter as a reader at this point in the "
+    "book would, knowing nothing past it.\n"
+    "- Do not cite, quote, or allude to any chapter after the one under "
+    "review anywhere in your critique. The ONE place these notes may be used "
+    'is a single short section headed "## Where This Is Heading", placed '
+    "immediately before your closing revision section: there you may discuss "
+    "how the chapter sets up, foreshadows, or earns its place in what the "
+    "author has planned. Omit the section if you have nothing genuinely "
+    "forward-looking to say. In a follow-up answer, draw on these notes only "
+    "when the author explicitly asks about where the story is going.")
 
 # Re-review of an updated draft: the previous draft never survives in the
 # conversation history (user turns store only the short message), so without
