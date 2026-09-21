@@ -107,6 +107,8 @@ The chapter marked CHAPTER UNDER REVIEW is the document you are reviewing — al
 
 Chronology is a hard rule: for the reader, the story exists only up to the end of the chapter under review. Wherever background material describes events after this chapter (an author's plan, a character arc or profile that reaches ahead), those events have not happened yet — never state them as current fact or current character state (injuries, possessions, knowledge, positions, relationships), and never count them for or against this chapter's realism, stakes, pacing, or continuity.
 
+Judge what the reader already knows the same way: claims of repetition, redundancy, or familiarity — "we know this", "we've seen this before", "this is a rehash" — may rest ONLY on the STORY SO FAR notes, the manuscript excerpts, and the chapter itself. The story bibles and character profiles are orientation for you, distilled from whole books; they are never evidence that the reader has seen something. A character marked FIRST APPEARANCE is a stranger to the reader: treat their introduction, voice, dynamics, and backstory as entirely new information, and judge the introduction as an introduction.
+
 When the author asks you to dig deeper into (or elaborate on, or expand on) a piece of your feedback, treat it as a request for evidence, not restatement: walk through the specific passages of the chapter that prompted the point, locating each one with a short quote, and for each show concretely what you are looking for — what the passage does now versus what a version that works would do at that spot. Every example must be grounded in the chapter's actual text or the provided background material; do not invent characters, events, wording, or details that are not on the page.
 
 Be economical: a full review should land around 800-1,200 words (not counting an Ideal Version section, when one is requested), and an answer to a follow-up question should be shorter, in proportion to what was asked — though a dig-deeper request earns whatever length its worked examples need. Make each point once, concretely, and move on — depth comes from precision, not length."""
@@ -145,9 +147,10 @@ BIBLE_PREAMBLE = (
     "for the book under review. "
     "Background reference assembled "
     "from the manuscripts — use it to read the chapter the way someone who "
-    "knows the series would, not as material to review. Note the character "
-    "profiles and arcs summarize each book as a whole, so they may reach past "
-    "the chapter under review.")
+    "knows the series would, not as material to review. The character "
+    "profiles and arcs summarize each book as a whole, so they may reach "
+    "past the chapter under review — they are orientation for you, not "
+    "reader knowledge.")
 
 UPCOMING_HEADER = ("== WHERE THE STORY IS HEADED (the author's plan for what "
                    "follows this chapter — NONE of it has happened yet as of "
@@ -639,7 +642,12 @@ def review_stream(req: ReviewRequest):
                                      chapters=(bn < req.book),
                                      mention_filter=(cast_source
                                                      if bn == req.book
-                                                     else None))
+                                                     else None),
+                                     # first-appearance gate: no profile for
+                                     # a character the reader hasn't met yet
+                                     reader_upto=(req.chapter
+                                                  if bn == req.book
+                                                  else None))
                 if bn == req.book:
                     profile_part = md
                 else:

@@ -312,7 +312,8 @@ def _ch_label(n: int) -> str:
 
 def _build_bible(s, book: int, compact: bool = False,
                  characters: bool = True, chapters: bool = True,
-                 mention_filter: str | None = None) -> tuple[str, str]:
+                 mention_filter: str | None = None,
+                 reader_upto: int | None = None) -> tuple[str, str]:
     """(title, markdown). Assembled entirely from extracted/enriched data —
     deterministic, zero LLM cost, nothing invented.
 
@@ -329,7 +330,18 @@ def _build_bible(s, book: int, compact: bool = False,
     characters whose name or alias appears in it, so the block carries the
     chapter's cast instead of the book's. Falls back to the unfiltered list
     when nothing matches (an all-new-cast chapter shouldn't lose every
-    profile). Deterministic for a given text, so cache-safe."""
+    profile). Deterministic for a given text, so cache-safe.
+
+    reader_upto, when given, is the chapter under review: a character whose
+    first scene presence in this book is at or after it gets a
+    first-appearance marker INSTEAD of a profile. Profiles distill whole
+    books, so for a character the reader hasn't met yet every line of
+    profile is future material — reviewers were reading it as "the reader
+    already knows this character" on the very chapter that introduces them
+    (2026-09-20 Bri/Austin reviews). Keyed on scene presence in THIS book:
+    presence in earlier books softens the marker (their background rides in
+    the digests) but never restores the profile, since traits/arcs blend in
+    later chapters of this book too."""
     db = s.db
     row = db.execute("SELECT DISTINCT book_title FROM chunks WHERE book_number = ?",
                      (book,)).fetchone()
@@ -430,13 +442,39 @@ def _build_bible(s, book: int, compact: bool = False,
                 tags.append(genders[e.name])
             if tags:
                 out(f"*{' · '.join(tags)}*")
+            if reader_upto is not None:
+                first = min((canon.chunk_meta[cid][1] for cid in e.chunk_ids
+                             if canon.chunk_meta.get(cid, (None,))[0] == book),
+                            default=None)
+                if first is not None and first >= reader_upto:
+                    seen_earlier = any(
+                        (m := canon.chunk_meta.get(cid)) and m[0] < book
+                        for cid in e.chunk_ids)
+                    note = ("FIRST APPEARANCE — steps on the page for the "
+                            "first time in this book in the chapter under "
+                            "review." if first == reader_upto else
+                            "Not yet on the page in this book as of the "
+                            "chapter under review.")
+                    note += (" The reader may know them from earlier books "
+                             "(see the digests above), but nothing from "
+                             "this book." if seen_earlier else
+                             " The reader has never met this character: "
+                             "their introduction, voice, and backstory are "
+                             "all new information.")
+                    out(f"- {note}")
+                    out("")
+                    continue
             tj, rj, aj = profiles.get(e.name, (None, None, None))
             traits = json.loads(tj) if tj else []
             if traits:
                 out(f"- **Traits:** {', '.join(traits)}")
             arcs = json.loads(aj) if aj else {}
             if arcs.get(str(book)):
-                out(f"- **Arc in this book:** {arcs[str(book)]}")
+                label = ("Arc across this whole book (includes developments "
+                         "after the chapter under review — not reader "
+                         "knowledge)" if reader_upto is not None
+                         else "Arc in this book")
+                out(f"- **{label}:** {arcs[str(book)]}")
             rels = json.loads(rj) if rj else []
             rel_lines = []
             for r in rels:
