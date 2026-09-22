@@ -140,11 +140,11 @@ STORY_NOTES_HEADER = ("== STORY SO FAR (events from earlier in the series, "
 # every turn in a session reads it at the cache rate, even across persona
 # or Ideal-toggle changes (those live in the volatile block after it)
 BIBLE_PREAMBLE = (
-    "Condensed story bibles for the series so far follow: earlier books as "
-    "condensed digests covering their arc, reveals, and outcomes (a book "
-    "may appear as chapter-by-chapter summaries where no digest exists), "
-    "and the major characters of this chapter (traits, arcs, relationships) "
-    "for the book under review. "
+    "Story bibles for the series so far follow: older books as condensed "
+    "digests covering their arc, reveals, and outcomes, the most recent "
+    "earlier book as full chapter-by-chapter summaries (the chapter under "
+    "review calls back to it most), and the major characters of this "
+    "chapter (traits, arcs, relationships) for the book under review. "
     "Background reference assembled "
     "from the manuscripts — use it to read the chapter the way someone who "
     "knows the series would, not as material to review. The character "
@@ -303,6 +303,48 @@ def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
         dropped = len(lines) - _DIGEST_MAX
         lines = [f"(…{dropped} earlier events omitted)"] + lines[-_DIGEST_MAX:]
     return lines
+
+
+def _enrichment_gaps(db, book: int, chapter: int | None) -> list[tuple[int, int]]:
+    """Chapters inside the review's context scope that are synced (have
+    chunks) but carry no enrichment rows at all — no events and no chapter
+    summary. _story_so_far can say nothing about them, so without a marker
+    the notes silently skip them and the reviewer reads the story as if
+    those chapters never happened (worst right after syncing new chapters,
+    before the next enrichment run catches up). Scope mirrors
+    _story_so_far: strictly before the reviewed chapter; a pasted draft
+    (chapter=None) follows everything synced for its book."""
+    if chapter is None:
+        cond, params = "book_number <= ?", [book]
+    else:
+        cond = "book_number < ? OR (book_number = ? AND chapter_number < ?)"
+        params = [book, book, chapter]
+    synced = db.execute(
+        f"SELECT DISTINCT book_number, chapter_number FROM chunks "
+        f"WHERE {cond}", params).fetchall()
+
+    def enriched(table: str) -> set:
+        try:
+            return set(db.execute(f"SELECT DISTINCT book_number, "
+                                  f"chapter_number FROM {table}").fetchall())
+        except sqlite3.OperationalError:    # enrichment hasn't run yet
+            return set()
+
+    covered = enriched("events") | enriched("chapter_summaries")
+    return sorted((bn, cn) for bn, cn in synced if (bn, cn) not in covered)
+
+
+def _gap_labels(gaps: list[tuple[int, int]]) -> list[str]:
+    """Compress (book, chapter) gaps into per-book runs: "Book 3 Ch 12-15"."""
+    runs: list[list[int]] = []
+    for bn, cn in gaps:
+        if runs and runs[-1][0] == bn and cn == runs[-1][2] + 1:
+            runs[-1][2] = cn
+        else:
+            runs.append([bn, cn, cn])
+    lab = lambda c: "Prologue" if c == 0 else f"Ch {c}"
+    return [f"Book {bn} {lab(a)}" + (f"-{lab(b)}" if b != a else "")
+            for bn, a, b in runs]
 
 
 def _tag_free(html_str: str) -> str:
@@ -472,6 +514,19 @@ def _probes(text: str, message: str) -> list[str]:
     return probes
 
 
+def _interleave(per_probe_hits: list[list[dict]]) -> list[dict]:
+    """One excerpt from each probe in turn. The excerpt budget truncates
+    from the front of this list, so plain concatenation in probe order let
+    the first probe (the author's note, or the chapter opening) fill the
+    whole budget and discarded the middle- and end-of-chapter retrievals —
+    exactly the skew the multi-probe design exists to avoid. Interleaving
+    keeps every probe represented at any budget."""
+    out: list[dict] = []
+    for i in range(max((len(h) for h in per_probe_hits), default=0)):
+        out += [h[i] for h in per_probe_hits if i < len(h)]
+    return out
+
+
 @router.post("/review/stream")
 def review_stream(req: ReviewRequest):
     s = get_state()
@@ -532,8 +587,10 @@ def review_stream(req: ReviewRequest):
             chapter_shingles = _shingles(text)
             per_probe = max(3, s.cfg.top_k_results // 2)
             try:
+                probe_hits: list[list[dict]] = []
                 for probe in _probes(text, req.message):
                     plan = QueryPlan(question=probe, qtype="general", scope=scope)
+                    hits: list[dict] = []
                     for e in s.retriever._semantic(plan, top_k=per_probe):
                         if e["chunk_id"] in seen:
                             continue
@@ -546,7 +603,9 @@ def review_stream(req: ReviewRequest):
                         if esh and len(esh & chapter_shingles) / len(esh) >= _SELF_SIM:
                             dropped_self += 1
                             continue
-                        excerpts.append(e)
+                        hits.append(e)
+                    probe_hits.append(hits)
+                excerpts = _interleave(probe_hits)
             except Exception:
                 # Never let retrieval kill the stream. A re-index in another
                 # process can leave this process's cached Chroma handle
@@ -568,6 +627,17 @@ def review_stream(req: ReviewRequest):
             excerpts = excerpts[:_excerpt_budget(req.focus,
                                                  s.cfg.top_k_results)]
         notes = [] if no_prior else _story_so_far(s.db, req.book, req.chapter)
+        gaps = [] if no_prior else _enrichment_gaps(s.db, req.book, req.chapter)
+        if gaps:
+            # the model must know the notes have a hole — otherwise absence
+            # reads as "nothing happened there" and earns false repetition/
+            # continuity calls; the author gets a notice below for the same
+            # gap, so she can weigh the review (or run enrichment) knowingly
+            notes.append(
+                "- NOTE: the following synced chapters are not yet "
+                "summarized, so these notes say NOTHING about them — their "
+                "events still happened and the reader has read them: "
+                + "; ".join(_gap_labels(gaps)))
 
         question = _question(req.message, req.focus, req.conversation_history)
         if req.chapter is None:
@@ -621,18 +691,25 @@ def review_stream(req: ReviewRequest):
                 cast_source = "\n".join(r[0] for r in idx)
         bible_parts = []
         profile_part = ""
+        digest_books: list[int] = []       # rode as condensed digests
+        full_books: list[int] = []         # rode as full compact bibles
         for bn in range(1, req.book + 1):
             try:
-                # Every earlier book rides as a stored condensed digest
-                # (~1.5K tokens each vs ~12K for a full chapter-by-chapter
-                # bible). The previous book used to keep full detail for its
-                # callbacks, but the ledger showed the system block dominating
-                # review cost (~50%), so it is condensed too; book_digest
-                # falls back to the full bible when no digest is stored.
-                if bn < req.book:
+                # Books before the previous one ride as stored condensed
+                # digests (~1.5K tokens each vs ~12K for a full
+                # chapter-by-chapter bible). The PREVIOUS book keeps its
+                # full chapter-by-chapter detail: it is what the chapter
+                # under review most often calls back to, and condensing it
+                # too (2026-09-01 cost pass) thinned reviews noticeably —
+                # reverted 2026-09-22. One full book is bounded and byte-
+                # stable within a session, so after the first turn it is a
+                # cache read. book_digest falls back to the full bible when
+                # no digest is stored.
+                if bn < req.book - 1:
                     digest = book_digest(s, bn)
                     if digest:
                         bible_parts.append(digest)
+                        digest_books.append(bn)
                         continue
                 # current book: character profiles only, filtered to the
                 # chapter's cast — profiles for characters who never appear
@@ -652,6 +729,7 @@ def review_stream(req: ReviewRequest):
                     profile_part = md
                 else:
                     bible_parts.append(md)
+                    full_books.append(bn)
             except Exception:
                 log.warning("review: could not build bible for book %s", bn)
         # the preamble stays in the stable block and introduces both blocks
@@ -684,14 +762,32 @@ def review_stream(req: ReviewRequest):
         # thinner context while she reads it — not after she has acted on it
         if degraded:
             yield {"type": "notice", "message": degraded}
+        if gaps:
+            yield {"type": "notice", "message":
+                   ("Story-so-far notes are missing "
+                    + "; ".join(_gap_labels(gaps))
+                    + " — synced but not yet summarized. The reviewer was "
+                      "told about the gap; running enrichment fills it in.")}
         # the scope ledgers the request from a `finally`, so a review that dies
         # mid-stream still shows up in the spend dashboard (marked failed)
         # instead of vanishing from it
+        # context-shape stats ride in the ledger so a review that "felt
+        # thin" can be diagnosed after the fact: how many excerpts and
+        # notes lines it actually had, which books rode condensed vs full,
+        # whose profiles were in the prompt, and whether it ran degraded
         with cost_scope(s.cfg, surface="review", answerer=answerer,
                         qtype="general",
                         extra={"focus": req.focus,
                                "include_ideal": req.include_ideal,
-                               "draft_rereview": bool(req.previous_text)}):
+                               "draft_rereview": bool(req.previous_text),
+                               "excerpts": len(excerpts),
+                               "notes_lines": len(notes),
+                               "digest_books": digest_books,
+                               "full_bible_books": full_books,
+                               "profiles": re.findall(r"(?m)^### (.+)$",
+                                                      profile_part),
+                               "enrich_gap_chapters": len(gaps),
+                               "retrieval_degraded": bool(degraded)}):
             for delta in answerer.answer_stream(review_plan, excerpts, notes,
                                                 history=history,
                                                 system_extra=system_extra,

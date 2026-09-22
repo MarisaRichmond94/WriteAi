@@ -5,7 +5,7 @@ and the system-block layout)."""
 from types import SimpleNamespace
 
 from server.routers.review import (FOCUS_PROMPTS, _excerpt_budget, _gist,
-                                   _question)
+                                   _interleave, _question)
 from src.answerer import Answerer
 from src.query_router import QueryPlan
 
@@ -63,6 +63,29 @@ def test_excerpt_budget_never_exceeds_configured_top_k():
 def test_excerpt_budget_covers_every_persona():
     for focus in FOCUS_PROMPTS:
         assert 1 <= _excerpt_budget(focus, top_k=15) <= 17
+
+
+def _hit(probe: int, rank: int) -> dict:
+    return {"chunk_id": f"p{probe}r{rank}"}
+
+
+def test_interleave_keeps_every_probe_inside_a_small_budget():
+    # 4 probes x 3 hits, budget 6: plain concatenation would spend the whole
+    # budget on the first two probes; interleaved, all four are represented
+    hits = [[_hit(p, r) for r in range(3)] for p in range(4)]
+    ids = [e["chunk_id"] for e in _interleave(hits)[:6]]
+    assert ids == ["p0r0", "p1r0", "p2r0", "p3r0", "p0r1", "p1r1"]
+
+
+def test_interleave_handles_uneven_and_empty_probe_lists():
+    hits = [[_hit(0, 0), _hit(0, 1), _hit(0, 2)], [], [_hit(2, 0)]]
+    ids = [e["chunk_id"] for e in _interleave(hits)]
+    assert ids == ["p0r0", "p2r0", "p0r1", "p0r2"]
+
+
+def test_interleave_of_nothing_is_empty():
+    assert _interleave([]) == []
+    assert _interleave([[], []]) == []
 
 
 def test_question_defaults_to_the_review_ask():
