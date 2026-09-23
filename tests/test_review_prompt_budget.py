@@ -4,8 +4,9 @@ and the system-block layout)."""
 
 from types import SimpleNamespace
 
-from server.routers.review import (FOCUS_PROMPTS, _excerpt_budget, _gist,
-                                   _interleave, _question)
+from server.routers.review import (FOCUS_PROMPTS, FORWARD_PERSONAS,
+                                   _UPCOMING_WINDOW, _excerpt_budget, _gist,
+                                   _interleave, _question, _trim_upcoming)
 from src.answerer import Answerer
 from src.query_router import QueryPlan
 
@@ -86,6 +87,28 @@ def test_interleave_handles_uneven_and_empty_probe_lists():
 def test_interleave_of_nothing_is_empty():
     assert _interleave([]) == []
     assert _interleave([[], []]) == []
+
+
+def test_reader_facing_personas_stay_blind_to_the_plan():
+    # the Literary Agent joined the blind set after the Ch-29 "Faded"
+    # review presented future-chapter events as reader knowledge
+    for focus in ("Literary Agent", "Casual Reader", "Hard-Core Reader"):
+        assert focus not in FORWARD_PERSONAS
+    assert FORWARD_PERSONAS <= set(FOCUS_PROMPTS)
+
+
+def test_trim_upcoming_caps_the_forward_block():
+    lines = [f"- (Ch {n} — written) something happens" for n in range(30, 95)]
+    trimmed = _trim_upcoming(lines)
+    assert len(trimmed) == _UPCOMING_WINDOW + 1
+    assert trimmed[:_UPCOMING_WINDOW] == lines[:_UPCOMING_WINDOW]
+    assert f"{len(lines) - _UPCOMING_WINDOW} more" in trimmed[-1]
+
+
+def test_trim_upcoming_leaves_short_blocks_alone():
+    lines = ["- (Ch 30 — written) a", "- (Ch 31 — planned) b"]
+    assert _trim_upcoming(lines) == lines
+    assert _trim_upcoming([]) == []
 
 
 def test_question_defaults_to_the_review_ask():

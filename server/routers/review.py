@@ -74,8 +74,14 @@ FOCUS_PROMPTS = {
 
 # personas that review with the author's plan in hand. The reader-simulating
 # personas (Casual Reader, Hard-Core Reader) stay blind to what comes next —
-# their whole value is reacting as readers who don't know the future.
-FORWARD_PERSONAS = {"Literary Agent", "Philosopher", "What-If Explorer"}
+# their whole value is reacting as readers who don't know the future. The
+# Literary Agent is blind too (2026-09-23): a real agent reads submitted
+# pages without the author's plan, and the Ch-29 "Faded" review showed a
+# 65-summary forward block overwhelming the chronology rules — future
+# events (Ch 37-49 pills/hair-dye coercion, a Ch-41 flashback retelling)
+# stated as "what the reader knows", with details garbled in the blending.
+# Structural exclusion is the only containment that cannot leak.
+FORWARD_PERSONAS = {"Philosopher", "What-If Explorer"}
 
 # personas whose review leans on manuscript excerpts — Hard-Core Reader's
 # continuity catches and What-If's character grounding cite earlier prose
@@ -190,6 +196,14 @@ DRAFT_DIFF_INSTRUCTION = (
     "reviewed. Base your assessment of what changed strictly on the diff — "
     "do not infer other changes, and do not treat unchanged prose as new or "
     "repeated material.")
+
+# how many upcoming chapters ride in the forward block. On a mostly-written
+# book the block used to carry EVERY later chapter's full summary (65
+# summaries, ~12K tokens, on the Ch-29 "Faded" review) — more future than
+# the reader's whole past, and the UPCOMING_INSTRUCTION rules could not
+# contain it. "Where This Is Heading" needs the near-term setup, not the
+# whole future.
+_UPCOMING_WINDOW = 10
 
 # how many events/chapter summaries immediately preceding the chapter ride
 # at full length; older prose chapter summaries are cut to their first
@@ -352,12 +366,31 @@ def _tag_free(html_str: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html_str)).strip()
 
 
+def _trim_upcoming(lines: list[str]) -> list[str]:
+    """Cap the forward block at the next _UPCOMING_WINDOW chapters. The
+    chapters beyond the window collapse to a count, so the reviewer knows
+    the draft continues without holding its events."""
+    if len(lines) <= _UPCOMING_WINDOW:
+        return lines
+    dropped = len(lines) - _UPCOMING_WINDOW
+    return lines[:_UPCOMING_WINDOW] + [
+        f"(…the draft/plan continues for {dropped} more chapters, omitted "
+        "here — judge only the near-term setup visible above)"]
+
+
 def _upcoming(s, book: int, chapter: int | None) -> list[str]:
     """One line per chapter after the reviewed one, in story order: enriched
     prose summaries for written chapters, the writer's Plan-pane outline
     cards (writer_summary, else extracted bullets) for the rest — including
     planned-but-unwritten chapters. A pasted draft (chapter=None) is assumed
-    to follow everything synced for its book."""
+    to follow everything synced for its book.
+
+    Every line is gisted to its first sentence and the block is capped at
+    _UPCOMING_WINDOW chapters: full future summaries also embed FLASHBACK
+    prose (a later chapter reliving an earlier book's events), which no
+    chronology rule can untangle once it is in the prompt — the Ch-29
+    "Faded" review re-attributed a Ch-41 flashback of the grandfather's
+    torture to the father and presented it as reader knowledge."""
     if chapter is None:
         row = s.db.execute("SELECT MAX(chapter_number) FROM chunks "
                            "WHERE book_number = ?", (book,)).fetchone()
@@ -380,7 +413,7 @@ def _upcoming(s, book: int, chapter: int | None) -> list[str]:
         cards = []
     entries: list[tuple[float, str]] = []
     for cn, summ in written.items():
-        entries.append((float(cn), f"- (Ch {cn} — written) {summ}"))
+        entries.append((float(cn), f"- (Ch {cn} — written) {_gist(summ)}"))
     for card in cards:
         cn = card.get("chapter")
         pos = card.get("position")
@@ -397,8 +430,9 @@ def _upcoming(s, book: int, chapter: int | None) -> list[str]:
         head = card.get("heading") or (f"Ch {cn}" if cn is not None
                                        else "Planned chapter")
         status = "written" if cn is not None else "planned"
-        entries.append((pos, f"- ({head} — {status}) {summ}"))
-    return [line for _, line in sorted(entries, key=lambda t: t[0])]
+        entries.append((pos, f"- ({head} — {status}) {_gist(summ)}"))
+    return _trim_upcoming([line for _, line in
+                           sorted(entries, key=lambda t: t[0])])
 
 
 def _draft_diff(old: str, new: str) -> str:
@@ -751,7 +785,9 @@ def review_stream(req: ReviewRequest):
         # bible-sized prefix stays a cache read.
         volatile_parts = [FOCUS_PROMPTS[req.focus], ideal]
         # forward context for the author-side personas only — the reader
-        # personas review without knowing what comes next
+        # personas (and the Literary Agent) review without knowing what
+        # comes next
+        upcoming: list[str] = []
         if req.focus in FORWARD_PERSONAS:
             upcoming = _upcoming(s, req.book, req.chapter)
             if upcoming:
@@ -787,6 +823,7 @@ def review_stream(req: ReviewRequest):
                                "profiles": re.findall(r"(?m)^### (.+)$",
                                                       profile_part),
                                "enrich_gap_chapters": len(gaps),
+                               "upcoming_lines": len(upcoming),
                                "retrieval_degraded": bool(degraded)}):
             for delta in answerer.answer_stream(review_plan, excerpts, notes,
                                                 history=history,
