@@ -46,8 +46,13 @@ def test_gist_single_sentence_unchanged():
 
 
 def test_excerpt_budget_light_for_craft_personas():
-    for focus in ("Literary Agent", "Casual Reader", "Philosopher"):
+    for focus in ("Casual Reader", "Philosopher"):
         assert _excerpt_budget(focus, top_k=15) == 6
+
+
+def test_excerpt_budget_mid_for_literary_agent():
+    # enough prose to ground pattern claims (Ch-33 incident), short of full
+    assert _excerpt_budget("Literary Agent", top_k=15) == 10
 
 
 def test_excerpt_budget_full_for_canon_personas():

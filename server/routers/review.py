@@ -88,14 +88,23 @@ FORWARD_PERSONAS = {"Philosopher", "What-If Explorer"}
 # directly, so they keep the full top_k+2 retrieval. The craft/reaction
 # personas rarely cite excerpts, yet at ~1K tokens apiece the full set was
 # ~40% of the uncached spend per turn (2026-09-01 ledger) — they get a
-# lighter set covering the strongest matches.
+# lighter set covering the strongest matches. The Literary Agent sits
+# between: the Ch-33 "Faded" review (2026-09-24) asserted a beat-identical
+# repeated scene from summary-level evidence alone — the granularity rule
+# in REVIEW_SYSTEM now demands prose evidence for such claims, and prose
+# is exactly what a 6-excerpt set was too thin to carry.
 _CANON_PERSONAS = {"Hard-Core Reader", "What-If Explorer"}
 _EXCERPT_LIGHT = 6
+_EXCERPT_AGENT = 10
 
 
 def _excerpt_budget(focus: str, top_k: int) -> int:
     full = top_k + 2
-    return full if focus in _CANON_PERSONAS else min(_EXCERPT_LIGHT, full)
+    if focus in _CANON_PERSONAS:
+        return full
+    if focus == "Literary Agent":
+        return min(_EXCERPT_AGENT, full)
+    return min(_EXCERPT_LIGHT, full)
 
 # pre-persona focus values (old saved sessions) -> nearest persona
 LEGACY_FOCUS = {
@@ -114,6 +123,8 @@ The chapter marked CHAPTER UNDER REVIEW is the document you are reviewing — al
 Chronology is a hard rule: for the reader, the story exists only up to the end of the chapter under review. Wherever background material describes events after this chapter (an author's plan, a character arc or profile that reaches ahead), those events have not happened yet — never state them as current fact or current character state (injuries, possessions, knowledge, positions, relationships), and never count them for or against this chapter's realism, stakes, pacing, or continuity.
 
 Judge what the reader already knows the same way: claims of repetition, redundancy, or familiarity — "we know this", "we've seen this before", "this is a rehash" — may rest ONLY on the STORY SO FAR notes, the manuscript excerpts, and the chapter itself. The story bibles and character profiles are orientation for you, distilled from whole books; they are never evidence that the reader has seen something. A character marked FIRST APPEARANCE is a stranger to the reader: treat their introduction, voice, dynamics, and backstory as entirely new information, and judge the introduction as an introduction.
+
+Match the confidence of every claim to the granularity of its evidence. Summaries — the story-so-far notes and the bibles — establish THAT events happened, never HOW a scene played out on the page: its beats, staging, dialogue shape, or pacing. Assert that scenes repeat a structure, or that a moment mirrors an earlier one beat for beat, only when the earlier prose is in front of you (a manuscript excerpt, or the chapter itself) and you can point to your evidence for EACH instance; when all you have is a summary saying a similar scene occurred, raise the possible pattern as something worth the author's checking — never as an observed fact. Likewise, your review history is only this conversation: never claim to have flagged, noticed, or said something in an earlier review unless it appears in the conversation above.
 
 When the author asks you to dig deeper into (or elaborate on, or expand on) a piece of your feedback, treat it as a request for evidence, not restatement: walk through the specific passages of the chapter that prompted the point, locating each one with a short quote, and for each show concretely what you are looking for — what the passage does now versus what a version that works would do at that spot. Every example must be grounded in the chapter's actual text or the provided background material; do not invent characters, events, wording, or details that are not on the page.
 
