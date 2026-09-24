@@ -98,8 +98,15 @@ _EXCERPT_LIGHT = 6
 _EXCERPT_AGENT = 10
 
 
-def _excerpt_budget(focus: str, top_k: int) -> int:
+def _excerpt_budget(focus: str, top_k: int, preset=None) -> int:
+    """Excerpt cap for this persona. A preset carries per-persona overrides
+    (empty dict = full budget for everyone); without one, today's defaults
+    apply — canon personas full, Literary Agent _EXCERPT_AGENT, the rest
+    _EXCERPT_LIGHT."""
     full = top_k + 2
+    if preset is not None:
+        over = preset.excerpt_budgets.get(focus)
+        return full if over is None else min(over, full)
     if focus in _CANON_PERSONAS:
         return full
     if focus == "Literary Agent":
@@ -250,6 +257,9 @@ class ReviewRequest(BaseModel):
     conversation_history: list[dict] = []
     include_ideal: bool = False       # opt in to the tracked-changes rewrite
     model: str | None = None          # per-request model (None = settings default)
+    preset: str | None = None         # review-experience preset (None = REVIEW_PRESET env)
+    effort: str | None = None         # per-request effort cap ("none" = uncapped;
+                                      # None = the preset's choice)
 
 
 def _gist(summary: str) -> str:
@@ -263,11 +273,14 @@ def _gist(summary: str) -> str:
     return m.group(0) if m else summary
 
 
-def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
+def _story_so_far(db, book: int, chapter: int | None,
+                  gist: bool = True) -> list[str]:
     """Chronological digest of enriched events strictly before the reviewed
     chapter: title-only lines for older major events, full summaries for the
     events immediately preceding the chapter. A pasted draft (chapter=None)
-    is assumed to follow everything synced for its book."""
+    is assumed to follow everything synced for its book. gist=False keeps
+    every prose chapter summary at full length (the pre-September shape —
+    richer, ~15K tokens heavier per turn on a late chapter)."""
     if chapter is None:
         cond, params = "book_number <= ?", [book]
     else:
@@ -318,7 +331,7 @@ def _story_so_far(db, book: int, chapter: int | None) -> list[str]:
         when = dates.get((bn, cn))
         loc = f"Book {bn}, {ch}" + (f" — {when}" if when else "")
         if gran == "summary":               # prose chapter summary line
-            full = i >= len(rows) - _DIGEST_TAIL
+            full = not gist or i >= len(rows) - _DIGEST_TAIL
             lines.append(f"- ({loc}) {summary if full else _gist(summary)}")
         elif i >= len(rows) - _DIGEST_TAIL:
             lines.append(f"- ({loc}) {title}: {summary}")
@@ -377,31 +390,37 @@ def _tag_free(html_str: str) -> str:
     return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html_str)).strip()
 
 
-def _trim_upcoming(lines: list[str]) -> list[str]:
-    """Cap the forward block at the next _UPCOMING_WINDOW chapters. The
-    chapters beyond the window collapse to a count, so the reviewer knows
-    the draft continues without holding its events."""
-    if len(lines) <= _UPCOMING_WINDOW:
+def _trim_upcoming(lines: list[str],
+                   window: int | None = _UPCOMING_WINDOW) -> list[str]:
+    """Cap the forward block at the next `window` chapters (None = uncapped,
+    the pre-September shape). The chapters beyond the window collapse to a
+    count, so the reviewer knows the draft continues without holding its
+    events."""
+    if window is None or len(lines) <= window:
         return lines
-    dropped = len(lines) - _UPCOMING_WINDOW
-    return lines[:_UPCOMING_WINDOW] + [
+    dropped = len(lines) - window
+    return lines[:window] + [
         f"(…the draft/plan continues for {dropped} more chapters, omitted "
         "here — judge only the near-term setup visible above)"]
 
 
-def _upcoming(s, book: int, chapter: int | None) -> list[str]:
+def _upcoming(s, book: int, chapter: int | None,
+              window: int | None = _UPCOMING_WINDOW,
+              gist: bool = True) -> list[str]:
     """One line per chapter after the reviewed one, in story order: enriched
     prose summaries for written chapters, the writer's Plan-pane outline
     cards (writer_summary, else extracted bullets) for the rest — including
     planned-but-unwritten chapters. A pasted draft (chapter=None) is assumed
     to follow everything synced for its book.
 
-    Every line is gisted to its first sentence and the block is capped at
-    _UPCOMING_WINDOW chapters: full future summaries also embed FLASHBACK
-    prose (a later chapter reliving an earlier book's events), which no
-    chronology rule can untangle once it is in the prompt — the Ch-29
-    "Faded" review re-attributed a Ch-41 flashback of the grandfather's
-    torture to the father and presented it as reader knowledge."""
+    By default every line is gisted to its first sentence and the block is
+    capped at _UPCOMING_WINDOW chapters: full future summaries also embed
+    FLASHBACK prose (a later chapter reliving an earlier book's events),
+    which no chronology rule can untangle once it is in the prompt — the
+    Ch-29 "Faded" review re-attributed a Ch-41 flashback of the
+    grandfather's torture to the father and presented it as reader
+    knowledge. window=None/gist=False reproduce the pre-September shape
+    (the aug31 preset)."""
     if chapter is None:
         row = s.db.execute("SELECT MAX(chapter_number) FROM chunks "
                            "WHERE book_number = ?", (book,)).fetchone()
@@ -424,7 +443,8 @@ def _upcoming(s, book: int, chapter: int | None) -> list[str]:
         cards = []
     entries: list[tuple[float, str]] = []
     for cn, summ in written.items():
-        entries.append((float(cn), f"- (Ch {cn} — written) {_gist(summ)}"))
+        entries.append((float(cn),
+                        f"- (Ch {cn} — written) {_gist(summ) if gist else summ}"))
     for card in cards:
         cn = card.get("chapter")
         pos = card.get("position")
@@ -441,9 +461,11 @@ def _upcoming(s, book: int, chapter: int | None) -> list[str]:
         head = card.get("heading") or (f"Ch {cn}" if cn is not None
                                        else "Planned chapter")
         status = "written" if cn is not None else "planned"
-        entries.append((pos, f"- ({head} — {status}) {_gist(summ)}"))
+        entries.append((pos,
+                        f"- ({head} — {status}) {_gist(summ) if gist else summ}"))
     return _trim_upcoming([line for _, line in
-                           sorted(entries, key=lambda t: t[0])])
+                           sorted(entries, key=lambda t: t[0])],
+                          window=window)
 
 
 def _draft_diff(old: str, new: str) -> str:
@@ -572,12 +594,45 @@ def _interleave(per_probe_hits: list[list[dict]]) -> list[dict]:
     return out
 
 
+@router.get("/review/options")
+def review_options():
+    """Configuration surface for review clients (Loom's settings cog):
+    the available presets, effort levels, models, and the server-side
+    defaults a request inherits when it sends none."""
+    from ..review_presets import EFFORT_CHOICES, presets
+
+    s = get_state()
+    return {
+        "presets": [{"name": p.name, "description": p.description}
+                    for p in presets().values()],
+        "efforts": list(EFFORT_CHOICES),
+        # keep in step with CHAT_MODELS in frontend/src/lib/models.ts
+        # (that list is pinned to the pricing table by
+        # tests/test_model_pricing.py)
+        "models": [{"id": "claude-opus-5", "label": "Opus 5"},
+                   {"id": "claude-opus-4-8", "label": "Opus 4.8"},
+                   {"id": "claude-sonnet-5", "label": "Sonnet 5"},
+                   {"id": "claude-haiku-4-5", "label": "Haiku 4.5"}],
+        "defaults": {"preset": s.cfg.review_preset,
+                     "effort": s.cfg.review_effort or "none",
+                     "model": s.cfg.query_model},
+    }
+
+
 @router.post("/review/stream")
 def review_stream(req: ReviewRequest):
+    # lazy import: review_presets reads this module's constants for the
+    # "current" preset, so a top-level import would be circular
+    from ..review_presets import EFFORT_CHOICES, resolve_effort, resolve_preset
+
     s = get_state()
     req.focus = LEGACY_FOCUS.get(req.focus, req.focus)
     if req.focus not in FOCUS_PROMPTS:
         raise HTTPException(400, f"unknown focus: {req.focus}")
+    if req.effort is not None and req.effort not in EFFORT_CHOICES:
+        raise HTTPException(400, f"unknown effort: {req.effort}")
+    preset = resolve_preset(req.preset, s.cfg.review_preset)
+    effort = resolve_effort(req.effort, preset, s.cfg.review_effort)
     if isinstance(req.book, str) and not req.book.isdigit():
         titles = {t.lower(): n for n, t in s.db.execute(
             "SELECT DISTINCT book_number, book_title FROM chunks")}
@@ -670,8 +725,10 @@ def review_stream(req: ReviewRequest):
                 log.info("review: dropped %d excerpt(s) near-identical to the "
                          "chapter under review", dropped_self)
             excerpts = excerpts[:_excerpt_budget(req.focus,
-                                                 s.cfg.top_k_results)]
-        notes = [] if no_prior else _story_so_far(s.db, req.book, req.chapter)
+                                                 s.cfg.top_k_results,
+                                                 preset)]
+        notes = [] if no_prior else _story_so_far(s.db, req.book, req.chapter,
+                                                  gist=preset.gist_story_notes)
         gaps = [] if no_prior else _enrichment_gaps(s.db, req.book, req.chapter)
         if gaps:
             # the model must know the notes have a hole — otherwise absence
@@ -750,7 +807,7 @@ def review_stream(req: ReviewRequest):
                 # stable within a session, so after the first turn it is a
                 # cache read. book_digest falls back to the full bible when
                 # no digest is stored.
-                if bn < req.book - 1:
+                if bn < req.book - preset.digest_keep_full_books:
                     digest = book_digest(s, bn)
                     if digest:
                         bible_parts.append(digest)
@@ -769,6 +826,7 @@ def review_stream(req: ReviewRequest):
                                      # a character the reader hasn't met yet
                                      reader_upto=(req.chapter
                                                   if bn == req.book
+                                                  and preset.first_appearance_gate
                                                   else None))
                 if bn == req.book:
                     profile_part = md
@@ -778,7 +836,7 @@ def review_stream(req: ReviewRequest):
             except Exception:
                 log.warning("review: could not build bible for book %s", bn)
         # the preamble stays in the stable block and introduces both blocks
-        system_extra = ((BIBLE_PREAMBLE
+        system_extra = ((preset.bible_preamble
                          + (("\n\n" + "\n\n---\n\n".join(bible_parts))
                             if bible_parts else ""))
                         if (bible_parts or profile_part) else "")
@@ -799,12 +857,14 @@ def review_stream(req: ReviewRequest):
         # personas (and the Literary Agent) review without knowing what
         # comes next
         upcoming: list[str] = []
-        if req.focus in FORWARD_PERSONAS:
-            upcoming = _upcoming(s, req.book, req.chapter)
+        if req.focus in preset.forward_personas:
+            upcoming = _upcoming(s, req.book, req.chapter,
+                                 window=preset.upcoming_window,
+                                 gist=preset.upcoming_gist)
             if upcoming:
-                volatile_parts.append(UPCOMING_HEADER + "\n"
+                volatile_parts.append(preset.upcoming_header + "\n"
                                       + "\n".join(upcoming)
-                                      + "\n\n" + UPCOMING_INSTRUCTION)
+                                      + "\n\n" + preset.upcoming_instruction)
         # ahead of the reply, so the writer knows the review is running on
         # thinner context while she reads it — not after she has acted on it
         if degraded:
@@ -825,6 +885,8 @@ def review_stream(req: ReviewRequest):
         with cost_scope(s.cfg, surface="review", answerer=answerer,
                         qtype="general",
                         extra={"focus": req.focus,
+                               "preset": preset.name,
+                               "effort": effort or "unbounded",
                                "include_ideal": req.include_ideal,
                                "draft_rereview": bool(req.previous_text),
                                "excerpts": len(excerpts),
@@ -840,15 +902,16 @@ def review_stream(req: ReviewRequest):
                                                 history=history,
                                                 system_extra=system_extra,
                                                 system_extra_tail=profile_part,
-                                                system_base=REVIEW_SYSTEM,
+                                                system_base=preset.system_base,
                                                 system_volatile="\n\n".join(volatile_parts),
                                                 notes_header=STORY_NOTES_HEADER,
                                                 max_tokens=32000 if req.include_ideal else 12000,
-                                                quote_instruction=REVIEW_QUOTE_INSTRUCTION,
-                                                # caps adaptive thinking (~54%
-                                                # of review output at the API
-                                                # default per the 09-01 ledger)
-                                                effort=s.cfg.review_effort or None):
+                                                quote_instruction=preset.quote_instruction,
+                                                # resolved cap on adaptive
+                                                # thinking: request > preset
+                                                # > REVIEW_EFFORT env; None
+                                                # = uncapped API default
+                                                effort=effort):
                 yield {"type": "chunk", "content": delta}
         yield citations_payload(excerpts)
         yield {"type": "usage", "model": answerer.model,

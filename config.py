@@ -107,6 +107,10 @@ class Config:
     # visible replies averaged only ~2.4K tokens — "medium" roughly halves
     # output spend with no prompt change. Blank = API default (no cap).
     review_effort: str = "medium"
+    # Default review-experience preset (see server/review_presets.py);
+    # a request's own preset choice wins. Unknown names fall back to
+    # "current" at request time rather than failing startup.
+    review_preset: str = "current"
 
     # Derived data locations (all under data_dir; created on demand)
     staging_dir: Path = field(init=False)
@@ -213,6 +217,7 @@ def load_config(env_file: Path | None = None) -> Config:
         enrich_rel_model=os.environ.get("ENRICH_REL_MODEL", "").strip(),
         api_read_timeout_s=_get_float("API_READ_TIMEOUT_S", 120.0),
         review_effort=review_effort,
+        review_preset=os.environ.get("REVIEW_PRESET", "current").strip().lower(),
     )
     cfg.assert_never_inside_books_dir(cfg.data_dir)
 
